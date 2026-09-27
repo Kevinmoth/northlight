@@ -59,9 +59,9 @@ template<class S> static void sameAsOld(const S& n,const OldSelection& o){
 }
 static bool oldDue(const NorthlightPointShadow::RefreshSchedule& s,uint32_t now,size_t replays){return replays<256||uint32_t(now-s.updatedAt)>=33;}
 int main(){
-    /* Defaults: absent files, empty file and Preset=Quality are the 0.3.136 constants. */
+    /* Defaults: absent files, empty file and Preset=Quality are the 0.3.136 constants, except the 0.3.167 FarShadowInterval 4. */
     const Settings d{};
-    assert(d.minSkinnedTriangles==0&&d.captureBudgetMiB==32&&d.actorShadowBudgetMiB==0&&d.farShadowInterval==1);
+    assert(d.minSkinnedTriangles==0&&d.captureBudgetMiB==32&&d.actorShadowBudgetMiB==0&&d.farShadowInterval==4);
     assert(d.localLightLimit==NorthlightLocalLightSelection::Limit&&d.pointShadows==1&&d.pointShadowRefreshMs==0&&d.shadowDirectionSteps==2048);
     assert(parse(nullptr)==d&&parse("")==d&&parse("[Quality]\nPreset=Quality\n")==d&&preset(Preset::Quality)==d);
     for(const auto& k:Keys){assert(k.preset[0]==d.*k.field);for(unsigned p=0;p<3;++p)assert(k.preset[p]>=k.low&&k.preset[p]<=k.high);}
@@ -71,11 +71,11 @@ int main(){
     /* Presets and case-insensitive names, BOM, CRLF, inline comments. */
     assert(parse("[Quality]\nPreset=Balanced\n")==preset(Preset::Balanced));
     auto perf=parse("\xEF\xBB\xBF; c\r\n[ quality ]\r\npreset = PERFORMANCE ; low end\r\n");
-    assert(perf==preset(Preset::Performance)&&perf.preset==Preset::Performance&&perf.farShadowInterval==3&&perf.pointShadows==0);
+    assert(perf==preset(Preset::Performance)&&perf.preset==Preset::Performance&&perf.farShadowInterval==6&&perf.pointShadows==0);
     assert(parse("[Quality]\nPreset=Performance\nfarshadowinterval=1 # keep\n").farShadowInterval==1);
     /* Explicit keys override the preset regardless of order; other sections ignored. */
     auto s=parse("[Other]\nLocalLightLimit=8\n[Quality]\nLocalLightLimit=20\nPreset=Balanced\n");
-    assert(s.localLightLimit==20&&s.farShadowInterval==2);
+    assert(s.localLightLimit==20&&s.farShadowInterval==5);
     /* Invalid values keep the preset value and are reported. */
     std::vector<std::string> problems;
     s=parse("[Quality]\nPreset=Balanced\nFarShadowInterval=17\nLocalLightLimit=-1\nPointShadows=yes\nMinSkinnedTriangles=50abc\nShadowDirectionSteps=\nBogus=1\nnoequals\n[broken\n",nullptr,problems);
@@ -88,13 +88,13 @@ int main(){
         if(k.low){std::string under="[Quality]\n"+std::string(k.name)+"="+std::to_string(k.low-1)+"\n";assert(parse(under.c_str())==d);}}
     /* Legacy shadow-experiment.ini: same values and fallbacks as 0.3.136's GetPrivateProfileInt path. */
     const char* legacy="; 0.3.131 experiment\n[ShadowExperiment]\nMinSkinnedTriangles=50\nCaptureBudgetMiB=32\nActorShadowBudgetMiB=16\n";
-    s=parse(nullptr,legacy);assert(s.minSkinnedTriangles==50&&s.captureBudgetMiB==32&&s.actorShadowBudgetMiB==16&&s.farShadowInterval==1);
+    s=parse(nullptr,legacy);assert(s.minSkinnedTriangles==50&&s.captureBudgetMiB==32&&s.actorShadowBudgetMiB==16&&s.farShadowInterval==4);
     s=parse(nullptr,"[ShadowExperiment]\nMinSkinnedTriangles=501\nCaptureBudgetMiB=0\nActorShadowBudgetMiB=33\n");assert(s==d); /* 0.3.136: 0,32,0 */
     s=parse(nullptr,"[ShadowExperiment]\nCaptureBudgetMiB=16\n");assert(s.captureBudgetMiB==16&&s.minSkinnedTriangles==0);
     /* No northlight-quality.ini, or Preset=Quality: each machine exactly as today (Mac legacy file, Windows none). */
     assert(parse(nullptr,legacy)==parse("[Quality]\nPreset=Quality\n",legacy)&&parse(nullptr,nullptr)==d);
     s=parse(nullptr,legacy);assert(s.origin[0]=='l'&&s.origin[1]=='l'&&s.origin[2]=='l'&&s.origin[3]=='d');
-    assert(describe(s).find("MinSkinnedTriangles=50(legacy)")!=std::string::npos&&describe(s).find("FarShadowInterval=1(default)")!=std::string::npos);
+    assert(describe(s).find("MinSkinnedTriangles=50(legacy)")!=std::string::npos&&describe(s).find("FarShadowInterval=4(default)")!=std::string::npos);
     /* Balanced/Performance: preset beats the legacy file, identically on Mac and Windows. */
     problems.clear();s=parse("[Quality]\nPreset=Performance\n",legacy,problems);
     assert(s==preset(Preset::Performance)&&s.minSkinnedTriangles==100&&s.actorShadowBudgetMiB==8&&s.captureBudgetMiB==32&&problems.size()==1);
@@ -108,10 +108,11 @@ int main(){
     s=parse("[Quality]\nShadowFateDiagnostics=1\nDiagnostics=0\n");assert(s.diagnostics==0&&!shadowFate(s)&&describe(s).find("Diagnostics=0(file)")!=std::string::npos&&describe(s).find("shadowFateEffective=0")!=std::string::npos);
     for(const char* p:{"[Quality]\nPreset=Balanced\n","[Quality]\nPreset=Performance\n"})assert(parse(p).diagnostics==1&&!shadowFate(parse(p)));
     problems.clear();s=parse("[Quality]\nDiagnostics=2\nShadowFateDiagnostics=yes\n",nullptr,problems);assert(s==d&&problems.size()==2);
-    /* ActorShadowRadius (yards): 0 = no limit in the code default and every preset; 0..200; not a legacy key. */
-    assert(d.actorShadowRadius==0&&preset(Preset::Balanced).actorShadowRadius==0&&preset(Preset::Performance).actorShadowRadius==0);
+    /* ActorShadowRadius (yards): 40 / 35 / 20 (0.3.167); 0 = no limit; 0..200; not a legacy key. */
+    assert(d.actorShadowRadius==40&&preset(Preset::Balanced).actorShadowRadius==35&&preset(Preset::Performance).actorShadowRadius==20);
+    assert(parse("[Quality]\nActorShadowRadius=0\n").actorShadowRadius==0);
     s=parse("[Quality]\nPreset=Performance\nActorShadowRadius=40\n");assert(s.actorShadowRadius==40&&s.origin[23]=='f'&&std::string(Keys[23].name)=="ActorShadowRadius"&&describe(s).find("ActorShadowRadius=40(file)")!=std::string::npos);
-    assert(describe(d).find("ActorShadowRadius=0(default)")!=std::string::npos&&parse("[Quality]\nActorShadowRadius=1\n").actorShadowRadius==1);
+    assert(describe(d).find("ActorShadowRadius=40(default)")!=std::string::npos&&parse("[Quality]\nActorShadowRadius=1\n").actorShadowRadius==1);
     problems.clear();s=parse("[Quality]\nActorShadowRadius=201\n",nullptr,problems);assert(s==d&&problems.size()==1);
     problems.clear();s=parse(nullptr,"[ShadowExperiment]\nActorShadowRadius=30\n",problems);assert(s==d&&problems.size()==1);
     /* Notepad UTF-16LE with BOM. */
@@ -165,7 +166,7 @@ int main(){
     }
     { /* Far-cascade reuse: interval 1 never skips or records; a failed render is never reused. */
       const float m1[16]={1,2,3},m2[16]={4,5,6};FarShadowReuse r;
-      for(unsigned pass=1;pass<50;++pass){assert(!r.canSkip(d.farShadowInterval,pass,true,false));r.begin(1);r.commit(1,pass,m1);assert(!r.valid);}
+      for(unsigned pass=1;pass<50;++pass){assert(!r.canSkip(1,pass,true,false));r.begin(1);r.commit(1,pass,m1);assert(!r.valid);}
       r.begin(3);r.commit(3,10,m1);assert(r.valid&&r.matrix[0]==1);
       assert(r.canSkip(3,11,true,false)&&r.canSkip(3,12,true,false)&&!r.canSkip(3,13,true,false)); /* at most N-1 reuses */
       assert(!r.canSkip(3,11,false,false)&&!r.canSkip(3,11,true,true)&&!r.canSkip(1,11,true,false));
@@ -199,14 +200,14 @@ int main(){
           assert(cascadeAction(x,1,pass,bits&1,bits&2,true)==CascadeAction::Render&&cascadeAction(x,1,pass,bits&1,bits&2,false)==CascadeAction::Render);
           assert(cascadeAction(x,3,pass,bits&1,bits&2,true)!=CascadeAction::Defer);}
     }
-    { /* Capture-skip decision table. Shadows on with any interval 1 (Quality, Balanced): never skip. */
+    { /* Capture-skip decision table. Shadows on with any interval 1 (Quality, Balanced: near 1): never skip. */
       ShadowMapReuse nearMaps[2],farMaps[2];const float m[16]={1};
       for(int i=0;i<2;++i){nearMaps[i].commit(16,10,m);farMaps[i].commit(16,10,m);}
       for(unsigned bits=0;bits<512;++bits){CaptureInputs in;in.shadows=true;in.actorDue=bits&1;in.demand=bits&2;in.diagnostic=bits&4;in.pointDue=bits&8;
           in.sourceActive[0]=bits&16;in.sourceActive[1]=bits&32;in.nextPass=11+(bits>>6);
           for(Preset p:{Preset::Quality,Preset::Balanced})assert(!skipModelCapture(preset(p),in,nearMaps,farMaps)&&!captureSkipPossible(preset(p),true));
           Settings one=d;one.farShadowInterval=16;assert(!skipModelCapture(one,in,nearMaps,farMaps));
-          one=d;one.nearShadowInterval=16;assert(!skipModelCapture(one,in,nearMaps,farMaps));
+          one=d;one.farShadowInterval=1;one.nearShadowInterval=16;assert(!skipModelCapture(one,in,nearMaps,farMaps));
           /* Both 16: every active source must reuse both maps at the next pass; GI, demand, diagnostics and a due lamp refresh capture. */
           Settings both=d;both.nearShadowInterval=both.farShadowInterval=16;
           assert(skipModelCapture(both,in,nearMaps,farMaps)==!(in.actorDue||in.demand||in.diagnostic||in.pointDue||in.nextPass-10>=16));
@@ -378,22 +379,23 @@ int main(){
         std::vector<std::string> p;auto bad=parse("[Quality]\nPointShadowFacesPerFrame=0\nPointShadowFacesPerFrame=7\nStaticCacheSlices=0\nStaticCacheSlices=5\n",nullptr,p);assert(bad==d&&p.size()==4);
         p.clear();assert(parse(nullptr,"[ShadowExperiment]\nStaticCacheSlices=2\n",p)==d&&p.size()==1);
         assert(describe(d).find(" PointShadowFacesPerFrame=6(default) StaticCacheSlices=1(default)")!=std::string::npos);}
-    // 0.3.153 GIDistance: 52 (14-cell window, the 0.3.151 layout) in the code default and every
-    // preset, own origin slot; yards snap down to d=4N-4 with N even, 36..84 -> 10..22.
-    assert(d.giDistance==52&&giProbeGrid(d)==14&&preset(Preset::Performance).giDistance==52&&preset(Preset::Balanced).giDistance==52);
+    // 0.3.167 GIDistance: 76 (20-cell window) in the code default, 52 (14-cell window, the 0.3.151
+    // layout) in Balanced and Performance, own origin slot; yards snap down to d=4N-4 with N even, 36..84 -> 10..22.
+    assert(d.giDistance==76&&giProbeGrid(d)==20&&preset(Preset::Performance).giDistance==52&&preset(Preset::Balanced).giDistance==52);
+    assert(giProbeGrid(parse("[Quality]\nGIDistance=52\n"))==14&&giProbeGrid(preset(Preset::Balanced))==14&&giProbeGrid(preset(Preset::Performance))==14);
     for(unsigned y=36;y<=84;++y){auto g=parse(("[Quality]\nGIDistance="+std::to_string(y)+"\n").c_str());const unsigned n=giProbeGrid(g);
-        assert(g.giDistance==y&&n%2==0&&n>=10&&n<=22&&4*n-4<=y&&y<4*n-4+8&&(y==52)==(g==d));}
+        assert(g.giDistance==y&&n%2==0&&n>=10&&n<=22&&4*n-4<=y&&y<4*n-4+8&&(y==76)==(g==d));}
     assert(giProbeGrid(parse("[Quality]\nGIDistance=60\n"))==16&&giProbeGrid(parse("[Quality]\nGIDistance=84\n"))==22&&giProbeGrid(parse("[Quality]\nGIDistance=43\n"))==10);
     {auto on=parse("[Quality]\nGIDistance=68\n");unsigned i=0;for(const auto& k:Keys){assert(on.origin[i]==(std::string(k.name)=="GIDistance"?'f':'d'));++i;}
         std::vector<std::string> p;assert(parse("[Quality]\nGIDistance=35\nGIDistance=85\n",nullptr,p)==d&&p.size()==2);
         p.clear();assert(parse(nullptr,"[ShadowExperiment]\nGIDistance=60\n",p)==d&&p.size()==1);
-        assert(describe(d).find(" GIDistance=52(default)")!=std::string::npos&&describe(on).find(" GIDistance=68(file)")!=std::string::npos);}
+        assert(describe(d).find(" GIDistance=76(default)")!=std::string::npos&&describe(on).find(" GIDistance=68(file)")!=std::string::npos);}
     // 0.3.153 GIProbeAhead: 0 (window on the eye) in the code default and every preset, 0..48, own origin slot.
     assert(d.giProbeAhead==0&&preset(Preset::Balanced).giProbeAhead==0&&preset(Preset::Performance).giProbeAhead==0);
     {auto on=parse("[Quality]\nGIProbeAhead=20\n");assert(on.giProbeAhead==20&&on!=d&&parse("[Quality]\nGIProbeAhead=0\n")==d);
         unsigned i=0;for(const auto& k:Keys){assert(on.origin[i]==(std::string(k.name)=="GIProbeAhead"?'f':'d'));++i;}
         std::vector<std::string> p;assert(parse("[Quality]\nGIProbeAhead=49\n",nullptr,p)==d&&p.size()==1);
-        assert(describe(d).find(" GIDistance=52(default) GIProbeAhead=0(default)")!=std::string::npos&&describe(on).find(" GIProbeAhead=20(file)")!=std::string::npos);}
+        assert(describe(d).find(" GIDistance=76(default) GIProbeAhead=0(default)")!=std::string::npos&&describe(on).find(" GIProbeAhead=20(file)")!=std::string::npos);}
     // Horizon haze (picture only): 50/75/6/1 in the code default and every preset, own origin slots;
     // HorizonHaze=0 is the 0.3.153 image (horizon_haze.h uploads optical depth 0).
     assert(d.horizonHaze==50&&d.horizonHazeStart==75&&d.horizonHazeBand==6&&d.horizonHazeTerrain==1);

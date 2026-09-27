@@ -146,7 +146,7 @@ static unsigned logged(const char* field){unsigned total=0;std::lock_guard<std::
  for(const auto& l:logLines){if(l.rfind("WORLD geometry published",0))continue;auto at=l.find(field);assert(at!=std::string::npos);total+=unsigned(std::strtoul(l.c_str()+at+std::strlen(field),nullptr,10));}return total;}
 int main(){
  for(auto run:{std::pair<unsigned,unsigned>{1,14},{2,14},{2,18}}){
-  // 0.3.153 GIDistance: the default 14-cell window and GIDistance=68 (18 cells).
+  // 0.3.153 GIDistance: the 14-cell window (GIDistance=52) and GIDistance=68 (18 cells).
   const unsigned threads=run.first;assert(NorthlightGI::configureProbeLayout(NorthlightGI::probeLayoutFor(run.second)));
   logLines.clear();
   // Moving camera: 4 x 9 units then a short hold, so each hold starts a build

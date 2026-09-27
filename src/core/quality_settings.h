@@ -15,7 +15,7 @@ enum class Preset { Quality, Balanced, Performance };
 struct Settings {
     Preset preset=Preset::Quality;
     unsigned minSkinnedTriangles=0,captureBudgetMiB=32,actorShadowBudgetMiB=0;
-    unsigned farShadowInterval=1,nearShadowInterval=1,localLightLimit=32,pointShadows=1,pointShadowRefreshMs=0,shadowDirectionSteps=2048;
+    unsigned farShadowInterval=4,nearShadowInterval=1,localLightLimit=32,pointShadows=1,pointShadowRefreshMs=0,shadowDirectionSteps=2048;
     // Where each value in Keys order came from: 'd' code default (Quality), 'p' Balanced/Performance
     // preset, 'l' legacy shadow-experiment.ini, 'f' northlight-quality.ini key. Not part of ==.
     // 0.3.138 GI: worker probe solve (rays, bounces, request step), actor/dynamic probes, solver threads.
@@ -39,14 +39,14 @@ struct Settings {
     unsigned renderProfile=0,diagReplayProbe=0;
     // ActorShadowRadius: characters/creatures farther than this many yards from the
     // player cast no shadow (actor_shadow_selection.h Radius). 0 = no limit (0.3.144).
-    unsigned actorShadowRadius=0;
+    unsigned actorShadowRadius=40;
     // 0.3.151 spike spreading. PointShadowFacesPerFrame: lamp cube faces refreshed per frame
     // (6 = all six in one frame, 0.3.150). StaticCacheSlices: a sun/moon static cache rect
     // redraw is spread over this many frames (1 = one frame, 0.3.150).
     unsigned pointShadowFacesPerFrame=6,staticCacheSlices=1;
     // 0.3.153 GIDistance: yards of solved GI around the probe window centre; snaps down
     // to 36,44,..,84 (giProbeGrid). 52 = the 0.3.151 14-cell window and 16^3 atlas.
-    unsigned giDistance=52;
+    unsigned giDistance=76;
     // 0.3.153 GIProbeAhead: yards the probe window centre moves ahead of the eye along the
     // horizontal view direction; geometry, fog and everything else stay on the eye. 0 = eye.
     unsigned giProbeAhead=0;
@@ -67,7 +67,7 @@ inline const Key Keys[]={
     {"MinSkinnedTriangles",&Settings::minSkinnedTriangles,0,500,{0,50,100}},
     {"CaptureBudgetMiB",&Settings::captureBudgetMiB,1,32,{32,32,32}},
     {"ActorShadowBudgetMiB",&Settings::actorShadowBudgetMiB,0,32,{0,16,8}},
-    {"FarShadowInterval",&Settings::farShadowInterval,1,16,{1,2,3}},
+    {"FarShadowInterval",&Settings::farShadowInterval,1,16,{4,5,6}},
     {"NearShadowInterval",&Settings::nearShadowInterval,1,16,{1,1,2}},
     {"LocalLightLimit",&Settings::localLightLimit,8,64,{32,24,16}},
     {"PointShadows",&Settings::pointShadows,0,1,{1,1,0}},
@@ -77,7 +77,7 @@ inline const Key Keys[]={
     {"GIRays",&Settings::giRays,16,64,{64,48,32}},
     {"GIBounces",&Settings::giBounces,1,3,{3,3,2}},
     {"GIProbeMoveStep",&Settings::giProbeMoveStep,8,16,{8,8,16}},
-    {"GIDynamicProbes",&Settings::giDynamicProbes,0,1,{1,1,0}},
+    {"GIDynamicProbes",&Settings::giDynamicProbes,0,1,{1,0,0}},
     {"GIThreads",&Settings::giThreads,1,4,{1,1,1}},
     {"GIFastBVH",&Settings::giFastBVH,0,1,{1,1,1}},
     {"GIStrength",&Settings::giStrength,0,100,{60,60,60}},
@@ -87,10 +87,10 @@ inline const Key Keys[]={
     {"Diagnostics",&Settings::diagnostics,0,1,{1,1,1}},
     {"RenderProfile",&Settings::renderProfile,0,1,{0,0,0}},
     {"DiagReplayProbe",&Settings::diagReplayProbe,0,1,{0,0,0}},
-    {"ActorShadowRadius",&Settings::actorShadowRadius,0,200,{0,0,0}},
+    {"ActorShadowRadius",&Settings::actorShadowRadius,0,200,{40,35,20}},
     {"PointShadowFacesPerFrame",&Settings::pointShadowFacesPerFrame,1,6,{6,6,6}},
     {"StaticCacheSlices",&Settings::staticCacheSlices,1,4,{1,1,1}},
-    {"GIDistance",&Settings::giDistance,36,84,{52,52,52}},
+    {"GIDistance",&Settings::giDistance,36,84,{76,52,52}},
     {"GIProbeAhead",&Settings::giProbeAhead,0,48,{0,0,0}},
     {"HorizonHaze",&Settings::horizonHaze,0,100,{50,50,50}},
     {"HorizonHazeStart",&Settings::horizonHazeStart,50,95,{75,75,75}},

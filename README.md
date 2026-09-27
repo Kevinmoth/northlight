@@ -24,8 +24,8 @@ Every effect below is on by default and is drawn on top of the game's own frame.
   round blob shadows under characters are replaced, and where the sun is blocked the game's painted
   sunlight is removed smoothly, without facet steps.
 - **Global illumination.** Sky light and bounced light from probes ray traced against the world
-  geometry on a background thread, about 52 yards around the camera; characters add their own bounce
-  and occlusion.
+  geometry on a background thread, about 76 yards around the camera (52 in the Balanced and Performance
+  presets); characters add their own bounce and occlusion (Quality preset).
 - **Ambient occlusion.** Screen-space AO with contact shading and a light bloom.
 - **Fog and air.** Volumetric sun and moon light with light shafts through the shadows; soft haze on
   the far landscape and the lowest sky in the game's own fog colour; regional ground fog in forests,

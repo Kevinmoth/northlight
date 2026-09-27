@@ -51,7 +51,7 @@ int main(){
       assert(worst<float(step)*1.7321f&&32+worst<96-24);}
     auto perf=NorthlightQuality::preset(NorthlightQuality::Preset::Performance),bal=NorthlightQuality::preset(NorthlightQuality::Preset::Balanced);
     assert(perf.giRays==32&&perf.giBounces==2&&perf.giProbeMoveStep==16&&!NorthlightQuality::giActorCapture(perf)&&perf.gi==1&&perf.giThreads==1);
-    assert(bal.giRays==48&&bal.giBounces==3&&bal.giProbeMoveStep==8&&NorthlightQuality::giActorCapture(bal));
+    assert(bal.giRays==48&&bal.giBounces==3&&bal.giProbeMoveStep==8&&bal.giDynamicProbes==0&&!NorthlightQuality::giActorCapture(bal)); /* 0.3.167 */
     {std::istringstream in("[Quality]\nGI=0\nGIThreads=4\nGIRays=15\nGIProbeMoveStep=17\n");std::vector<std::string> problems;
      auto s=NorthlightQuality::load(&in,nullptr,problems);
      assert(s.gi==0&&s.giThreads==4&&s.giRays==64&&s.giProbeMoveStep==8&&problems.size()==2&&!NorthlightQuality::giActorCapture(s));

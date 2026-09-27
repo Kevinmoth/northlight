@@ -89,10 +89,10 @@ The installer adds the file only if it does not exist yet: an update never
 replaces your own changes. northlight-renderer.log shows the values in use (QUALITY).
 Individual settings (Quality / Balanced / Performance):
   ActorShadowBudgetMiB  0 / 16 / 8     character shadows, nearest first (0 = no limit)
-  ActorShadowRadius     0 / 0 / 0      characters more than N yards from your own character cast no shadow (0..200; 0 = no limit; 1..3 = your own character, mount, weapons and whatever is right next to you)
+  ActorShadowRadius     40 / 35 / 20   characters more than N yards from your own character cast no shadow (0..200; 0 = no limit; 1..3 = your own character, mount, weapons and whatever is right next to you)
   ActorShadows          1 / 1 / 1      shadows of characters and moving objects (0 = static shadows only: terrain, buildings, and the trees and objects placed on the map; characters, creatures, mounts and pets lose their shadow, your own character too, and so do objects the server places, such as doors, elevators, ships, zeppelins, mailboxes and event decorations; swaying trees, windmills and flags keep a shadow frozen in their rest pose; the game's own round shadows return under characters; saves about 4–5 ms per frame in crowds and about 1 ms in quiet areas; with GIDynamicProbes=1 characters are still copied about every 200 ms for indirect light, GIDynamicProbes=0 removes that too; 0 also turns off the PersistentCasters, PersistentRigidProps, ShadowFateDiagnostics and DiagReplayProbe settings; no preset changes this)
   MinSkinnedTriangles   0 / 50 / 100   small animated parts cast no shadow
-  FarShadowInterval     1 / 2 / 3      distant shadows (beyond ~48 m) are drawn every Nth frame (1..16)
+  FarShadowInterval     4 / 5 / 6      distant shadows (beyond ~48 m) are drawn every Nth frame (1..16)
   NearShadowInterval    1 / 1 / 2      moving parts of the near shadows (characters) every Nth frame (1..16)
   LocalLightLimit       32 / 24 / 16   lamps lighting at the same time (8..64; above 32 = more distant lamps too)
   PointShadows          1 / 1 / 0      lamp shadows at night
@@ -105,11 +105,11 @@ Individual settings (Quality / Balanced / Performance):
   GIRays                64 / 48 / 32   rays per light probe
   GIBounces             3 / 3 / 2      light bounces
   GIProbeMoveStep       8 / 8 / 16     camera movement before the probes are updated
-  GIDynamicProbes       1 / 1 / 0      characters' effect on indirect light
+  GIDynamicProbes       1 / 0 / 0      characters' effect on indirect light
   GIThreads             1 / 1 / 1      computation threads (raise only if you have enough cores)
   GIFastBVH             1 / 1 / 1      new fast ray tracing (0 = the 0.3.137 version)
   GIStrength            60 / 60 / 60   indirect light strength in percent (0..100; 60 = standard, 100 = maximum)
-  GIDistance            52 / 52 / 52   reach of the indirect light from the camera in yards (36..84, rounded down to 36/44/52/60/68/76/84; above 52 the background computation is about 1.3x (60), 1.65x (68) and 2.5x (84), a new area fills more slowly and slightly more memory is used; small FPS impact, because the larger light texture is updated while moving)
+  GIDistance            76 / 52 / 52   reach of the indirect light from the camera in yards (36..84, rounded down to 36/44/52/60/68/76/84; above 52 the background computation is about 1.3x (60), 1.65x (68), 2x (76) and 2.5x (84), a new area fills more slowly and slightly more memory is used; small FPS impact, because the larger light texture is updated while moving)
   GIProbeAhead          0 / 0 / 0      moves the indirect light area forward from the camera towards your own character, in yards (0..48; 0 = around the camera; the camera is about 15–27 yards behind the character; values near the camera distance, about 15–25 (20 recommended), bring light further ahead of the character and reduce background computation when the camera turns; large values (40+) increase it; turning the camera can move the area)
   HorizonHaze           50 / 50 / 50   horizon haze: distant terrain and the lowest band of the sky in the game's own fog colour, in percent (0..100; 0 = off, the image as in 0.3.153; the fog toggle Ctrl+Shift+F7 also turns off the haze; small FPS impact)
   HorizonHazeStart      75 / 75 / 75   where the haze starts on the terrain, in percent of the game's own fog end distance (50..95; nearer terrain does not change; raise to 85–95 if the haze reaches too close)
@@ -130,8 +130,9 @@ fast-moving character can appear to step at a low FPS. The benefit is largest
 when FarShadowInterval is a multiple of NearShadowInterval (for example 2 and 4).
 With shadows off (Ctrl+Shift+F9), the copying is done only for indirect light.
 The old shadow-experiment.ini applies only with Preset=Quality.
-Balanced/Performance turn on the distance selection of character shadows (about
-0.4 ms); the benefit comes from drawing clearly fewer characters into shadows.
+Every preset turns on the distance selection of character shadows (ActorShadowRadius,
+and ActorShadowBudgetMiB in Balanced/Performance; about 0.4 ms); the benefit comes
+from drawing clearly fewer characters into shadows.
 The file can be saved as UTF-8, ANSI or Notepad's Unicode.
 
 WINDOWS TEST

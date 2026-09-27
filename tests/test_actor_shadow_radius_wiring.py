@@ -31,9 +31,9 @@ assert 'transition(budget&&stable.radiusInsideBytes>budget);' in ex and 'Radius 
 assert 'else if(NorthlightActorShadowSelection::Enabled){if(budget)actorShadowHistory.keptAll();else actorShadowHistory.clear();}' in ex,'radius 0 keeps the 0.3.144 reset'
 assert "int(ranked&&stable.actors+stable.rigidActors>0)" in ex,'ranking= keeps its meaning (the quota ranked)'
 # Settings: key, range, presets and the log fields.
-assert '{"ActorShadowRadius",&Settings::actorShadowRadius,0,200,{0,0,0}}' in q and 'unsigned actorShadowRadius=0;' in q
+assert '{"ActorShadowRadius",&Settings::actorShadowRadius,0,200,{40,35,20}}' in q and 'unsigned actorShadowRadius=40;' in q
 assert 'radius=%u radiusDropped=%zu radiusDroppedDraws=%zu radiusDroppedBytes=%zu radiusTogglesSinceLog=%zu radiusFlickerSinceLog=%zu radiusRekeyedSinceLog=%zu radiusCharacters=%zu radiusSelf=%zu radiusCompanions=%zu radiusInsideBytes=%zu radiusNoPivot=%zu' in ex
 ini=fp.src('windows-package/northlight-quality.ini').read_text();readme=fp.src('windows-package/README.txt').read_text(encoding='utf-8')
-block=ini[ini.index('; Characters and creatures farther than'):ini.index(';ActorShadowRadius=0')]
-assert 'Allowed 0..200. 0 / 0 / 0' in block and '; FPS impact:' in block and 'ActorShadowRadius     0 / 0 / 0      characters more than N yards from your own character cast no shadow' in readme
+block=ini[ini.index('; Characters and creatures farther than'):ini.index(';ActorShadowRadius=40')]
+assert 'Allowed 0..200. 40 / 35 / 20' in block and '; FPS impact:' in block and 'ActorShadowRadius     40 / 35 / 20   characters more than N yards from your own character cast no shadow' in readme
 print('PASS actor shadow radius wiring: GI packets before selection and untouched, shadow flag only, radius 0 = 0.3.144 control flow, key/presets/docs/log fields')
