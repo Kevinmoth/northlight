@@ -122,15 +122,23 @@ int main(){
         for(int i=7;i<48;++i)assert(std::fabs(lum[i+1]-2*lum[i]+lum[i-1])<.012f);
     }
     {   // disc hidden (a near mountain), ring visible -> the core is NEVER
-        // drawn; only the tail wraps, and only from ~2R out. Disc visible -> unchanged.
+        // drawn; only the tail shifted out by 3R wraps (a soft plateau at the
+        // tail's 3R level). Disc visible -> unchanged.
         for(int i=0;i<=48;++i){const float r=i*.25f,hidden=sunGlare(r,0,1,Wrap),visible=sunGlare(r,1,0,Wrap);
-            const float tailOnly=SunTailWeight*sunTail(r)*Wrap*smoothstep(1.5f,3.f,r)*(1-smoothstep(7,20,r));
+            const float tailOnly=SunTailWeight*sunTail(std::sqrt(r*r+9))*Wrap*(1-smoothstep(7,20,r));
             assert(std::fabs(hidden-tailOnly)<1e-6f);                       // no core term at any radius
-            if(r<=1.5f)assert(hidden==0);                                    // nothing over the occluder near the disc
-            assert(std::fabs(visible-sunProfile(r))<1e-5f*std::max(1.f,visible));} // unobstructed: the 0.3.164 profile
-        assert(sunGlare(0,0,1,Wrap)==0&&sunGlare(1,0,1,Wrap)==0&&sunGlare(2,0,1,Wrap)<.2f*sunGlare(2,1,0,Wrap));
+            assert(hidden<=SunTailWeight*Wrap*sunTail(3)+1e-6f);            // never above the wrapped tail's 3R level
+            assert(std::fabs(visible-sunProfile(r))<1e-5f*std::max(1.f,visible));} // unobstructed: unchanged profile
+        assert(sunGlare(0,0,1,Wrap)<.25f*sunGlare(0,1,0,Wrap));             // no core blob over the occluder
         assert(sunGlare(1,0,0,Wrap)==0&&sunGlare(8,0,0,Wrap)==0);           // fully hidden: nothing
         float prev=sunGlare(0,.4f,1,Wrap);for(int i=1;i<=1200;++i){const float v=sunGlare(i*.01f,.4f,1,Wrap);assert(std::fabs(v-prev)<.03f);prev=v;} // partly hidden: continuous, no step
+        // Monotonic sweep: for every (disc, ring) visibility the profile never
+        // rises with radius, so a barely hidden sun has no dark ring around it
+        // (the former 1.5R..3R fade-in of the ring rose again after a dip at ~2R,
+        // e.g. disc .19, ring .8).
+        for(int a=0;a<=20;++a)for(int b=0;b<=20;++b){const float disc=a*.05f,ring=b*.05f;
+            float last=sunGlare(0,disc,ring,Wrap);
+            for(int i=1;i<=240;++i){const float v=sunGlare(i*.05f,disc,ring,Wrap);assert(v<=last+1e-6f);last=v;}}
     }
     {   // Glare colour: mix folded in on the CPU (fallback tint at mix 0); c47.w = tail, moon has none.
         Hue h;const float tint[3]={1,.96f,.88f};h.sun[0]=.76f;h.sun[1]=1;h.sun[2]=.64f;h.sunCore[0]=.95f;h.sunCore[1]=1;h.sunCore[2]=.74f;h.strength=1;

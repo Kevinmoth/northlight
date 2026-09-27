@@ -67,15 +67,19 @@ float filteredSkyVisibility(float4 source){
 // M1 skirt .35*2^(-1.11(r-1)) times c12.z. The edge fades both to 0 at the support.
 // Occlusion (r47): the hot core is the disc itself and uses the disc taps'
 // visibility only, so it is never drawn over geometry that hides the disc (a
-// near mountain). The 2-4R ring (x wrap) may carry only the tail beyond ~2R:
-// light bleeding around a trunk, never a core blob over the occluder.
+// near mountain). The 2-4R ring (x wrap) carries only a core-free tail: the
+// tail shifted out by 3R, tail(sqrt(r^2+9)), flat-topped at the tail's 3R
+// level. Both parts fall monotonically with radius, so a barely hidden sun
+// (small disc, bright ring) shows no dark ring around it.
 float glareProfile(float radius){
     float r2=radius*radius;
     float edge=1-smoothstep(.35*DiscEmission.y,DiscEmission.y,radius);
     float disc=saturate(tex2Dlod(DiscHaloVisibility,float4(.5,.5,0,0)).r);
-    float tailVisible=max(disc,DiscGlowCore.w*saturate(tex2Dlod(DiscRingVisibility,float4(.5,.5,0,0)).r)*smoothstep(1.5,3,radius));
-    if(DiscRepair.w>.5)return (DiscEmission.z*exp2(-DiscEmission.x*r2)*disc+
-        DiscGlowHue.w*(.25*exp2(-.12*r2)+.35*exp2(-.025*r2)+.40*exp2(-.008*r2))*tailVisible)*edge;
+    float ring=DiscGlowCore.w*saturate(tex2Dlod(DiscRingVisibility,float4(.5,.5,0,0)).r);
+    float3 tail=float3(exp2(-.12*r2),exp2(-.025*r2),exp2(-.008*r2));
+    // tail(sqrt(r^2+9)) = sum w_i*2^(-k_i*9)*2^(-k_i*r^2): the same three terms.
+    float tailed=max(disc*dot(tail,float3(.25,.35,.40)),ring*dot(tail,float3(.118257,.299458,.380527)));
+    if(DiscRepair.w>.5)return (DiscEmission.z*exp2(-DiscEmission.x*r2)*disc+DiscGlowHue.w*tailed)*edge;
     return DiscEmission.z*.35*exp2(-1.11*max(radius-1,0))*edge*disc;
 }
 // Tinted by the glow hue; inside the hot core it goes to the core colour, so a

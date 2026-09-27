@@ -57,10 +57,15 @@ veil_ps=body(shader,'float4 CelestialVeilPS(')
 assert 'float sky=(depth>=.99999994&&rawDepth>=DiscRepair.x-DiscRepair.z)?1:0;' in veil_ps
 assert 'float geometry=1-sky*terrainVisibility(ray);' in veil_ps
 assert 'float alpha=geometry*glareProfile(radius);' in veil_ps
-# the core only by the disc taps' visibility; the ring (x wrap) only for the tail from ~2R.
+# the core only by the disc taps' visibility; the ring (x wrap) only for the
+# core-free tail shifted out by 3R, so the profile is monotonic (no dark ring).
 profile=shader[shader.index('float glareProfile(float radius){'):shader.index('float3 glowColor(')]
-assert 'float tailVisible=max(disc,DiscGlowCore.w*saturate(tex2Dlod(DiscRingVisibility,float4(.5,.5,0,0)).r)*smoothstep(1.5,3,radius));' in profile
-assert 'DiscEmission.z*exp2(-DiscEmission.x*r2)*disc+' in profile and '*tailVisible)*edge;' in profile
+assert 'float ring=DiscGlowCore.w*saturate(tex2Dlod(DiscRingVisibility,float4(.5,.5,0,0)).r);' in profile
+assert 'float tailed=max(disc*dot(tail,float3(.25,.35,.40)),ring*dot(tail,float3(.118257,.299458,.380527)));' in profile
+assert 'return (DiscEmission.z*exp2(-DiscEmission.x*r2)*disc+DiscGlowHue.w*tailed)*edge;' in profile
+assert 'smoothstep(1.5,3' not in profile
+# The shifted-tail literals are w_i*2^(-9 k_i) of the tail terms (k .12, .025, .008).
+for w,k,c in ((.25,.12,.118257),(.35,.025,.299458),(.40,.008,.380527)):assert abs(w*2**(-9*k)-c)<1e-6
 assert 'glowVisibility' not in shader
 
 compile_script=fp.tracked('compile_celestial_disc_shaders.py').read_text()

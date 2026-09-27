@@ -44,11 +44,12 @@ def smooth(a,b,x):
  t=max(0,min(1,(x-a)/(b-a)));return t*t*(3-2*t)
 def tail(r):r2=r*r;return .25*2**(-.12*r2)+.35*2**(-.025*r2)+.40*2**(-.008*r2)
 def glare(radius, sun, visible=1, wrap=0, ring=0, tailWeight=None):
- # the core only by the disc taps; the ring (x wrap) only for the tail from ~2R.
- disc=visible*(2-visible);tailVisible=max(disc,wrap*ring*(2-ring)*smooth(1.5,3,radius))
+ # the core only by the disc taps; the ring (x wrap) only for the core-free
+ # tail shifted out by 3R, tail(sqrt(r^2+9)): monotonic for any visibilities.
+ disc=visible*(2-visible);tailed=max(disc*tail(radius),wrap*ring*(2-ring)*tail(math.sqrt(radius*radius+9)))
  support=20 if sun else 6
  edge=1-smooth(.35*support,support,radius)
- if sun:halo=CORE*2**(-RATE*radius*radius)*disc+(TAIL if tailWeight is None else tailWeight)*tail(radius)*tailVisible
+ if sun:halo=CORE*2**(-RATE*radius*radius)*disc+(TAIL if tailWeight is None else tailWeight)*tailed
  else:halo=MOON*.35*2**(-1.11*max(radius-1,0))*disc
  return edge*halo*(1 if sun else 1-opacity(radius))
 def core_weight(r):return smooth(0,1,2**(-RATE*r*r))
@@ -63,13 +64,19 @@ for radius in (0,.64,.8,1,2,3.9,12):
  assert glare(radius,True,0)==0 and glare(radius,False,0)==0
 assert glare(0,False)==0
 # Wrap: a trunk hiding the disc keeps a partial TAIL glow from the ring around
-# it, from ~2R out, never the core (no core blob over a near mountain);
-# a roof or hill hiding both leaves none.
+# it (the tail shifted out by 3R: a soft plateau, never the core, so no core
+# blob over a near mountain); a roof or hill hiding both leaves none.
 for radius in (0,1,3,8):
- assert math.isclose(glare(radius,True,0,.6,1),.6*TAIL*tail(radius)*smooth(1.5,3,radius)*(1-smooth(7,20,radius)),rel_tol=1e-12,abs_tol=1e-15)
+ assert math.isclose(glare(radius,True,0,.6,1),.6*TAIL*tail(math.sqrt(radius*radius+9))*(1-smooth(7,20,radius)),rel_tol=1e-12,abs_tol=1e-15)
  assert glare(radius,True,0,.6,0)==0
  assert glare(radius,True,1,.6,1)==glare(radius,True)
-for i in range(0,7):assert glare(i*.25,True,0,.6,1)==0  # nothing within 1.5R of a hidden disc
+assert glare(0,True,0,.6,1)<.25*glare(0,True)  # no core over a hidden disc
+# Monotonic for every (disc, ring) visibility: a barely hidden sun has no dark
+# ring around it (a radial fade-in of the ring rose again after a dip at ~2R).
+for a in range(11):
+ for b in range(11):
+  values=[glare(i*.1,True,a/10,.6,b/10) for i in range(121)]
+  assert all(y<=x+1e-12 for x,y in zip(values,values[1:])),(a,b)
 lunar=[glare(i/10000,False) for i in range(10000,60001)]
 assert all(a>=b for a,b in zip(lunar,lunar[1:])) and lunar[-1]==0
 # Partial cover retains more of the apparent glow footprint without changing
@@ -119,7 +126,9 @@ assert 'if(DiscRepair.w<.5)alpha*=1-texel.a;' in shader
 assert 'if(DiscPolicy.w>.5&&depth<.99999994)return 0;' in shader
 assert 'if(DiscRepair.w>.5){float a=saturate((1-length(local))/.56);texel.a=a*a*(3-2*a);}' in shader
 assert 'if(DiscRepair.w>.5)return (DiscEmission.z*exp2(-DiscEmission.x*r2)*disc+' in shader
-assert 'DiscGlowHue.w*(.25*exp2(-.12*r2)+.35*exp2(-.025*r2)+.40*exp2(-.008*r2))*tailVisible)*edge;' in shader
+assert 'float3 tail=float3(exp2(-.12*r2),exp2(-.025*r2),exp2(-.008*r2));' in shader
+assert 'float tailed=max(disc*dot(tail,float3(.25,.35,.40)),ring*dot(tail,float3(.118257,.299458,.380527)));' in shader
+assert 'return (DiscEmission.z*exp2(-DiscEmission.x*r2)*disc+DiscGlowHue.w*tailed)*edge;' in shader
 assert 'return DiscEmission.z*.35*exp2(-1.11*max(radius-1,0))*edge*disc;' in shader
 assert 'float edge=1-smoothstep(.35*DiscEmission.y,DiscEmission.y,radius);' in shader
 assert 'return saturate(lerp(DiscGlowHue.rgb,DiscGlowCore.rgb,smoothstep(0,1,exp2(-DiscEmission.x*radius*radius))));' in shader

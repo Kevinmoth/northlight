@@ -71,11 +71,14 @@ inline float sunTail(float radius){const float r2=radius*radius;return .25f*std:
 inline float sunProfile(float radius,float tail=SunTailWeight,float core=SunCoreWeight,float support=SunGlareSupport){
     return (core*std::exp2(-SunCoreRate*radius*radius)+tail*sunTail(radius))*(1-smoothstep(.35f*support,support,radius));
 }
-// With occlusion: the core uses the disc taps' visibility only; the
-// ring (x wrap) may carry only the tail, from ~2R out (smoothstep 1.5R..3R).
+// With occlusion: the core uses the disc taps' visibility only; the ring
+// (x wrap) carries only the core-free tail shifted out by 3R,
+// sunTail(sqrt(r^2+9)). Both parts are non-increasing in r, so the profile is
+// monotonic for every (disc, ring) pair: no dark ring around a barely hidden sun.
 inline float sunGlare(float radius,float disc,float ring,float wrap,float tail=SunTailWeight,float core=SunCoreWeight,float support=SunGlareSupport){
-    const float d=clamp01(disc),tailVisible=std::max(d,clamp01(wrap)*clamp01(ring)*smoothstep(1.5f,3.f,radius));
-    return (core*std::exp2(-SunCoreRate*radius*radius)*d+tail*sunTail(radius)*tailVisible)*(1-smoothstep(.35f*support,support,radius));
+    const float d=clamp01(disc),w=clamp01(wrap)*clamp01(ring);
+    const float tailed=std::max(d*sunTail(radius),w*sunTail(std::sqrt(radius*radius+9)));
+    return (core*std::exp2(-SunCoreRate*radius*radius)*d+tail*tailed)*(1-smoothstep(.35f*support,support,radius));
 }
 // Soft shoulder of the screen blend: final = 1-(1-dst)*exp(-x*colour).
 inline float shoulder(float destination,float x,float colour){return 1-(1-destination)*std::exp2(-1.442695f*x*colour);}
