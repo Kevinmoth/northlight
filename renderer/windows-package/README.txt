@@ -8,12 +8,8 @@ never starts the game and never changes wow.exe.
 
 DOWNLOADS
 - Northlight-__RELEASE_VERSION__-Windows.zip: the installer and the renderer (about 20 MB).
-- Northlight-cache-stock-<id>.zip: a prebuilt world cache (world-cache, about
-  3.5 GB) for an unmodified 3.3.5a client. Download it to the same folder as
-  the installer package (for example Downloads). Do NOT extract it yourself:
-  the installer reads the ZIP directly and checks every file.
-- An HD client or an otherwise modified client does not need the cache ZIP:
-  the installer builds the cache itself from the game's own files (20–40 min).
+- Nothing else: the installer builds the world cache (world-cache) itself from
+  the game's own files, for an unmodified and an HD client alike (10–40 min).
 
 REQUIREMENTS
 - 64-bit Windows 10 or 11 and a WoW 3.3.5a (12340) client.
@@ -21,8 +17,8 @@ REQUIREMENTS
 - Only ASCII characters in the game folder path (no ä, ö, å or other special
   characters), a path of at most about 150 characters, and the game must not
   be in Program Files.
-- About 11 GB of free space on the game's drive (the cache). If the installer
-  builds the cache itself: 13 GB of free space and at least 8 GB of memory.
+- About 13 GB of free space on the game's drive and at least 8 GB of memory
+  while the installer builds the cache.
 
 INSTALLATION
 1. Close WoW completely.
@@ -35,10 +31,8 @@ INSTALLATION
    something is missing, it stops before anything is changed and tells you
    what to do.
 5. Then the installer
-   - installs the cache from the ZIP (unmodified client) or builds it itself
-     (HD or modified client; after an interruption it continues where it left off)
-     (on an unmodified client, a cache you built earlier is replaced once by
-     the prebuilt one, which has the latest lights),
+   - builds the world cache from the game's own files (after an interruption
+     it continues where it left off),
    - builds the lighting layer (Data\patch-z.mpq and Data\<locale>\patch-<locale>-z.mpq)
      from the game's own light tables in a few seconds,
    - installs the renderer (d3d9.dll), DXVK and the settings files as one
@@ -49,7 +43,6 @@ You can run the installer again at any time: parts that are already up to date
 are skipped. Log: the logs folder of the extracted package.
 
 Options (Install.cmd ...):
-  --cache "D:\Downloads\Northlight-cache-stock-....zip"  the cache ZIP from elsewhere
   --locale enUS          if the client has several locales and the installer cannot tell which one is used
   --backend native       Windows' own Direct3D 9 instead of DXVK
   --backend legacy       the d3d9.dll that was already in the game folder (for example your own DXVK or ReShade)

@@ -9,19 +9,15 @@ WoWSilicon and never changes wow.exe.
 
 DOWNLOADS
 - Northlight-__RELEASE_VERSION__-macOS.zip: the installer and the renderer.
-- Northlight-cache-stock-<id>.zip: a prebuilt world cache (world-cache, about
-  3.5 GB) for an unmodified 3.3.5a client. Leave it in Downloads or next to
-  the installer folder. Do NOT extract it yourself. If Safari extracted it
-  into a folder automatically, that folder works as it is.
-- An HD client or an otherwise modified client does not need the cache ZIP:
-  the installer builds the cache itself from the game's own files (20–40 min).
+- Nothing else: the installer builds the world cache (world-cache) itself from
+  the game's own files, for an unmodified and an HD client alike (10–40 min).
 
 REQUIREMENTS
 - An Apple Silicon Mac and WoWSilicon, with this client patched with the DXVK
   backend (WoWSilicon: Patch, with DXVK as the graphics backend, not MTLD3D).
 - Only ASCII characters in the game folder path (no ä, ö, å or other special characters).
-- About 11 GB of free disk space. If the installer builds the cache itself:
-  13 GB of free space and at least 8 GB of memory.
+- About 13 GB of free disk space and at least 8 GB of memory while the
+  installer builds the cache.
 
 INSTALLATION
 1. Close WoW and WoWSilicon completely.
@@ -39,10 +35,8 @@ INSTALLATION
    space and the package. If something is missing, it stops before anything is
    changed and tells you what to do.
 6. Then the installer
-   - installs the cache from the ZIP (unmodified client) or builds it itself
-     (HD or modified client; after an interruption it continues where it left off)
-     (on an unmodified client, a cache you built earlier is replaced once by
-     the prebuilt one, which has the latest lights),
+   - builds the world cache from the game's own files (after an interruption
+     it continues where it left off),
    - builds the lighting layer (Data/patch-z.mpq and Data/<locale>/patch-<locale>-z.mpq)
      from the game's own light tables in a few seconds,
    - installs the renderer as mods/d3d9.dll, adds it to WoWSilicon's
@@ -55,7 +49,6 @@ You can run the installer again at any time: parts that are already up to date
 are skipped. Log: the logs folder of the extracted package.
 
 Options (add them after the command):
-  --cache "/path/Northlight-cache-stock-....zip"  the cache ZIP from elsewhere
   --locale enUS          if the client has several locales and the installer cannot tell which one is used
   --no-art-layer         no lighting layer (patch-z)
   --no-world-cache       the renderer only, without the cache (no static world shadows and no GI)
