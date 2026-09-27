@@ -20,5 +20,3 @@
 ;out = ~/northlight-out
 ; Optional captured world-shader corpus for extra actor-deformation sub-cases.
 ;shader_corpus = ~/world_shader_samples.bin
-; Optional second client's wow.exe, compared (informational) by renderer_status.py status.
-;reference_exe = ~/Games/other-client/wow.exe

@@ -169,7 +169,6 @@ it is ignored by git), then a default. `python3 northlight_paths.py` prints what
 | `NORTHLIGHT_OUT` | `out/` | build and test output |
 | `NORTHLIGHT_TEST_OUTPUT_DIR` | set by `run_tests.py` | where a test writes its report |
 | `NORTHLIGHT_SHADER_CORPUS` | none | optional captured shader corpus (extra sub-cases) |
-| `NORTHLIGHT_REFERENCE_EXE` | none | optional second client's `wow.exe`, compared by `renderer_status.py status` |
 | `NORTHLIGHT_DOWNLOADS` | none (then `tools/`) | pinned runtime downloads for `renderer/build_packages.py` (`renderer/package-pins.json`) |
 | `NORTHLIGHT_LIVE_CLIENT`, `NORTHLIGHT_STOCK_CLIENT`, `NORTHLIGHT_LIGHTS_STAGE`, `BASE` | none | a few specific tests; see their docstrings (`NORTHLIGHT_STOCK_CLIENT`: a stock 3.3.5a client for the identity and variant tests) |
 

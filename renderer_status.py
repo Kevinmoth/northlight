@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Turn this macOS client's renderer on/off; never launches a process and never
-patches wow.exe (any wow.exe is accepted). "on" = renderer/migrate_mac_proxy.py
---apply (mods/d3d9.dll preloaded from dlls.txt; only our old frd9 patch, if
-present, is reverted: 2 bytes), "off" = its restore (wow.exe is not re-patched),
+"""Turn this macOS client's renderer on/off; never launches a process, and wow.exe
+is never read or written (any wow.exe is accepted). "on" = renderer/migrate_mac_proxy.py
+--apply (mods/d3d9.dll preloaded from dlls.txt), "off" = its restore,
 "status" = read-only state. Add --dry-run to see the steps without writing.
 The client is --client PATH, else NORTHLIGHT_CLIENT, else northlight.local.ini
 [paths] client, else the repository's parent folder."""

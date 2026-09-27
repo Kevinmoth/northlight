@@ -10,7 +10,7 @@ from contextlib import redirect_stderr
 from unittest.mock import patch
 from test_renderer_status import OnOff
 
-BROKEN={'percent':b'[paths]\narchive = ~/x%20y\nreference_exe = ~/a%zb/wow.exe\n',
+BROKEN={'percent':b'[paths]\narchive = ~/x%20y\nshader_corpus = ~/a%zb/corpus.bin\n',
         'duplicate':b'[paths]\narchive = /nonexistent-a\narchive = /nonexistent-b\n',   # not client: renderer_status would rightly refuse it
         'no_section':b'client = /nonexistent\njust garbage\n',
         'binary':b'\xff\xfe\x00[paths\n'}
@@ -18,14 +18,14 @@ BROKEN={'percent':b'[paths]\narchive = ~/x%20y\nreference_exe = ~/a%zb/wow.exe\n
 class Setting(unittest.TestCase):
     def test_broken_ini_is_ignored(self):
         for name,data in BROKEN.items():
-            with self.subTest(name),tempfile.TemporaryDirectory() as t,patch.dict(os.environ,{'NORTHLIGHT_REFERENCE_EXE':''}):
+            with self.subTest(name),tempfile.TemporaryDirectory() as t,patch.dict(os.environ,{'NORTHLIGHT_SHADER_CORPUS':''}):
                 ini=Path(t)/'northlight.local.ini';ini.write_bytes(data)
                 saved=(fp.LOCAL_INI,fp._ini_cache);fp.LOCAL_INI,fp._ini_cache=ini,None
                 err=io.StringIO()
                 try:
-                    with redirect_stderr(err):value=fp.setting('reference_exe')
+                    with redirect_stderr(err):value=fp.setting('shader_corpus')
                 finally:fp.LOCAL_INI,fp._ini_cache=saved
-                if name=='percent':self.assertEqual(value,'~/a%zb/wow.exe')   # no interpolation: '%' is literal
+                if name=='percent':self.assertEqual(value,'~/a%zb/corpus.bin')   # no interpolation: '%' is literal
                 elif name=='duplicate':self.assertIsNone(value)   # strict=False: the last value wins, no error
                 else:self.assertIsNone(value);self.assertIn('ignoring unreadable',err.getvalue())
 

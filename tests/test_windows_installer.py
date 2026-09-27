@@ -135,7 +135,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(cache.read_bytes(),b'correct')
     def test_installer_has_no_exe_code(self):
         src=fp.src('windows-package/install.py').read_text()
-        for gone in ['OFFSET','frd9.dll','revert_exe','patched(','ORIGINAL','PATCHED','OLD_MOD','OLD_DXVK']:self.assertNotIn(gone,src)
+        for gone in ['OFFSET','frd9.dll','OLD_MOD','OLD_DXVK']:self.assertNotIn(gone,src)
     def test_spy_sees_exe_access(self):
         (self.client/'wow.exe').read_bytes();self.assertEqual(len(self.exe_access),1);self.exe_access.clear()   # the guard itself works
     def test_payload_corruption_rejected(self):

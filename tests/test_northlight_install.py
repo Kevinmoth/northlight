@@ -3,8 +3,8 @@
 """The player installer (renderer/northlight_install.py) on fake clients and a fake package: every preflight
 refusal writes nothing; a stock client gets the prebuilt cache (sha-checked, resumable after a kill), any
 other client a local build; the art layer is installed unless a foreign patch-z is there; a rerun changes
-nothing; uninstall restores the client file list and deletes only our cache; macOS package mode never
-writes wow.exe; an old full Windows package is restored first. The pipeline scripts are replaced by a fake
+nothing; uninstall restores the client file list and deletes only our cache; wow.exe is left
+unchanged; an old full Windows package is restored first. The pipeline scripts are replaced by a fake
 runner and client identification by a stub. No game, Wine or Windows binary runs."""
 import sys; from pathlib import Path; sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root
 import northlight_paths as fp
@@ -205,13 +205,6 @@ class Preflight(Base):
         (self.pkg_root / 'payload/celestial-profiles.ini').write_bytes(b'changed')
         self.assertIn('damaged', self.refused())
 
-    def test_mac_patched_exe_never_written(self):
-        exe = b'head\0frd9.dll\0\0\0\0-tail'
-        (self.client / 'wow.exe').write_bytes(exe); self.before = tree(self.client)
-        with patch.object(mig, 'OFFSET', 5):
-            self.assertIn('never writes wow.exe', self.refused())
-        self.assertEqual((self.client / 'wow.exe').read_bytes(), exe)
-
     def test_mac_preload_missing(self):
         (self.client / 'libDllLdr.dll').unlink(); self.before = tree(self.client)
         self.assertIn('preload', self.refused())
@@ -244,7 +237,7 @@ class RunningCheck(unittest.TestCase):
 
 class WindowsPreflight(Preflight):
     platform = 'windows'
-    test_mac_patched_exe_never_written = test_mac_preload_missing = None
+    test_mac_preload_missing = None
 
     def test_path_length(self):
         deep = self.base / ('x' * 60) / ('y' * 60) / 'WoW'

@@ -25,8 +25,8 @@ The launchers (Install Northlight.command, Install.cmd) run this with the packag
    into the package's work folder and installed through the transaction, unless Data/patch-z.mpq
    or the locale patch-<loc>-z.mpq is someone else's (then it is skipped and reported).
 4. the renderer: Windows installs d3d9.dll, the DXVK backend and the ini files in one transaction
-   (install.py); macOS runs migrate_mac_proxy in package mode (mods/d3d9.dll preloaded from
-   dlls.txt; wow.exe is never written), then the ini files and the art layer in a transaction.
+   (install.py); macOS runs migrate_mac_proxy (mods/d3d9.dll preloaded from
+   dlls.txt; wow.exe is never read or written), then the ini files and the art layer in a transaction.
 One run per client at a time (<client>/northlight-installer.lock). Rerunning is safe: current parts are skipped. Uninstall restores every transaction of this
 client, newest first, and deletes the world cache only if this installer or install_world_cache
 made it. Every transaction's backups stay in <client>/renderer-backups. Log: <package>/logs/.
@@ -708,7 +708,7 @@ class Installer:
                               'but there is none. Use --backend dxvk or native.')
         if self.platform == 'mac':
             try:
-                migrate().plan(client, self.pkg.dll, package=True, roots=[self.mac_backups(client)])
+                migrate().plan(client, self.pkg.dll, roots=[self.mac_backups(client)])
             except ValueError as e:
                 raise Refusal(str(e))
         old = self.legacy(client)
@@ -800,7 +800,7 @@ class Installer:
         backups, payload = [], 'kept (unchanged)'
         if self.platform == 'mac':
             self.still_closed('installing the renderer')
-            record = migrate().apply(client, self.pkg.dll, self.mac_backups(client), package=True)
+            record = migrate().apply(client, self.pkg.dll, self.mac_backups(client))
             if record:
                 backups.append(record)
                 payload = 'installed (mods/d3d9.dll preloaded from dlls.txt)'

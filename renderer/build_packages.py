@@ -129,13 +129,13 @@ def check_dll(data):
     return MARKER.search(data).group(1).decode()
 
 
-def git_head():
+def commit_time():
+    """The last commit's time, used as the zip entry date (None outside a repository)."""
     try:
-        r = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=fp.REPO, capture_output=True, text=True, timeout=30)
         stamp = subprocess.run(['git', 'log', '-1', '--format=%ct'], cwd=fp.REPO, capture_output=True, text=True, timeout=30)
-        return (r.stdout.strip() or None), int(stamp.stdout.strip() or 0) or None
+        return int(stamp.stdout.strip() or 0) or None
     except (OSError, ValueError):
-        return None, None
+        return None
 
 
 def variant_digest(files):
@@ -253,7 +253,7 @@ def launchers(platform, version):
 def build(platform, version, dll, variants, out, stormlib_dir):
     top = f'Northlight-{version}-{PLATFORMS[platform]}'
     tree = Tree(top)
-    head, stamp = git_head()
+    stamp = commit_time()
     check_closure(APP_FILES)
     for name in APP_FILES:
         tree.add('app/' + name, fp.REPO / name)
@@ -286,7 +286,7 @@ def build(platform, version, dll, variants, out, stormlib_dir):
     tree.add('README.txt', text.replace('\n', '\r\n').encode('utf-8') if platform == 'windows' else text.encode('utf-8'))
     for name, data in launchers(platform, version).items():
         tree.add(name, data, executable=True)
-    info = {'format': 'northlight-package/1', 'version': version, 'platform': platform, 'git_head': head,
+    info = {'format': 'northlight-package/1', 'version': version, 'platform': platform,
             'dll_version': dll_version, 'dll_sha256': hashlib.sha256(dll_data).hexdigest(),
             'dll_pe_normalized_sha256': hashlib.sha256(pe_normalized(dll_data)).hexdigest(),
             'stormlib_sha256': sha(lib), 'stormlib_source_tree_sha256': PINS['stormlib']['source_tree_sha256'],
