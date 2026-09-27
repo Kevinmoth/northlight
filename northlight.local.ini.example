@@ -1,0 +1,24 @@
+; Machine configuration. Copy to northlight.local.ini (ignored by git) and uncomment what you need.
+; Each key can also be given as an environment variable NORTHLIGHT_<KEY> (e.g. NORTHLIGHT_CLIENT),
+; which wins over this file. `python3 northlight_paths.py` prints what is resolved.
+[paths]
+; WoW 3.3.5a client folder (Wow.exe + Data/). Default: the folder that contains this repository.
+;client = ~/Games/wow-3.3.5a
+; zig 0.15.2 executable. Default: tools/zig-*/zig, then zig on PATH.
+;zig = ~/tools/zig-aarch64-macos-0.15.2/zig
+; Folder containing bin/wine (shader compilers only). Default: WoWSilicon's bundled Wine, then wine on PATH.
+;wine = /opt/wine
+; StormLib shared library for mpq.py. Default: tools/storm-build/storm.framework/storm
+;stormlib = ~/tools/libstorm.dylib
+; Third-party downloads folder (DXVK, StormLib, zig). Default: tools/
+;tools = ~/northlight-tools
+; External archive (holds renderer/rollback-*, renderer/runtime-diagnostics-*). No default.
+;archive = ~/renderer-archive
+; Old renderer tarballs read by differential tests. Default: backups/
+;backups = ~/northlight-backups
+; Build/test output. Default: out/
+;out = ~/northlight-out
+; Optional captured world-shader corpus for extra actor-deformation sub-cases.
+;shader_corpus = ~/world_shader_samples.bin
+; Optional second client's wow.exe, compared (informational) by renderer_status.py status.
+;reference_exe = ~/Games/other-client/wow.exe

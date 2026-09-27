@@ -1,0 +1,52 @@
+{
+  "format": "northlight-package-pins/1",
+  "note": "Third-party inputs of renderer/build_packages.py. Files are looked up by name in NORTHLIGHT_DOWNLOADS, then tools/ (both ignored by git); a sha256 mismatch refuses the build.",
+  "python_mac": {
+    "name": "CPython (python-build-standalone)",
+    "version": "3.13.15",
+    "release": "20260924",
+    "file": "cpython-3.13.15+20260924-aarch64-apple-darwin-install_only_stripped.tar.gz",
+    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260924/cpython-3.13.15%2B20260924-aarch64-apple-darwin-install_only_stripped.tar.gz",
+    "sha256": "064afb7c2fc0bbf511d886288adf98696af5105e36c138cdf2c199c0146fcf68",
+    "bytes": 25208410,
+    "sha256_source": "the release's SHA256SUMS and the GitHub asset digest (both 064afb7c...)",
+    "license": "PSF-2.0 (python/lib/python3.13/LICENSE.txt, which also lists the bundled libraries); python-build-standalone build scripts: MPL-2.0"
+  },
+  "python_windows": {
+    "name": "CPython embeddable package (python.org)",
+    "version": "3.13.15",
+    "file": "python-3.13.15-embed-amd64.zip",
+    "url": "https://www.python.org/ftp/python/3.13.15/python-3.13.15-embed-amd64.zip",
+    "sha256": "d1f04d990aee1253d8569e8e5104e30fa9f5fa830899f14843448872d936a2cf",
+    "bytes": 11009825,
+    "sha256_source": "python.org SBOM python-3.13.15-embed-amd64.zip.spdx.json (checksumValue)",
+    "license": "PSF-2.0 (LICENSE.txt in the zip)"
+  },
+  "dxvk": {
+    "name": "DXVK",
+    "version": "2.7.1",
+    "file": "dxvk-2.7.1-download/dxvk-2.7.1.tar.gz",
+    "url": "https://github.com/doitsujin/dxvk/releases/download/v2.7.1/dxvk-2.7.1.tar.gz",
+    "sha256": "d85ce7c79f57ecd765aaa1b9e7007cb875e6fde9f6d331df799bce73d513ce87",
+    "sha256_source": "GitHub release asset digest (release.json)",
+    "member": "dxvk-2.7.1/x32/d3d9.dll",
+    "member_sha256": "00ecd422b3b12e9d3b309785f3f19431405389d80eb4a37018ebc63e2d87d900",
+    "license_file": "dxvk-2.7.1-download/LICENSE",
+    "license_sha256": "a5cb1a6ded7d2d7e92d550ba28edd21be2d1d4044662b399887351023e30ce64",
+    "license": "zlib"
+  },
+  "stormlib": {
+    "name": "StormLib",
+    "source": "tools/StormLib-master",
+    "url": "https://github.com/ladislav-zezula/StormLib",
+    "source_tree_sha256": "e9d2ec908c1419beb1b142ea2d76103a36cdd070ae621bc3baebf41ec1a11be4",
+    "built_by": "scripts/build_stormlib.py (zig 0.15.2)",
+    "windows_sha256": "dc1e133965432b55e0a016d0302399bfa57770c423d93db76e7dcfa45fd41b15",
+    "mac_sha256": "80e591bac7e8a85958fe25ef640a5ff83fcc0a2915c9e27e511e85b91be26859",
+    "license": "MIT; bundles zlib (zlib), bzip2 (BSD-style), LibTomCrypt/LibTomMath (public domain), LZMA SDK (public domain)"
+  },
+  "zig": {
+    "version": "0.15.2",
+    "url": "https://ziglang.org/download/0.15.2/"
+  }
+}

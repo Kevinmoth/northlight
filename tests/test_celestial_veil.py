@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+# northlight-test: requires=cxx
+"""veil over geometry and the sun glow: native CPU policy and recorded draw
+sequence (test_celestial_veil.cpp), plus static checks of the call site order
+(after water, before UI, gated like the discs), the raw-depth classification,
+the unchanged halo-visibility shader and the slot budgets. No device or game."""
+import sys; from pathlib import Path; sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root
+import northlight_paths as fp
+import hashlib,json,subprocess,tempfile
+HERE=Path(__file__).resolve().parent
+
+with tempfile.TemporaryDirectory(prefix='northlight-celestial-veil-') as tmp:
+    binary=str(Path(tmp)/'test')
+    subprocess.run(['c++','-std=c++17','-O1','-g','-fsanitize=address,undefined','-fno-omit-frame-pointer',*fp.test_include_flags(),
+                    str(HERE/'test_celestial_veil.cpp'),'-o',binary],check=True)
+    native=subprocess.check_output([binary],text=True).strip()
+assert native.startswith('PASS'),native
+
+def body(source,start):
+    i=source.index(start);return source[i:source.index('\n}\n',i)+3]
+renderer=fp.src('renderer.cpp').read_text()
+effects=renderer[renderer.index('    void renderEffects() {'):renderer.index('template<class Capture> void prepareDraw(')]
+order=['if (applied || !enabled || failed || !projectionValid) return;',
+       'const bool celestial=celestialDiscs&&world&&debugMode==0&&worldDebug==0;',
+       'celestialDiscs->render(saved.targets[0],',
+       'gpuProfile->mark("CelestialDiscs");',
+       'if(celestial){celestialDiscs->renderRing();gpuProfile->mark("CelestialRing");}',
+       'ext->StretchRect(saved.targets[0], nullptr, sceneSurface',
+       'world->render(saved.targets[0],',
+       'water->render(saved.targets[0],',
+       'gpuProfile->mark("Water");',
+       'celestialDiscs->renderVeil(saved.targets[0],NorthlightCelestialGlow::hazeAtSun(haze.haze[3],haze.shape[2],sunElevation),world->skyTransmittance());',
+       'gpuProfile->mark("CelestialVeil");',
+       'applied = true;']
+at=[effects.index(s) for s in order]
+assert at==sorted(at),list(zip(order,at))
+veil_site=effects[effects.index('gpuProfile->mark("Water");'):effects.index('applied = true;')]
+assert 'if(celestial){' in veil_site and 'SetRenderTarget' not in veil_site
+
+host=fp.src('celestial_disc_renderer.h').read_text()
+veil=host[host.index('    bool renderVeil('):]
+veil=veil[:veil.index('\n    }\n')]
+assert 'SetRenderTarget' not in veil and 'SavedState' not in veil  # the caller restores; no pass switch
+assert 'return NorthlightCelestialVeil::draw(d,target,veilPS,textures,c,g.bounds,g.width,g.height,veilStats);' in veil
+assert 'if(!(veil>0)||!(c[12][2]+c[47][3]>0)){++veilStats.skipped;return false;}' in veil
+assert veil.index('if(!(veil>0)')<veil.index('CreatePixelShader')  # no shader or call when off
+ring=host[host.index('    bool renderRing('):host.index('    NorthlightCelestialVeil::Stats veilStats;')]
+assert 'd->SetPixelShader(haloPS);' in ring and 'SetPixelShaderConstantF(0,c[0],47)' in ring
+assert 'sourceTaps(g.disc,g.inverseView,g.projection,g.width,g.height,SunMaskRadius,true,c)' in ring
+
+shader_path=fp.src('celestial_disc_effects.hlsl');shader=shader_path.read_text()
+# The halo-visibility PS (497/512) is reused without edits for the ring.
+assert hashlib.sha256(body(shader,'float4 CelestialHaloVisibilityPS(').encode()).hexdigest()=='8ee5fbdf13aece7843af3b0dd842cad26078d540842cffac57ae0e8f7c5580e4'
+veil_ps=body(shader,'float4 CelestialVeilPS(')
+# Raw-depth classification: WDL/beyond-far silhouettes (normalised depth 1, raw
+# depth below the sky sprite) are geometry; the complement of the glare.
+assert 'float sky=(depth>=.99999994&&rawDepth>=DiscRepair.x-DiscRepair.z)?1:0;' in veil_ps
+assert 'float geometry=1-sky*terrainVisibility(ray);' in veil_ps
+assert 'float alpha=geometry*glareProfile(radius);' in veil_ps
+# the core only by the disc taps' visibility; the ring (x wrap) only for the tail from ~2R.
+profile=shader[shader.index('float glareProfile(float radius){'):shader.index('float3 glowColor(')]
+assert 'float tailVisible=max(disc,DiscGlowCore.w*saturate(tex2Dlod(DiscRingVisibility,float4(.5,.5,0,0)).r)*smoothstep(1.5,3,radius));' in profile
+assert 'DiscEmission.z*exp2(-DiscEmission.x*r2)*disc+' in profile and '*tailVisible)*edge;' in profile
+assert 'glowVisibility' not in shader
+
+compile_script=fp.tracked('compile_celestial_disc_shaders.py').read_text()
+assert "'CelestialVeilPS'" in compile_script
+manifest=json.loads(fp.src('celestial-disc-shader-build.json').read_text())
+compiled=manifest['source_sha256']==hashlib.sha256(shader_path.read_bytes()).hexdigest()
+budget={}
+if compiled:
+    shaders=manifest['shaders']
+    # The halo PS source is unchanged; its bytes moved only because fxc places the literal (def) registers after the
+    # highest declared constant, and the file now declares c47/c48. The asm equals the 0.3.162 asm (e47ec123...) with
+    # every c>=47 renumbered by +2 (checked at integration).
+    assert shaders['CelestialHaloVisibilityPS']['sha256']=='a155a54312069dcac2e2973169513d1d30dffa491439dce094d6cbc8fc29805f'
+    assert shaders['CelestialHaloVisibilityPS']['static_instruction_slots']==497
+    for entry in ('CelestialDiscPS','CelestialVeilPS'):
+        assert shaders[entry]['static_instruction_slots']<=480 and shaders[entry]['temporary_registers']<=32,entry
+        budget[entry]=shaders[entry]['static_instruction_slots']
+print(json.dumps({'status':'PASS','native':native,'call_order':len(order),
+                  'manifest':'compiled' if compiled else 'pending shader compile (build refuses until then)','slots':budget,
+                  'game_or_gpu_launched':False},indent=2))

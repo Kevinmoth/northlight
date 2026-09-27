@@ -1,0 +1,420 @@
+{
+  "source_sha256": "fc76c61fa9b2b0ddd756cb6df255398e305e4d9836aa7f61b54af232303f411a",
+  "compiler": "Wine d3dcompiler_47 D3DCompile",
+  "game_launched": false,
+  "shaders": {
+    "WorldNormals": {
+      "target": "ps_3_0",
+      "bytes": 6368,
+      "sha256": "1e8d22d66a1022bad26c930dd719398eba02c22179084a275f4fe52bf54c1db5",
+      "static_instruction_slots": 417,
+      "temporary_registers": 29,
+      "samplers": [
+        1
+      ],
+      "instructions": {
+        "mul": 75,
+        "frc": 3,
+        "add": 82,
+        "max": 26,
+        "min": 11,
+        "mov": 101,
+        "texldl": 7,
+        "rcp": 22,
+        "cmp": 27,
+        "if": 4,
+        "rep": 1,
+        "break": 1,
+        "else": 4,
+        "endif": 4,
+        "abs": 6,
+        "dp3": 17,
+        "rsq": 7,
+        "endrep": 1
+      }
+    },
+    "WorldLighting": {
+      "target": "ps_3_0",
+      "bytes": 7200,
+      "sha256": "a8f2855c9278d60b1c557acfffead9bdfaedace599587b2a88d3f6746c6a59a8",
+      "static_instruction_slots": 427,
+      "temporary_registers": 19,
+      "samplers": [
+        1,
+        2,
+        3,
+        11,
+        14
+      ],
+      "instructions": {
+        "mov": 103,
+        "texldl": 5,
+        "mul": 71,
+        "frc": 4,
+        "add": 97,
+        "max": 20,
+        "min": 6,
+        "cmp": 35,
+        "if": 9,
+        "rcp": 9,
+        "else": 9,
+        "endif": 9,
+        "dp3": 6,
+        "abs": 7,
+        "rep": 2,
+        "break": 2,
+        "dp2add": 1,
+        "endrep": 2
+      }
+    },
+    "WorldGI": {
+      "target": "ps_3_0",
+      "bytes": 5956,
+      "sha256": "23dfdd6e1d08800f8958b278b09aebc97f0558f6b0ac83b5cf447891ef1466e7",
+      "static_instruction_slots": 348,
+      "temporary_registers": 26,
+      "samplers": [
+        1,
+        4,
+        5,
+        6,
+        7,
+        10,
+        11,
+        14
+      ],
+      "instructions": {
+        "mov": 95,
+        "texldl": 8,
+        "mul": 56,
+        "frc": 7,
+        "add": 71,
+        "max": 10,
+        "min": 8,
+        "cmp": 26,
+        "if": 6,
+        "rcp": 16,
+        "else": 6,
+        "endif": 6,
+        "rep": 1,
+        "break": 1,
+        "abs": 2,
+        "dp3": 1,
+        "rsq": 1,
+        "dp4": 3,
+        "endrep": 1
+      }
+    },
+    "WorldFog": {
+      "target": "ps_3_0",
+      "bytes": 8720,
+      "sha256": "4b40e8e5e49892a4f47b41bc21bb1079abf61664d7d623abc12a784efda189fe",
+      "static_instruction_slots": 512,
+      "temporary_registers": 29,
+      "samplers": [
+        1,
+        3,
+        11,
+        13,
+        15
+      ],
+      "instructions": {
+        "add": 104,
+        "cmp": 34,
+        "mov": 127,
+        "if": 8,
+        "mul": 110,
+        "frc": 5,
+        "max": 23,
+        "min": 9,
+        "texldl": 8,
+        "rcp": 12,
+        "else": 8,
+        "endif": 8,
+        "dp3": 3,
+        "rsq": 2,
+        "log": 1,
+        "exp": 2,
+        "mad": 3,
+        "abs": 3,
+        "rep": 2,
+        "break": 3,
+        "dp4": 5,
+        "endrep": 2
+      }
+    },
+    "FogBlur": {
+      "target": "ps_3_0",
+      "bytes": 3400,
+      "sha256": "b48b12488d6233e53031b9f947e643a47d5892fc7fd478356a0a08037a3a1e78",
+      "static_instruction_slots": 199,
+      "temporary_registers": 12,
+      "samplers": [
+        1,
+        9,
+        11
+      ],
+      "instructions": {
+        "mul": 28,
+        "frc": 3,
+        "add": 40,
+        "rcp": 13,
+        "max": 12,
+        "min": 7,
+        "mov": 41,
+        "texldl": 5,
+        "cmp": 20,
+        "if": 3,
+        "else": 3,
+        "endif": 3,
+        "rep": 1,
+        "break": 1,
+        "abs": 3,
+        "exp": 1,
+        "endrep": 1
+      }
+    },
+    "LocalDirect": {
+      "target": "ps_3_0",
+      "bytes": 4348,
+      "sha256": "ad4107aef51fb39a9f5ed21d7f3884c63f4e580954ddf34d0fb0b46a7bbca7cc",
+      "static_instruction_slots": 237,
+      "temporary_registers": 5,
+      "samplers": [
+        1,
+        11,
+        12,
+        14
+      ],
+      "instructions": {
+        "mov": 45,
+        "texldl": 4,
+        "add": 49,
+        "max": 14,
+        "rcp": 13,
+        "mul": 61,
+        "frc": 1,
+        "min": 3,
+        "cmp": 9,
+        "if": 2,
+        "else": 2,
+        "endif": 2,
+        "dp3": 16,
+        "rsq": 8
+      }
+    },
+    "TemporalLight": {
+      "target": "ps_3_0",
+      "bytes": 6884,
+      "sha256": "029e809d0b7f874a39ee1244dfc3e2b31b6ff5aa0a5f14febdc09afd84fb8c4d",
+      "static_instruction_slots": 423,
+      "temporary_registers": 23,
+      "samplers": [
+        0,
+        1,
+        8,
+        12,
+        14,
+        15
+      ],
+      "instructions": {
+        "mul": 68,
+        "frc": 5,
+        "add": 69,
+        "rcp": 38,
+        "mov": 96,
+        "texldl": 14,
+        "max": 32,
+        "min": 17,
+        "cmp": 20,
+        "if": 7,
+        "mad": 2,
+        "log": 1,
+        "exp": 2,
+        "rep": 1,
+        "break": 1,
+        "else": 7,
+        "endif": 7,
+        "rsq": 1,
+        "abs": 3,
+        "endrep": 1
+      }
+    },
+    "LocalFog": {
+      "target": "ps_3_0",
+      "bytes": 7284,
+      "sha256": "3439bb63d20ae45ae5cd2d7975e7d97231d3445ab086063d65af1d44232d4f70",
+      "static_instruction_slots": 407,
+      "temporary_registers": 5,
+      "samplers": [
+        1,
+        11
+      ],
+      "instructions": {
+        "mul": 93,
+        "frc": 1,
+        "add": 125,
+        "max": 32,
+        "min": 13,
+        "mov": 25,
+        "texldl": 2,
+        "cmp": 52,
+        "if": 1,
+        "rcp": 30,
+        "else": 1,
+        "endif": 1,
+        "dp3": 9,
+        "rsq": 10,
+        "abs": 8
+      }
+    },
+    "SourceVisibilityPS": {
+      "target": "ps_3_0",
+      "bytes": 7944,
+      "sha256": "65a5e68fe23513a5750c8714975b0d4276a2b5241d44d2314fd044bb9b73671e",
+      "static_instruction_slots": 492,
+      "temporary_registers": 5,
+      "samplers": [
+        1,
+        15
+      ],
+      "instructions": {
+        "texldl": 25,
+        "mov": 95,
+        "dp3": 3,
+        "mul": 73,
+        "add": 178,
+        "cmp": 59,
+        "if": 2,
+        "rcp": 3,
+        "min": 3,
+        "abs": 16,
+        "max": 2,
+        "else": 2,
+        "endif": 2
+      }
+    },
+    "WorldComposite": {
+      "target": "ps_3_0",
+      "bytes": 7752,
+      "sha256": "998f38ddfb6f644c50bbed7fab5c2ebccb9e8fda3aa3a33ed05558a0d76c0c55",
+      "static_instruction_slots": 467,
+      "temporary_registers": 28,
+      "samplers": [
+        0,
+        1,
+        8,
+        9,
+        11,
+        12
+      ],
+      "instructions": {
+        "mov": 125,
+        "texldl": 8,
+        "mul": 70,
+        "frc": 4,
+        "add": 82,
+        "max": 23,
+        "min": 12,
+        "cmp": 41,
+        "if": 8,
+        "rcp": 19,
+        "else": 8,
+        "endif": 8,
+        "mad": 6,
+        "log": 2,
+        "exp": 6,
+        "rep": 1,
+        "break": 1,
+        "abs": 5,
+        "endrep": 1,
+        "dp3": 1,
+        "rsq": 3,
+        "dp2add": 3
+      }
+    },
+    "ShadowVS": {
+      "target": "vs_3_0",
+      "bytes": 652,
+      "sha256": "10172c530a92bd9cd5bbf13dff11ebbb53888c355b5b9b13a8aebe764215c165",
+      "static_instruction_slots": 31,
+      "temporary_registers": 2,
+      "samplers": [],
+      "instructions": {
+        "mul": 12,
+        "add": 12,
+        "mov": 7
+      }
+    },
+    "ShadowCacheVS": {
+      "target": "vs_3_0",
+      "bytes": 700,
+      "sha256": "54092470516c229529f1e86cadacb240ac6fcb2a877114b00e0cfed1d4f7a753",
+      "static_instruction_slots": 35,
+      "temporary_registers": 2,
+      "samplers": [],
+      "instructions": {
+        "mul": 12,
+        "add": 12,
+        "mov": 11
+      }
+    },
+    "ShadowPS": {
+      "target": "ps_3_0",
+      "bytes": 256,
+      "sha256": "318fe2a445a91294b3f1b0a4711ba226fee07397c1f2816d9d96d09a18fdbffd",
+      "static_instruction_slots": 5,
+      "temporary_registers": 1,
+      "samplers": [
+        0
+      ],
+      "instructions": {
+        "texld": 1,
+        "add": 1,
+        "texkill": 1,
+        "mov": 1
+      }
+    },
+    "ShadowReplayPS": {
+      "target": "ps_3_0",
+      "bytes": 256,
+      "sha256": "194f5665d22f12a8c0e337be2938d036386c4e7982f048051a804714f85a592d",
+      "static_instruction_slots": 5,
+      "temporary_registers": 1,
+      "samplers": [
+        0
+      ],
+      "instructions": {
+        "texld": 1,
+        "add": 1,
+        "texkill": 1,
+        "mov": 1
+      }
+    },
+    "ShadowUnion": {
+      "target": "ps_3_0",
+      "bytes": 960,
+      "sha256": "d090109910314885bc31fdf67ebd4c393f95c499da6dbd0c055498981f28d4c6",
+      "static_instruction_slots": 44,
+      "temporary_registers": 3,
+      "samplers": [
+        0,
+        1
+      ],
+      "instructions": {
+        "rcp": 2,
+        "mul": 3,
+        "frc": 1,
+        "add": 10,
+        "mov": 8,
+        "texldl": 2,
+        "cmp": 6,
+        "min": 4,
+        "if": 1,
+        "max": 1,
+        "else": 1,
+        "endif": 1
+      }
+    }
+  }
+}

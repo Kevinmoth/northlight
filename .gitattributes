@@ -1,0 +1,2 @@
+# Byte-exact checkouts: hash gates (shader manifests, builders, release verifiers) compare raw bytes.
+* -text

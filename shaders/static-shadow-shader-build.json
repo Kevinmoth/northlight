@@ -1,0 +1,93 @@
+{
+  "source_sha256": "d11ded7248dc73794f1f7345b4472032573f357f4b9809ec0f2f12762b329561",
+  "compiler": "Wine d3dcompiler_47 D3DCompile",
+  "game_launched": false,
+  "shaders": {
+    "StaticCasterVS": {
+      "target": "vs_3_0",
+      "bytes": 928,
+      "sha256": "6158b185c0d3e8a9b2c3de2dd10b1f069af3c3711021605bb47cd644cebf801d",
+      "static_instruction_slots": 40,
+      "temporary_registers": 3,
+      "samplers": [],
+      "instructions": {
+        "mov": 13,
+        "dp4": 3,
+        "mul": 12,
+        "add": 12
+      }
+    },
+    "StaticCasterInstancedVS": {
+      "target": "vs_3_0",
+      "bytes": 832,
+      "sha256": "49575c4b2af2af633fbc535f4234cc45be40703a1d088c0da99a5cf3f38a98b4",
+      "static_instruction_slots": 40,
+      "temporary_registers": 3,
+      "samplers": [],
+      "instructions": {
+        "mov": 13,
+        "dp4": 3,
+        "mul": 12,
+        "add": 12
+      }
+    },
+    "StaticCasterPS": {
+      "target": "ps_3_0",
+      "bytes": 332,
+      "sha256": "a1ef7de03e42ba06dfc0aa7740d94773deb1471aa958a3fc09f197fcb52203f6",
+      "static_instruction_slots": 10,
+      "temporary_registers": 1,
+      "samplers": [
+        0
+      ],
+      "instructions": {
+        "texld": 1,
+        "add": 2,
+        "texkill": 2,
+        "max": 1,
+        "mov": 2
+      }
+    },
+    "StaticCasterFastPS": {
+      "target": "ps_3_0",
+      "bytes": 256,
+      "sha256": "e5feba23f8b70c62fef7476922f14131d8ad2b242a5bbe6c53614e2b096060d3",
+      "static_instruction_slots": 5,
+      "temporary_registers": 1,
+      "samplers": [
+        0
+      ],
+      "instructions": {
+        "texld": 1,
+        "add": 1,
+        "texkill": 1,
+        "mov": 1
+      }
+    },
+    "StaticCasterOpaqueFastPS": {
+      "target": "ps_3_0",
+      "bytes": 100,
+      "sha256": "88e8f923c594a6e8e74b1704709e796801de942d210df815c354ba3c6df72241",
+      "static_instruction_slots": 1,
+      "temporary_registers": 0,
+      "samplers": [],
+      "instructions": {
+        "mov": 1
+      }
+    },
+    "StaticCasterOpaquePS": {
+      "target": "ps_3_0",
+      "bytes": 176,
+      "sha256": "078dc107dbedcc5f24c2af6f601f6ed5129415f0d5944efbf4ff90082dd52d52",
+      "static_instruction_slots": 6,
+      "temporary_registers": 1,
+      "samplers": [],
+      "instructions": {
+        "add": 1,
+        "texkill": 1,
+        "max": 1,
+        "mov": 2
+      }
+    }
+  }
+}

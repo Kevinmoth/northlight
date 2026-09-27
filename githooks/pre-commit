@@ -1,0 +1,23 @@
+#!/bin/bash
+# githooks/pre-commit: refuse staged files > 5 MB and game/binary payloads, and run the
+# layout lint (nothing at a pre-move path, unique basenames, no machine paths in code).
+# Enable once per clone: git config core.hooksPath githooks
+limit=5242880
+status=0
+git diff --cached --name-only --diff-filter=AM -z | while IFS= read -r -d '' f; do
+    size=$(git cat-file -s ":$f" 2>/dev/null || echo 0)
+    if [ "$size" -gt "$limit" ]; then
+        echo "pre-commit: $f is $size bytes (> 5 MB); add it to .gitignore or use --no-verify deliberately." >&2
+        exit 1
+    fi
+    case "$f" in
+        *.mpq|*.MPQ|*.dll|*.exe|*.pdb|*.zip|*.blp|*.m2|*.wmo|*.adt|*.bls|*.dbc|*.skin|*.anim|*.wdt|*.wdl|*.tga|*.fg3|*.fgs|*.frf)
+            echo "pre-commit: $f is a binary/game payload; not tracked in this repository." >&2
+            exit 1;;
+    esac
+done || status=1
+if ! out=$(python3 scripts/check_layout.py 2>&1); then
+    echo "pre-commit: $out" >&2
+    status=1
+fi
+exit $status

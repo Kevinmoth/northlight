@@ -1,0 +1,56 @@
+# Northlight renderer: sources, shaders, build and test tools, tests and the installer pipeline.
+# Build and test output, third-party downloads, machine configuration and local data are
+# ignored: out/, tools/, backups/, archive/, northlight.local.ini, built DLLs and packages.
+# git clean -x would delete those local folders.
+
+# ---- top level: allowlist (new top-level items are ignored until listed) ----
+/*
+!/.gitignore
+!/.gitattributes
+!/githooks/
+!/README.md
+!/LICENSE
+!/*.py
+!/client-config/
+!/renderer/
+!/scripts/
+!/src/
+!/shaders/
+!/tests/
+!/northlight.local.ini.example
+# out/ (build and test output) and northlight.local.ini (machine config) stay ignored by the rule above.
+
+# ---- everywhere: build outputs, caches, binaries, logs ----
+.DS_Store
+__pycache__/
+*.pyc
+.zig-cache/
+zig-cache/
+*.dSYM/
+*.log
+*.o
+*.obj
+*.lib
+*.exp
+*.dll
+*.pdb
+*.exe
+*.zip
+*.tar.gz
+*.mpq
+*.dmp
+*.renderer-tmp
+# local diagnostics and review folders
+northlight-diagnostics/
+rollback-*/
+archived-*/
+runtime-diagnostics-*/
+video-review-*/
+
+# ---- renderer: machine-local state / regenerable game-derived data ----
+/renderer/test_projection
+/renderer/world_shader_signatures.json
+
+# ---- renderer/records: validation evidence and install backups, local only ----
+# Tests read their inputs from tests/fixtures/; records are written with run_tests.py --record.
+/renderer/records/

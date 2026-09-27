@@ -1,0 +1,85 @@
+#pragma once
+#include "world_gi.h"
+#include "local_shadow_signature.h"
+#include <cstdint>
+#include <limits>
+#include <memory>
+#include <set>
+#include <string>
+#include <vector>
+
+namespace NorthlightWorldMeshPages { struct Plan; }
+
+// Worker-thread preparation only. No D3D, game callbacks or mutable global data.
+namespace NorthlightWorldMesh {
+struct Batch {
+    // start is an index-buffer element offset; count is a triangle count.
+    uint32_t start=0,count=0,material=0;
+    // Global ADT chunk X follows world Y, chunk Y follows world X.
+    // -1 means nonterrain, or terrain not provably confined to one chunk.
+    int chunkX=-1,chunkY=-1;
+    bool terrain=false;
+    // Exact bounds of this batch's referenced vertices, prepared on the worker.
+    // Invalid empty defaults fail open in the conservative clip rejection test.
+    NorthlightGI::Vec3 boundsLow={std::numeric_limits<float>::infinity(),std::numeric_limits<float>::infinity(),std::numeric_limits<float>::infinity()};
+    NorthlightGI::Vec3 boundsHigh={-std::numeric_limits<float>::infinity(),-std::numeric_limits<float>::infinity(),-std::numeric_limits<float>::infinity()};
+};
+struct MaterialUpload {
+    uint32_t width=1,height=1;
+    // Tightly packed D3DFMT_A8R8G8B8 memory bytes: B,G,R,A.
+    std::vector<uint8_t> bgra;
+    float alphaCutoff=0;
+    bool terrain=false;
+};
+struct WorldMeshUploadPlan {
+    // Caller must retain the SAME immutable source scene/BVH until upload and
+    // drawing finish. Vertices remain there to avoid a second large CPU copy.
+    const NorthlightGI::WorldScene* source=nullptr;
+    // Optional shadow-only source. GI retains its original local BVH unchanged.
+    std::shared_ptr<const NorthlightGI::WorldScene> ownedSource;
+    std::set<std::pair<int,int>> fixedTerrainChunks;
+    uint32_t vertexCount=0,triangleCount=0;
+    std::vector<uint32_t> indices;
+    std::vector<Batch> batches;
+    // Exactly one slot per original material; indices need no remapping.
+    std::vector<MaterialUpload> materials;
+    // Compact worker-prepared spatial content identities. Commit this pointer
+    // with the corresponding batches/fixedTerrainChunks, never before upload.
+    std::shared_ptr<const NorthlightLocalShadowSignature::Records> localShadowRecords;
+    uint64_t vertexBytes=0,indexBytes=0,textureBytes=0;
+    std::shared_ptr<const NorthlightWorldMeshPages::Plan> pages;
+    uint64_t pagedCpuBytes=0;
+    // Once paged geometry owns its bytes, keep only placement proofs from the
+    // temporary shadow scene. GI continues owning its independent local BVH.
+    std::vector<NorthlightGI::WorldPlacementCoverage> completePlacements;
+    bool pagesSealed=false;
+    uint32_t unmaskableTerrainTriangles=0;
+    // Retirement admission only (not a frame-path traversal). Counts retained
+    // capacity; allocator/control-block overhead is conservatively estimated.
+    uint64_t cpuBytes()const{
+        uint64_t bytes=pagedCpuBytes+sizeof(*this)+indices.capacity()*sizeof(uint32_t)+batches.capacity()*sizeof(Batch)+materials.capacity()*sizeof(MaterialUpload);
+        bytes+=completePlacements.capacity()*sizeof(NorthlightGI::WorldPlacementCoverage);
+        for(const auto& owner:completePlacements)bytes+=owner.modelKey.capacity();
+        for(const auto& material:materials)bytes+=material.bgra.capacity();
+        bytes+=fixedTerrainChunks.size()*(sizeof(std::pair<int,int>)+4*sizeof(void*));
+        if(localShadowRecords)bytes+=sizeof(NorthlightLocalShadowSignature::Records)+localShadowRecords->capacity()*sizeof(NorthlightLocalShadowSignature::Record)+64;
+        if(ownedSource){const auto& s=*ownedSource;
+            bytes+=sizeof(s)+s.vertices.capacity()*sizeof(NorthlightGI::WorldVertex)+s.triangles.capacity()*sizeof(NorthlightGI::WorldTriangle)+s.materials.capacity()*sizeof(NorthlightGI::WorldMaterial)+s.completePlacements.capacity()*sizeof(NorthlightGI::WorldPlacementCoverage)+64;
+            for(const auto& m:s.materials)bytes+=m.rgba.capacity();
+            for(const auto& p:s.completePlacements)bytes+=p.modelKey.capacity();
+        }
+        return bytes;
+    }
+};
+
+// Builds immutable packed indices, exact terrain-chunk batches and upload-ready
+// textures on the worker. Input triangle order is preserved within each batch.
+// Shadow rasterization samples alpha only: opaque materials use a white 1x1
+// texture. Cutout texture colors/alpha are preserved exactly while swizzling.
+// Unknown/cross-chunk terrain stays in an unmaskable batch; it is never hidden
+// merely because one adjacent chunk was submitted by the game.
+// Failure preserves output. Empty scenes are valid plans; no GPU call is made.
+bool buildUploadPlan(const NorthlightGI::WorldScene& source,
+                     WorldMeshUploadPlan& output,std::string& error,
+                     const NorthlightGI::AllocationAdmission& admit = {});
+} // namespace NorthlightWorldMesh

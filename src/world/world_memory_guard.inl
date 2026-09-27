@@ -1,0 +1,28 @@
+    // Memory guard (memory_guard.h): render-thread side. Called only at the frame
+    // boundary, after endFrame() recycled every replay: no capture, draw or GPU
+    // binding of the finished frame still refers to a cache entry. Every cache
+    // here is optional and keyed by identity/version/contents, so a later lookup
+    // misses and rebuilds from the live buffers. Shared immutable snapshots stay
+    // valid for any holder; mesh-keyed caches use weak owners (no ABA reuse).
+    struct MemoryTrim {size_t terrain=0,snapshots=0,indices=0,pool=0,gpu=0;size_t total()const{return terrain+snapshots+indices+pool+gpu;}};
+    bool memoryPressure=false;
+    std::atomic<bool> workerMemoryTrim{false}; /* 0.3.153: the geometry builder thread drops its incremental local-geometry cache on its next request */
+    static constexpr size_t ReplayPoolBytes=48u*1024u*1024u;
+    size_t replayPoolLimit()const{return memoryPressure?ReplayPoolBytes/2:ReplayPoolBytes;}
+    MemoryTrim trimMemory(){
+        MemoryTrim t;
+        {const auto before=terrainBoundsCache.persistentBytes();terrainBoundsCache.clearPersistent();t.terrain=size_t(before-std::min(before,terrainBoundsCache.persistentBytes()));}
+        t.snapshots=replaySnapshots.snapshotCacheBytes();
+        {const auto before=replaySnapshots.indexCacheBytes();replaySnapshots.clearIndexCache();t.indices=before-std::min(before,replaySnapshots.indexCacheBytes());} /* clears snapshots too */
+        t.pool=pooledSnapshotBytes+freeReplays.size()*sizeof(Replay);freeReplays.clear();freeReplays.shrink_to_fit();pooledSnapshotBytes=0;
+        t.gpu=replayGpuCache.bytes();replayGpuCache.clear();
+        workerMemoryTrim.store(true,std::memory_order_relaxed);
+        return t;
+    }
+    // Halved caps while the guard reports pressure; restored on recovery.
+    void setMemoryPressure(bool on){
+        memoryPressure=on;
+        replaySnapshots.setSnapshotCacheLimit(on?NorthlightDrawSnapshot::Frame::SnapshotCacheLimit/2:NorthlightDrawSnapshot::Frame::SnapshotCacheLimit);
+        terrainBoundsCache.setPersistentByteLimit(on?16u*1024u*1024u:32u*1024u*1024u);
+        replayGpuCache.setLimit(on?32u*1024u*1024u:64u*1024u*1024u);
+    }

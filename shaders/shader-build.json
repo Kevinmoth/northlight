@@ -1,0 +1,88 @@
+{
+  "source_sha256": "9281609813d4f1ef55dc584e94ded6e28a93cdba3004d3285d31dc87b6cfe92a",
+  "target": "ps_3_0",
+  "shaders": {
+    "AO": {
+      "bytes": 7716,
+      "sha256": "febb436b779aa24b64783182e210f55218ed71a86e793a74ed56a9cc62244e8e",
+      "static_instruction_slots": 473,
+      "temporary_registers": 14,
+      "instructions": {
+        "mov": 95,
+        "texldl": 8,
+        "add": 119,
+        "mul": 84,
+        "cmp": 55,
+        "if": 3,
+        "max": 15,
+        "rcp": 28,
+        "min": 8,
+        "else": 3,
+        "endif": 3,
+        "abs": 20,
+        "dp3": 3,
+        "rsq": 3,
+        "dp2add": 2,
+        "frc": 2,
+        "rep": 1,
+        "break": 1,
+        "endrep": 1
+      }
+    },
+    "AOContact": {
+      "bytes": 7476,
+      "sha256": "0d3e3b83682838e5018ccaed1abb6ec5d4d20b4d17e471f83ea95bc1d3e4d21d",
+      "static_instruction_slots": 460,
+      "temporary_registers": 12,
+      "instructions": {
+        "mov": 87,
+        "texldl": 7,
+        "add": 118,
+        "mul": 82,
+        "cmp": 55,
+        "if": 3,
+        "max": 15,
+        "rcp": 28,
+        "min": 8,
+        "else": 3,
+        "endif": 3,
+        "abs": 20,
+        "dp3": 3,
+        "rsq": 3,
+        "dp2add": 2,
+        "frc": 2,
+        "rep": 1,
+        "break": 1,
+        "endrep": 1
+      }
+    },
+    "Composite": {
+      "bytes": 7868,
+      "sha256": "500cabe87a43572738f44870ba996b621c3474a8984b919d4cb8db54d0025a56",
+      "static_instruction_slots": 508,
+      "temporary_registers": 20,
+      "instructions": {
+        "mov": 140,
+        "texldl": 13,
+        "add": 101,
+        "mul": 96,
+        "max": 12,
+        "rcp": 29,
+        "cmp": 40,
+        "if": 6,
+        "min": 4,
+        "else": 6,
+        "endif": 6,
+        "dp3": 9,
+        "rsq": 2,
+        "frc": 2,
+        "rep": 1,
+        "break": 1,
+        "abs": 8,
+        "exp": 1,
+        "endrep": 1,
+        "log": 2
+      }
+    }
+  }
+}

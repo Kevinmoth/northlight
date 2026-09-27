@@ -1,0 +1,1434 @@
+{
+  "version": 1,
+  "policy": "Exact model allowlist; fallback only when native extraction supplies no supported light. Steady artistic fire, not source animation playback. Model hue travels with the model across zones.",
+  "sources": [
+    "https://www.nlworks.com/wowbeta/",
+    "https://www.wowhead.com/wotlk/zone=1637/orgrimmar",
+    "https://www.wowhead.com/classic/de/zone=85/tirisfal",
+    "https://www.pcgamer.com/levelling-an-undead-priest-in-wow-classic-is-surprisingly-similar-to-modern-warcraft/"
+  ],
+  "profiles": {
+    "world\\azeroth\\elwynn\\passivedoodads\\lamppost\\lamppost.m2": {
+      "family": "warm_lantern",
+      "asset_sha256": "18dd18ee64fddf161895737edcfb20d8aaf96815e1dd3827c40c16e9d2b309c5",
+      "position": [
+        0.094,
+        0.974,
+        2.861
+      ],
+      "rgb": [
+        1,
+        0.64,
+        0.29
+      ],
+      "intensity": 1.15,
+      "start": 1.0,
+      "end": 12,
+      "position_basis": "installed luminous skin-batch bounds center: world\\azeroth\\elwynn\\passivedoodads\\lamppost\\glow32.blp"
+    },
+    "world\\generic\\human\\passive doodads\\lampposts\\duskwoodlamppost.m2": {
+      "family": "warm_lantern",
+      "asset_sha256": "f73bd6b906d933eaeff7754a402ca719152894e26d70186eea9abdced9fbeafa",
+      "position": [
+        0.094,
+        0.974,
+        2.861
+      ],
+      "rgb": [
+        1,
+        0.64,
+        0.29
+      ],
+      "intensity": 1.15,
+      "start": 1.0,
+      "end": 12,
+      "position_basis": "installed luminous skin-batch bounds center: world\\azeroth\\elwynn\\passivedoodads\\lamppost\\glow32.blp"
+    },
+    "world\\generic\\human\\passive doodads\\lamps\\stormwindstreetlamp01.m2": {
+      "family": "warm_lantern",
+      "asset_sha256": "7241e2596912786a188b2e5204df41420d44a74b0069ac72be04e0d0df28fb91",
+      "position": [
+        0,
+        0.02,
+        4.26
+      ],
+      "rgb": [
+        1,
+        0.64,
+        0.29
+      ],
+      "intensity": 1.15,
+      "start": 1.0,
+      "end": 12,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds",
+      "variants": {
+        "4372625c7ff5c9a9a619390938b3b5c656a5633eb0d8493514675ad390fa36f7": {
+          "asset": "stock 3.3.5a (data/common-2.mpq)",
+          "position": [
+            0.0,
+            0.0,
+            4.348
+          ],
+          "position_basis": "installed luminous skin-batch bounds center: dungeons\\textures\\doodads\\stormwindlampglass.blp (stock lamp glass, unlit; the profile position is the HD lamp-window batch center (-0.004,0.018,4.258))"
+        }
+      }
+    },
+    "world\\generic\\human\\passive doodads\\hanginglanterns\\generalhanginglantern01.m2": {
+      "family": "warm_lantern",
+      "asset_sha256": "0497ac88a59aeb05f1bf8804493d8a82812b0474bc99ca3349548b93515b5404",
+      "position": [
+        0.001,
+        0.005,
+        0.534
+      ],
+      "rgb": [
+        1,
+        0.64,
+        0.29
+      ],
+      "intensity": 1.15,
+      "start": 1.0,
+      "end": 9,
+      "position_basis": "installed luminous skin-batch bounds center: world\\azeroth\\elwynn\\passivedoodads\\lamppost\\glow32.blp"
+    },
+    "world\\generic\\human\\passive doodads\\hanginglanterns\\generalhanginglanternlong.m2": {
+      "family": "warm_lantern",
+      "asset_sha256": "8c50b2052a1b7f7687fb4e8ee144c7fb0165d3f1c29a993b995de1d56ddb250f",
+      "position": [
+        0,
+        0,
+        -2.806
+      ],
+      "rgb": [
+        1,
+        0.64,
+        0.29
+      ],
+      "intensity": 1.15,
+      "start": 1.0,
+      "end": 9,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\human\\passive doodads\\lanterns\\generallantern01.m2": {
+      "family": "warm_lantern",
+      "asset_sha256": "82b80601e1580fcc3ed688c921e245eb26a2af0353fb78f633de8858e3d482ae",
+      "position": [
+        0.012,
+        0.003,
+        0.436
+      ],
+      "rgb": [
+        1,
+        0.64,
+        0.29
+      ],
+      "intensity": 1.15,
+      "start": 1.0,
+      "end": 9,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\human\\passive doodads\\lanterns\\generallantern02.m2": {
+      "family": "warm_lantern",
+      "asset_sha256": "4f11586c3572ac86704e797fa202c4b4f9ea9536d35617696d02f8f464336235",
+      "position": [
+        0.004,
+        0.006,
+        0.436
+      ],
+      "rgb": [
+        1,
+        0.64,
+        0.29
+      ],
+      "intensity": 1.15,
+      "start": 1.0,
+      "end": 9,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\human\\passive doodads\\lanterns\\generallantern03.m2": {
+      "family": "warm_lantern",
+      "asset_sha256": "296cbb8aa056270364da4346a23f2d23f1f3d00afe91249c2f10a4d4f92083e1",
+      "position": [
+        0.004,
+        0.006,
+        0.436
+      ],
+      "rgb": [
+        1,
+        0.64,
+        0.29
+      ],
+      "intensity": 1.15,
+      "start": 1.0,
+      "end": 9,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\human\\passive doodads\\lanterns\\generallantern04.m2": {
+      "family": "warm_lantern",
+      "asset_sha256": "8008717cfd2c097726f842590c25f59814163d14f8f8aea01fffa2be8e28f89f",
+      "position": [
+        0.004,
+        0.006,
+        0.436
+      ],
+      "rgb": [
+        1,
+        0.64,
+        0.29
+      ],
+      "intensity": 1.15,
+      "start": 1.0,
+      "end": 9,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\azeroth\\westfall\\passivedoodads\\lamppost\\westfalllamppost.m2": {
+      "family": "warm_lantern",
+      "asset_sha256": "92f832247b2f3e60b89f22be2ac903d73143bacda405052adab04c9588616e39",
+      "position": [
+        0,
+        0,
+        3.5
+      ],
+      "rgb": [
+        1,
+        0.64,
+        0.29
+      ],
+      "intensity": 1.15,
+      "start": 1.0,
+      "end": 12,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds",
+      "variants": {
+        "a0d067aecfd0ed9fac3e88c251ffdce22b7540fb513b0a7c777ea687cb2e3d30": {
+          "asset": "stock 3.3.5a (data/common-2.mpq)",
+          "position": [
+            0.031,
+            0.006,
+            3.47
+          ],
+          "position_basis": "installed luminous skin-batch bounds center: world\\generic\\passivedoodads\\lights\\gloworange32.blp (stock glow halo around the lantern, as lamppost.m2 glow32.blp; the HD model is one garrison-lamp batch with no glow)"
+        }
+      }
+    },
+    "world\\azeroth\\westfall\\passivedoodads\\lamppost\\westfalllamppost01.m2": {
+      "family": "warm_lantern",
+      "asset_sha256": "7316e75aff91ea9340b5ee8d76660804fa90e64a3bb5f3841ddd639fe4896154",
+      "position": [
+        0,
+        0,
+        3.5
+      ],
+      "rgb": [
+        1,
+        0.64,
+        0.29
+      ],
+      "intensity": 1.15,
+      "start": 1.0,
+      "end": 12,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds",
+      "variants": {
+        "e9b569ef21db8ebc8f84418cb4c0920fb675d18b03f3eb8821442fb60948b987": {
+          "asset": "stock 3.3.5a (data/common-2.mpq)",
+          "position": [
+            0.003,
+            -0.012,
+            3.387
+          ],
+          "position_basis": "installed luminous skin-batch bounds center: item\\objectcomponents\\weapon\\misc_1h_lantern_b_01silver.blp (stock lantern body, unlit additive; this variant has no glow halo)"
+        }
+      }
+    },
+    "world\\azeroth\\westfall\\passivedoodads\\lamppost\\westfalllamppost02.m2": {
+      "family": "warm_lantern",
+      "asset_sha256": "92f832247b2f3e60b89f22be2ac903d73143bacda405052adab04c9588616e39",
+      "position": [
+        0,
+        0,
+        3.5
+      ],
+      "rgb": [
+        1,
+        0.64,
+        0.29
+      ],
+      "intensity": 1.15,
+      "start": 1.0,
+      "end": 12,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds",
+      "variants": {
+        "65180bd787f2e996977b2e44259752b0f7f93d3f4fef3f963bbd705a99f75512": {
+          "asset": "stock 3.3.5a (data/common-2.mpq)",
+          "position": [
+            0.03,
+            0.005,
+            3.469
+          ],
+          "position_basis": "installed luminous skin-batch bounds center: world\\generic\\passivedoodads\\lights\\gloworange32.blp (stock glow halo around the lantern, as lamppost.m2 glow32.blp; the HD model is one garrison-lamp batch with no glow)"
+        }
+      }
+    },
+    "world\\expansion02\\doodads\\generic\\human\\lamppost\\hu_lamppost_northrend.m2": {
+      "family": "warm_lantern",
+      "asset_sha256": "556c50e6288d19e9c83968addd3304125e7b64fc2c2b1f3187a7752a8ff14566",
+      "position": [
+        0.498,
+        0.011,
+        1.665
+      ],
+      "rgb": [
+        1,
+        0.64,
+        0.29
+      ],
+      "intensity": 1.15,
+      "start": 1.0,
+      "end": 12,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\expansion02\\doodads\\generic\\human\\lamppost\\hu_lamp_arm_northrend.m2": {
+      "family": "warm_lantern",
+      "asset_sha256": "a9638b6d5badfb1b8e7a97d78759d1c8f4c2d589474a682eafb18a5a09c08717",
+      "position": [
+        0.429,
+        0.015,
+        2.061
+      ],
+      "rgb": [
+        1,
+        0.64,
+        0.29
+      ],
+      "intensity": 1.15,
+      "start": 1.0,
+      "end": 12,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\azeroth\\stranglethorn\\passivedoodads\\diamondminewalllantern\\diamondminewalllantern.m2": {
+      "family": "warm_lantern",
+      "asset_sha256": "50d5c516df11f42cc6dce645ad1ea7e2747f15d8da2ac7c15cb0ec824980901c",
+      "position": [
+        0.286,
+        -0.008,
+        0.242
+      ],
+      "rgb": [
+        1,
+        0.64,
+        0.29
+      ],
+      "intensity": 1.15,
+      "start": 1.0,
+      "end": 9,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\human\\passive doodads\\lamps\\tirisfallstreetlamp01.m2": {
+      "family": "violet_lantern",
+      "asset_sha256": "e96d88fbe3733e01b5c5ce682e7428f29b47ff92bdced1b37f2eee568674a16b",
+      "position": [
+        -0.01,
+        -0.01,
+        4.26
+      ],
+      "rgb": [
+        0.65,
+        0.25,
+        1
+      ],
+      "intensity": 1.05,
+      "start": 1.0,
+      "end": 12,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds",
+      "variants": {
+        "44504173e57866be2bd1a51a6b2261417257d64d60242343df03434cee04f869": {
+          "asset": "stock 3.3.5a (data/common-2.mpq)",
+          "family": "green_lantern",
+          "position": [
+            0.0,
+            0.0,
+            4.348
+          ],
+          "rgb": [
+            0.63,
+            1,
+            0.27
+          ],
+          "position_basis": "installed luminous skin-batch bounds center: world\\generic\\human\\passive doodads\\lamps\\silverpinelampposttop01.blp (stock lamp glass, unlit; the profile position is the HD lamp-window batch center (-0.01,-0.009,4.258). Green, not violet: the stock glass is yellow-green (linear mean .63,1,.27) with a glowgreen32.blp halo, where the HD window is purple)"
+        }
+      }
+    },
+    "world\\expansion02\\doodads\\generic\\forsaken\\fk_lamppost.m2": {
+      "family": "violet_lantern",
+      "asset_sha256": "da33c7d282eff4858482661c7912b67ed164845e34aac63d2e873fa036a2c1a4",
+      "position": [
+        -0.014,
+        -0.01,
+        2.339
+      ],
+      "rgb": [
+        0.65,
+        0.25,
+        1
+      ],
+      "intensity": 1.05,
+      "start": 1.0,
+      "end": 12,
+      "position_basis": "installed luminous skin-batch bounds center: world\\azeroth\\elwynn\\passivedoodads\\lamppost\\glow32.blp"
+    },
+    "world\\expansion01\\doodads\\ghostlands\\lampposts\\be_lamppost_ghostlands01.m2": {
+      "family": "violet_lantern",
+      "asset_sha256": "3ad2f616a08bad06f15679943f665de4c1f6e63c1503e00fa6752d09fe411d6b",
+      "position": [
+        0.772,
+        -0.1,
+        2.022
+      ],
+      "rgb": [
+        0.65,
+        0.25,
+        1
+      ],
+      "intensity": 1.05,
+      "start": 1.0,
+      "end": 12,
+      "position_basis": "installed luminous skin-batch bounds center: spells\\genericglow64.blp"
+    },
+    "world\\expansion01\\doodads\\ghostlands\\lampposts\\be_lamppost_ghostlands02.m2": {
+      "family": "violet_lantern",
+      "asset_sha256": "3d8499e6336a6ed9f442de33512710abee392ea86f366adb8d6d28510dbe5969",
+      "position": [
+        0.772,
+        -0.1,
+        2.022
+      ],
+      "rgb": [
+        0.65,
+        0.25,
+        1
+      ],
+      "intensity": 1.05,
+      "start": 1.0,
+      "end": 12,
+      "position_basis": "installed luminous skin-batch bounds center: spells\\genericglow64.blp"
+    },
+    "world\\generic\\nightelf\\passive doodads\\lamps\\kalidarstreetlamp01.m2": {
+      "family": "blue_lantern",
+      "asset_sha256": "39cc6648bf36ed959ffd6acf07640991eabb3e0ee9c603b844074be67b94d04c",
+      "position": [
+        -0.075,
+        -1.238,
+        4.601
+      ],
+      "rgb": [
+        0.29,
+        0.65,
+        1
+      ],
+      "intensity": 1.0,
+      "start": 1.0,
+      "end": 12,
+      "position_basis": "installed luminous skin-batch bounds center: world\\generic\\nightelf\\passive doodads\\lamps\\glowblue32.blp"
+    },
+    "world\\generic\\nightelf\\passive doodads\\lamps\\kalidarstreetlamp02.m2": {
+      "family": "blue_lantern",
+      "asset_sha256": "76200fe388b244411a21d5b3a3eeeee997ad777fcaea61491759e42502ffa784",
+      "position": [
+        -0.008,
+        0.101,
+        4.174
+      ],
+      "rgb": [
+        0.29,
+        0.65,
+        1
+      ],
+      "intensity": 1.0,
+      "start": 1.0,
+      "end": 12,
+      "position_basis": "installed luminous skin-batch bounds center: world\\generic\\nightelf\\passive doodads\\lamps\\glowblue32.blp"
+    },
+    "world\\generic\\nightelf\\passive doodads\\lamps\\darnassusstreetlamp01.m2": {
+      "family": "blue_lantern",
+      "asset_sha256": "8269a1b928a453e98d2644db442f0fc8ccc752251a82336cf553ac7980289c00",
+      "position": [
+        0.013,
+        -0.48,
+        4.724
+      ],
+      "rgb": [
+        0.29,
+        0.65,
+        1
+      ],
+      "intensity": 1.0,
+      "start": 1.0,
+      "end": 12,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\nightelf\\passive doodads\\lamps\\darnassusstreetlamp02.m2": {
+      "family": "blue_lantern",
+      "asset_sha256": "57cf883614c68e03f51e126f1715be77c9e22c1fffcb462dd3c977e1e1cc3f6b",
+      "position": [
+        0.003,
+        -0.026,
+        5.381
+      ],
+      "rgb": [
+        0.29,
+        0.65,
+        1
+      ],
+      "intensity": 1.0,
+      "start": 1.0,
+      "end": 12,
+      "position_basis": "installed luminous skin-batch bounds center: world\\generic\\nightelf\\passive doodads\\lamps\\glowblue32.blp"
+    },
+    "world\\generic\\nightelf\\passive doodads\\lanterns\\nightelfhanginglantern.m2": {
+      "family": "blue_lantern",
+      "asset_sha256": "d69c6440aa5bf4049ba318cbb6b31ed0204eeeab1e64c0463c1d5679354728e3",
+      "position": [
+        -0.025,
+        0.003,
+        -2.138
+      ],
+      "rgb": [
+        0.29,
+        0.65,
+        1
+      ],
+      "intensity": 1.0,
+      "start": 1.0,
+      "end": 9,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\nightelf\\passive doodads\\lanterns\\nightelflantern01.m2": {
+      "family": "blue_lantern",
+      "asset_sha256": "9e75195d722c70cdb4bed7d2a36ba3e181ce91097a6c1dd133feda4147d8c4f7",
+      "position": [
+        0.05,
+        0,
+        1.3
+      ],
+      "rgb": [
+        0.29,
+        0.65,
+        1
+      ],
+      "intensity": 1.0,
+      "start": 1.0,
+      "end": 9,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\environment\\doodad\\generaldoodads\\nightelflanternblue\\ne_lanternblue01.m2": {
+      "family": "blue_lantern",
+      "asset_sha256": "ad6ee30ba2e55043be9e7d967e4b3332ebde0780b790df32a02cfb3bbf8b05bb",
+      "position": [
+        -0.034,
+        0.012,
+        -1.19
+      ],
+      "rgb": [
+        0.29,
+        0.65,
+        1
+      ],
+      "intensity": 1.0,
+      "start": 1.0,
+      "end": 9,
+      "position_basis": "installed luminous skin-batch bounds center: world\\generic\\nightelf\\passive doodads\\lamps\\glowblue32.blp"
+    },
+    "world\\expansion01\\doodads\\generic\\draenei\\lampposts\\dr_lamppost_01.m2": {
+      "family": "arcane_lantern",
+      "asset_sha256": "083f38195458db1a206720d36bda0a326c84ef4e3b66d0484f53d85e1e92e33e",
+      "position": [
+        0.197,
+        0.104,
+        2.464
+      ],
+      "rgb": [
+        0.59,
+        0.35,
+        1
+      ],
+      "intensity": 1.0,
+      "start": 1.0,
+      "end": 11,
+      "position_basis": "installed luminous skin-batch bounds center: spells\\genericglow64.blp"
+    },
+    "world\\expansion01\\doodads\\generic\\draenei\\lampposts\\dr_lamppost_02.m2": {
+      "family": "arcane_lantern",
+      "asset_sha256": "b5ab41c09ad284068bfd564421ca798255b728fc9eac0908c52ce15b3a2c0da1",
+      "position": [
+        0.391,
+        0.531,
+        2.477
+      ],
+      "rgb": [
+        0.59,
+        0.35,
+        1
+      ],
+      "intensity": 1.0,
+      "start": 1.0,
+      "end": 11,
+      "position_basis": "installed luminous skin-batch bounds center: spells\\genericglow64.blp"
+    },
+    "world\\expansion01\\doodads\\generic\\draenei\\lanterns\\dr_lantern_01.m2": {
+      "family": "arcane_lantern",
+      "asset_sha256": "8d34bc1f8bb4ffc4f8fdc6623228a9dda685ff1b9dbaba7b750cc4deff9161ef",
+      "position": [
+        -0.224,
+        -0.004,
+        0.184
+      ],
+      "rgb": [
+        0.59,
+        0.35,
+        1
+      ],
+      "intensity": 1.0,
+      "start": 1.0,
+      "end": 9,
+      "position_basis": "installed luminous skin-batch bounds center: spells\\genericglow64.blp"
+    },
+    "world\\expansion01\\doodads\\eversong\\lamppost\\be_lamppost_eversong01.m2": {
+      "family": "gold_lantern",
+      "asset_sha256": "55f170dc8cdb105492c518026d6916f583319af461b6fd598b4acfe31ccb60d4",
+      "position": [
+        0.844,
+        -0.097,
+        2.014
+      ],
+      "rgb": [
+        1,
+        0.67,
+        0.35
+      ],
+      "intensity": 1.0,
+      "start": 1.0,
+      "end": 11,
+      "position_basis": "installed luminous skin-batch bounds center: spells\\genericglow64.blp"
+    },
+    "world\\expansion01\\doodads\\eversong\\lamppost\\be_lamppost_eversong01-optimized.m2": {
+      "family": "gold_lantern",
+      "asset_sha256": "e029e1031171fba2c29c1798574beeec3c2a3b299f2c9decf4831efdcaf0d392",
+      "position": [
+        1.044,
+        -0.097,
+        1.936
+      ],
+      "rgb": [
+        1,
+        0.67,
+        0.35
+      ],
+      "intensity": 1.0,
+      "start": 1.0,
+      "end": 11,
+      "position_basis": "installed luminous skin-batch bounds center: spells\\genericglow64.blp"
+    },
+    "world\\expansion01\\doodads\\generic\\bloodelf\\lantern\\be_lantern01.m2": {
+      "family": "gold_lantern",
+      "asset_sha256": "d56071ce43775327cf901587e0b36db6503521d070d33eca78be35c722a5decf",
+      "position": [
+        0.103,
+        0.01,
+        0.264
+      ],
+      "rgb": [
+        1,
+        0.67,
+        0.35
+      ],
+      "intensity": 1.0,
+      "start": 1.0,
+      "end": 9,
+      "position_basis": "installed luminous skin-batch bounds center: spells\\genericglow64.blp"
+    },
+    "world\\generic\\orc\\passive doodads\\lampposts\\orcbrazierstreetlamp.m2": {
+      "family": "fire",
+      "asset_sha256": "22b419d850e1d9c996b5940c55a63bc5f661024a58f4ea210baaec4db6a3f161",
+      "position": [
+        0,
+        0,
+        1.35
+      ],
+      "rgb": [
+        1,
+        0.43,
+        0.12
+      ],
+      "intensity": 1.35,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\orc\\passive doodads\\lampposts\\orcbrazierlamppost01.m2": {
+      "family": "fire",
+      "asset_sha256": "1163539adefd22aeadbcf7f0f07dadd4afb8474f8a441dc61d39ccc18a792a71",
+      "position": [
+        0,
+        0,
+        3.4
+      ],
+      "rgb": [
+        1,
+        0.43,
+        0.12
+      ],
+      "intensity": 1.35,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\orc\\passive doodads\\lampposts\\orcbrazier_lightpostbarrens.m2": {
+      "family": "fire",
+      "asset_sha256": "8f68d41fbb68f7e64366cd411a73661f3855fc9b65921bcf7856b8c1aa0a7b5c",
+      "position": [
+        0,
+        0,
+        3.4
+      ],
+      "rgb": [
+        1,
+        0.43,
+        0.12
+      ],
+      "intensity": 1.35,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\orc\\passive doodads\\lanterns\\orchanginglantern.m2": {
+      "family": "fire",
+      "asset_sha256": "bb81f2f8bf3547b22caf8a9fb799db53c4091e875fb8aaab26296837765a22a7",
+      "position": [
+        -0.65,
+        -0.08,
+        1.8
+      ],
+      "rgb": [
+        1,
+        0.43,
+        0.12
+      ],
+      "intensity": 1.35,
+      "start": 1.0,
+      "end": 9,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\orc\\passive doodads\\braziers\\mediumbrazier01.m2": {
+      "family": "fire",
+      "asset_sha256": "19314f994adb266766706780128e4d1a02ba531c026ab4f2082ac350887a01b9",
+      "position": [
+        0,
+        0,
+        2.65
+      ],
+      "rgb": [
+        1,
+        0.43,
+        0.12
+      ],
+      "intensity": 1.35,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\orc\\passive doodads\\braziers\\mediumbraziernoomni01.m2": {
+      "family": "fire",
+      "asset_sha256": "392c208bd54c30e1e0030e7825ca25e95399f33335e50a70dd953600dc1c499e",
+      "position": [
+        0,
+        0,
+        2.65
+      ],
+      "rgb": [
+        1,
+        0.43,
+        0.12
+      ],
+      "intensity": 1.35,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\orc\\passive doodads\\braziers\\smallbrazier01.m2": {
+      "family": "fire",
+      "asset_sha256": "308f0f2482fdfae9795beb622581b203468f79e47bc4f2c0471b3628448654ac",
+      "position": [
+        0,
+        0,
+        1.55
+      ],
+      "rgb": [
+        1,
+        0.43,
+        0.12
+      ],
+      "intensity": 1.35,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\orc\\passive doodads\\braziers\\smallbraziernoomni01.m2": {
+      "family": "fire",
+      "asset_sha256": "7e634cd1d23234e5f0ad708118bd0026094223401ca242615f1d4399047ede8f",
+      "position": [
+        0,
+        0,
+        1.55
+      ],
+      "rgb": [
+        1,
+        0.43,
+        0.12
+      ],
+      "intensity": 1.35,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\orc\\passive doodads\\braziers\\tallbrazier01.m2": {
+      "family": "fire",
+      "asset_sha256": "bd3b4cbb2a78ed90750b62b1739082c4d20a3e4f95bb2e287c3f8c32b1382231",
+      "position": [
+        0,
+        0,
+        2.7
+      ],
+      "rgb": [
+        1,
+        0.43,
+        0.12
+      ],
+      "intensity": 1.35,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\orc\\passive doodads\\braziers\\tallbraziernoomni01.m2": {
+      "family": "fire",
+      "asset_sha256": "a7d330172da7759da1abbe4a28989ea7859891be0895676819bf5a35e90e0647",
+      "position": [
+        0,
+        0,
+        2.7
+      ],
+      "rgb": [
+        1,
+        0.43,
+        0.12
+      ],
+      "intensity": 1.35,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\passivedoodads\\lights\\freestandingtorch01.m2": {
+      "family": "fire",
+      "asset_sha256": "a23dce05dbb398469a4afe5fb9305d85e04edf1474d6d1dd54d52c795f65dc2b",
+      "position": [
+        0,
+        0,
+        2.25
+      ],
+      "rgb": [
+        1,
+        0.43,
+        0.12
+      ],
+      "intensity": 1.08,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\passivedoodads\\lights\\generaltorch01.m2": {
+      "family": "fire",
+      "asset_sha256": "9620efb54b6c5e22838b4ac0a13f27f59f5aefe389f4147446ad4510fab42b22",
+      "position": [
+        0,
+        0,
+        2
+      ],
+      "rgb": [
+        1,
+        0.43,
+        0.12
+      ],
+      "intensity": 1.08,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\ogre\\passive doodads\\torches\\ogrewalltorch.m2": {
+      "family": "fire",
+      "asset_sha256": "45612529fd3ba443b6cbcb126ea726ef3098c5222753723be79e95dbfe9d74d4",
+      "position": [
+        -0.25,
+        0,
+        2.2
+      ],
+      "rgb": [
+        1,
+        0.43,
+        0.12
+      ],
+      "intensity": 1.35,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\ogre\\passive doodads\\torches\\ogrewalltorchred.m2": {
+      "family": "fire",
+      "asset_sha256": "816fcd08b2ae2905cdedc4983d81803842e88fd27388805e3402774aa7f9ebe4",
+      "position": [
+        -0.25,
+        0,
+        2.3
+      ],
+      "rgb": [
+        1,
+        0.43,
+        0.12
+      ],
+      "intensity": 1.35,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\tauren\\passive doodads\\lampposts\\taurenlamppost.m2": {
+      "family": "fire",
+      "asset_sha256": "492303c0be3b50cd635351b50b87139de6094eca5b85514a790abfeecaa2eae2",
+      "position": [
+        0.06,
+        -1.04,
+        0.65
+      ],
+      "rgb": [
+        1,
+        0.43,
+        0.12
+      ],
+      "intensity": 1.35,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\tauren\\passive doodads\\lampposts\\taurenlamppost02.m2": {
+      "family": "fire",
+      "asset_sha256": "80239174cd2cc78170a3c5330adad4625e39a4046fdcbbc4edb5f60690121b71",
+      "position": [
+        0,
+        0,
+        2.35
+      ],
+      "rgb": [
+        1,
+        0.43,
+        0.12
+      ],
+      "intensity": 1.35,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\human\\passive doodads\\braziers\\stormwindbrazier01.m2": {
+      "family": "fire",
+      "asset_sha256": "115b741fe15097700073f8f7d906acdc07746d64106b555f9d0af35a0a3fb1cc",
+      "position": [
+        0,
+        0,
+        0.85
+      ],
+      "rgb": [
+        1,
+        0.43,
+        0.12
+      ],
+      "intensity": 1.35,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\dwarf\\passive doodads\\braziers\\dwarvenbrazier01.m2": {
+      "family": "fire",
+      "asset_sha256": "610c6e9ef81b8b11c7e2dd53570b1559a5560a1b2576c9b817fc1f8a15e5ce45",
+      "position": [
+        0,
+        0,
+        1.5
+      ],
+      "rgb": [
+        1,
+        0.43,
+        0.12
+      ],
+      "intensity": 1.35,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\dwarf\\passive doodads\\braziers\\dwarvenbrazier02.m2": {
+      "family": "fire",
+      "asset_sha256": "4b541f0d9c146764e06e9d24f4697bf69adacaff93b8093aeaaf0551799337eb",
+      "position": [
+        0,
+        0,
+        1.5
+      ],
+      "rgb": [
+        1,
+        0.43,
+        0.12
+      ],
+      "intensity": 1.35,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\dwarf\\passive doodads\\braziers\\stormwinddwarfbrazier.m2": {
+      "family": "fire",
+      "asset_sha256": "b1b1ddcadffd63edb8f34dbcd50968008d33e68060fadcf0287f1d211df4fb74",
+      "position": [
+        0,
+        0,
+        1.5
+      ],
+      "rgb": [
+        1,
+        0.43,
+        0.12
+      ],
+      "intensity": 1.35,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\azeroth\\elwynn\\passivedoodads\\campfire\\elwynncampfire.m2": {
+      "family": "fire",
+      "asset_sha256": "8ec77d2ebb8e3dc79f48b1b895dd40996c6381300d41a4711dbd3f76fad6ac58",
+      "position": [
+        0,
+        0,
+        0.8
+      ],
+      "rgb": [
+        1,
+        0.43,
+        0.12
+      ],
+      "intensity": 1.35,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds",
+      "variants": {
+        "527e12ce9581b27b52f2d9021c24dc2728192c75fce1ba148e6d0934f720b98c": {
+          "asset": "stock 3.3.5a (data/common-2.mpq)",
+          "position": [
+            0,
+            0,
+            0.8
+          ],
+          "position_basis": "authored flame offset of elwynncampfire_blue.m2 (0,0,0.8), whose skin batches and bounds are identical to this stock model (rocks top z .712, wood center z .173); the stock native light has an animated track, so the profile applies"
+        }
+      }
+    },
+    "world\\generic\\human\\passive doodads\\fire\\undeadcampfire.m2": {
+      "family": "fire",
+      "asset_sha256": "640723ad4b49fc9208a61868f2b24c5c0ee4c50471a7f4eed390085c0a55c90e",
+      "position": [
+        0,
+        0,
+        0.7
+      ],
+      "rgb": [
+        1,
+        0.43,
+        0.12
+      ],
+      "intensity": 1.35,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\expansion02\\doodads\\generic\\northrend fires\\northrendelwynncampfire.m2": {
+      "family": "fire",
+      "asset_sha256": "47735a80d0370b1e35590f7480b54b0b85d3eeb4361c31661ac68d5cf212220c",
+      "position": [
+        0,
+        0,
+        0.8
+      ],
+      "rgb": [
+        1,
+        0.43,
+        0.12
+      ],
+      "intensity": 1.35,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\expansion02\\doodads\\generic\\northrend fires\\northrendgeneraltorch01.m2": {
+      "family": "fire",
+      "asset_sha256": "e2b3772d36701e6b69148d5fd71888e59aa86c9705ef231c47d6e3bf2479cce2",
+      "position": [
+        0,
+        0,
+        2.15
+      ],
+      "rgb": [
+        1,
+        0.43,
+        0.12
+      ],
+      "intensity": 1.35,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\kalimdor\\orgrimmar\\passivedoodads\\orgrimmarbonfire\\orgrimmarbonfire01.m2": {
+      "family": "bonfire",
+      "asset_sha256": "3c709bde4ee885e2f8efa85190800c8ee26d38e4fa199c057938750a72f2245b",
+      "position": [
+        0.125,
+        -0.238,
+        2.1
+      ],
+      "rgb": [
+        1,
+        0.42,
+        0.1
+      ],
+      "intensity": 1.65,
+      "start": 1.0,
+      "end": 20,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\azeroth\\burningsteppes\\passivedoodads\\bonfire\\orcbonfire.m2": {
+      "family": "bonfire",
+      "asset_sha256": "695c274b3ae36a178c56d1f4cb286d5efbaacc8e6c7721acd7bc668641cff755",
+      "position": [
+        0,
+        0,
+        1.5
+      ],
+      "rgb": [
+        1,
+        0.42,
+        0.1
+      ],
+      "intensity": 1.65,
+      "start": 1.0,
+      "end": 20,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\orc\\passive doodads\\firepits\\largefirepit01.m2": {
+      "family": "bonfire",
+      "asset_sha256": "b041266cb6e9c2ddecebbf26c859d2adf18a372e2b729f7bf17115175fc4dfb9",
+      "position": [
+        0,
+        0,
+        1.1
+      ],
+      "rgb": [
+        1,
+        0.42,
+        0.1
+      ],
+      "intensity": 1.65,
+      "start": 1.0,
+      "end": 20,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\orc\\passive doodads\\braziers\\orcbrazier_campfire01.m2": {
+      "family": "bonfire",
+      "asset_sha256": "d59f1c0ee43024ee6e952bcd090c6aefc6efe6f35523664212721533d6590a36",
+      "position": [
+        0,
+        0,
+        1.5
+      ],
+      "rgb": [
+        1,
+        0.42,
+        0.1
+      ],
+      "intensity": 1.65,
+      "start": 1.0,
+      "end": 20,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\expansion02\\doodads\\generic\\bonfire\\bonfirenorthrend_01.m2": {
+      "family": "bonfire",
+      "asset_sha256": "96ddb952327f66c20b70037efedf1c51147c797add2b11d35d2322aaff10f1c5",
+      "position": [
+        0,
+        0,
+        2
+      ],
+      "rgb": [
+        1,
+        0.42,
+        0.1
+      ],
+      "intensity": 1.65,
+      "start": 1.0,
+      "end": 20,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\orc\\passive doodads\\braziers\\mediumbrazierpurple01.m2": {
+      "family": "magic_blue",
+      "asset_sha256": "94203c2a8b946d2bb085c543a7100a497284838a1bb20bdb19eb4ca7cde4462d",
+      "position": [
+        0,
+        0,
+        2.65
+      ],
+      "rgb": [
+        0.25,
+        0.47,
+        1
+      ],
+      "intensity": 1.2,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\orc\\passive doodads\\braziers\\smallbrazierpurple01.m2": {
+      "family": "magic_blue",
+      "asset_sha256": "535c2b17dba9249e5d4d019a60d3aa27e2cc43ee8380cd0a0064d9336db50ec4",
+      "position": [
+        0,
+        0,
+        1.55
+      ],
+      "rgb": [
+        0.25,
+        0.47,
+        1
+      ],
+      "intensity": 1.2,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\orc\\passive doodads\\braziers\\smallbrazierpurplehanging.m2": {
+      "family": "magic_blue",
+      "asset_sha256": "09754a6a96406f68a9197a8107a79f28d101be2b39d4674a5f6b2c08916f87c5",
+      "position": [
+        0,
+        0,
+        1.5
+      ],
+      "rgb": [
+        0.25,
+        0.47,
+        1
+      ],
+      "intensity": 1.2,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\ogre\\passive doodads\\torches\\ogrewalltorchblue.m2": {
+      "family": "magic_blue",
+      "asset_sha256": "b9dbce6d787b32ce3afe3fa71be727bb0604eed05759467b426faa57565d4075",
+      "position": [
+        -0.25,
+        0,
+        2.3
+      ],
+      "rgb": [
+        0.25,
+        0.47,
+        1
+      ],
+      "intensity": 1.2,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\azeroth\\elwynn\\passivedoodads\\campfire\\elwynncampfire_blue.m2": {
+      "family": "magic_blue",
+      "asset_sha256": "791cde9558c7ba32ae4f90dd1817e48cd91512a0bc5885ec2925cb0f01696766",
+      "position": [
+        0,
+        0,
+        0.8
+      ],
+      "rgb": [
+        0.25,
+        0.47,
+        1
+      ],
+      "intensity": 1.2,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\expansion02\\doodads\\generic\\northrend fires\\northrendelwynncampfire_blue.m2": {
+      "family": "magic_blue",
+      "asset_sha256": "d0fc691ba642e87f6a0aa5e3bc06dfaf87d57063bec10968fc3370860841756a",
+      "position": [
+        0,
+        0,
+        0.8
+      ],
+      "rgb": [
+        0.25,
+        0.47,
+        1
+      ],
+      "intensity": 1.2,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\azeroth\\burningsteppes\\passivedoodads\\bonfire\\orcbonfire_blue.m2": {
+      "family": "magic_blue",
+      "asset_sha256": "32118e49e9d4b331cd587250015ccc251546786f8a3ee3670a941d8db221451c",
+      "position": [
+        0,
+        0,
+        1.5
+      ],
+      "rgb": [
+        0.25,
+        0.47,
+        1
+      ],
+      "intensity": 1.2,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\expansion02\\doodads\\generic\\vrykul\\brazier\\vr_brazier_01_blue.m2": {
+      "family": "magic_blue",
+      "asset_sha256": "f1755049bc19595b3cd2e47dd9d43f5500c06388b118d4b24ccbd1051caf05e8",
+      "position": [
+        0,
+        0,
+        2
+      ],
+      "rgb": [
+        0.25,
+        0.47,
+        1
+      ],
+      "intensity": 1.2,
+      "start": 1.0,
+      "end": 13,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\ogre\\passive doodads\\torches\\ogrewalltorchpurple.m2": {
+      "family": "magic_violet",
+      "asset_sha256": "63d254edba9297b0762e38c2574194b842c04f353cc00f829c227850d0d168c5",
+      "position": [
+        -0.2,
+        0,
+        2.3
+      ],
+      "rgb": [
+        0.67,
+        0.26,
+        1
+      ],
+      "intensity": 1.1,
+      "start": 1.0,
+      "end": 12,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\lordaeron\\scholomance\\passivedoodads\\brazier\\scholomancebrazier01purple.m2": {
+      "family": "magic_violet",
+      "asset_sha256": "321bd948094f6093b2bc6de30eaee39e3c94d1d9302a72efc2ad5b15d0f4d2f3",
+      "position": [
+        0.129,
+        -0.004,
+        1.852
+      ],
+      "rgb": [
+        0.67,
+        0.26,
+        1
+      ],
+      "intensity": 1.1,
+      "start": 1.0,
+      "end": 12,
+      "position_basis": "installed luminous skin-batch bounds center: world\\generic\\human\\passive doodads\\candelabras\\glowwhite32.blp"
+    },
+    "world\\generic\\ogre\\passive doodads\\torches\\ogrewalltorchgreen.m2": {
+      "family": "magic_green",
+      "asset_sha256": "a79fe77444e8bdbcf1e03f831234b3c0e1619b719494b803775cfa7f1d9d8c2c",
+      "position": [
+        -0.2,
+        0,
+        2.3
+      ],
+      "rgb": [
+        0.35,
+        1,
+        0.25
+      ],
+      "intensity": 1.1,
+      "start": 1.0,
+      "end": 12,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\lordaeron\\scholomance\\passivedoodads\\brazier\\scholomancebrazier01green.m2": {
+      "family": "magic_green",
+      "asset_sha256": "496464a7f2b677acb498fe53638f84d7749fa6e8cdb0ea761a1b48bafad9c01c",
+      "position": [
+        0.129,
+        -0.004,
+        1.847
+      ],
+      "rgb": [
+        0.35,
+        1,
+        0.25
+      ],
+      "intensity": 1.1,
+      "start": 1.0,
+      "end": 12,
+      "position_basis": "installed luminous skin-batch bounds center: world\\generic\\human\\passive doodads\\candelabras\\glowwhite32.blp"
+    },
+    "world\\generic\\human\\passive doodads\\braziers\\humanbraziercorrupt.m2": {
+      "family": "magic_green",
+      "asset_sha256": "dcc72aa7292b608273645c7f7192f814450aeef2b316ece59b9f096ec6c97210",
+      "position": [
+        0,
+        0,
+        0.9
+      ],
+      "rgb": [
+        0.35,
+        1,
+        0.25
+      ],
+      "intensity": 1.1,
+      "start": 1.0,
+      "end": 12,
+      "position_basis": "authored flame/bulb offset reviewed against installed mesh bounds"
+    },
+    "world\\generic\\passivedoodads\\lights\\torch.m2": {
+      "family": "warm_fire",
+      "asset_sha256": "d635955bd1e1a9c7ef29108a566115b5a8b44c394aff86f87fd12122cf215d7e",
+      "position": [
+        -0.008311,
+        -0.000961,
+        1.02
+      ],
+      "rgb": [
+        1,
+        0.52,
+        0.2
+      ],
+      "intensity": 1.15,
+      "start": 1.0,
+      "end": 10,
+      "position_basis": "Installed particle emitter z=.7555, centered slightly above emission at z=1.02 inside luminous glow bounds .481..1.556; wall-mounted torch.m2, distinct from generaltorch01.m2"
+    }
+  }
+}

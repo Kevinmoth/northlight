@@ -1,0 +1,1419 @@
+{
+  "variants_seen": 138,
+  "unique": 72,
+  "accepted": [
+    {
+      "hash": "154c2ea13c397f03",
+      "wordCount": 366,
+      "patched_fnv1a64": "9dbe80eb94553990",
+      "patched_sha256": "98a82d78c23389d1a33ff21e1096b1c5c7a869702aa34e24a4c2551ee064deaf",
+      "model": 3,
+      "vertex": false,
+      "temp": 5,
+      "varying": 8,
+      "writes": 2,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\pixel\\ps_3_0\\psLiquidProcWater.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "17f042a7906ca126",
+      "wordCount": 64,
+      "patched_fnv1a64": "afe1373f4e88ebda",
+      "patched_sha256": "adfe966f60c234e849b8d5c0f988c2370b1faf5f8cd0ab05cf43447270af189a",
+      "model": 3,
+      "vertex": false,
+      "temp": 2,
+      "varying": 4,
+      "writes": 2,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\Pixel\\ps_3_0\\psLiquidWaterNoSpec.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "1a60da2b7818d5b8",
+      "wordCount": 366,
+      "patched_fnv1a64": "f4541e19d599c7db",
+      "patched_sha256": "d8fd33ce90627033b8574a7e6180030e40ad18f9e19219b29c5d66375f60f8b0",
+      "model": 3,
+      "vertex": false,
+      "temp": 5,
+      "varying": 8,
+      "writes": 2,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\pixel\\ps_3_0\\psLiquidProcWater.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "1b0033712e29218e",
+      "wordCount": 341,
+      "patched_fnv1a64": "8115a8da5d7fb63e",
+      "patched_sha256": "4a33168ee6bd58dc618dbbc2b15e5c9b2e774d13afeb582e3ba16758ad0c4d37",
+      "model": 3,
+      "vertex": true,
+      "temp": 4,
+      "varying": 6,
+      "writes": 1,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\Vertex\\vs_3_0\\vsLiquidWater.bls",
+          "variant": 3
+        }
+      ]
+    },
+    {
+      "hash": "206d861fd0a721dd",
+      "wordCount": 160,
+      "patched_fnv1a64": "5e93bc0101df0b93",
+      "patched_sha256": "58eea634053e7db35ec5141b39f05d993e5d9666585065780009e9f943644b5b",
+      "model": 3,
+      "vertex": true,
+      "temp": 2,
+      "varying": 5,
+      "writes": 1,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\Vertex\\vs_3_0\\vsLiquidWaterNoSpec.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "32e2e79604d9dc80",
+      "wordCount": 304,
+      "patched_fnv1a64": "a10486e4b7ff21f8",
+      "patched_sha256": "fb4f0ef02c84a77b8f4f32929539d8bec5887274b968a79be8ead13ac8599dd2",
+      "model": 2,
+      "vertex": false,
+      "temp": 6,
+      "varying": 7,
+      "writes": 1,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\pixel\\ps_2_0\\psLiquidProcWater.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "348db9bfe182895d",
+      "wordCount": 296,
+      "patched_fnv1a64": "4e7048bf5a6c2baa",
+      "patched_sha256": "24d59e96e1821a4b4190cfc49594d6e1c09963822f8a727c3771331b82c1ee24",
+      "model": 2,
+      "vertex": true,
+      "temp": 4,
+      "varying": 7,
+      "writes": 1,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_2_0\\vsLiquidWater.bls",
+          "variant": 2
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\vertex\\vs_2_0\\vsLiquidWater.bls",
+          "variant": 2
+        }
+      ]
+    },
+    {
+      "hash": "39e3be32b73c3072",
+      "wordCount": 331,
+      "patched_fnv1a64": "09e4e840b6e3587a",
+      "patched_sha256": "5fa20ef63cbc825534856c1c49c1068b5f055cdce5cf32eef207dc1bbfa76a03",
+      "model": 2,
+      "vertex": true,
+      "temp": 7,
+      "varying": 7,
+      "writes": 1,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\vertex\\vs_2_0\\vsLiquidWater.bls",
+          "variant": 2
+        }
+      ]
+    },
+    {
+      "hash": "3b691fe2b8699c90",
+      "wordCount": 182,
+      "patched_fnv1a64": "0997e2fe37d9fd48",
+      "patched_sha256": "fdc8c99b2f27991ff26edb07903c8813f09a1ea2ea541e35cbabac6adff1cef1",
+      "model": 2,
+      "vertex": true,
+      "temp": 3,
+      "varying": 7,
+      "writes": 1,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\vertex\\vs_2_0\\vsLiquidWater.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "48a82796bd612aeb",
+      "wordCount": 245,
+      "patched_fnv1a64": "d0026e44bc4bc333",
+      "patched_sha256": "8fd37168ae2d979182bc41a1fb82c9931d098e5a8206a1e9e74c926cbb56d57c",
+      "model": 3,
+      "vertex": true,
+      "temp": 4,
+      "varying": 6,
+      "writes": 1,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\Vertex\\vs_3_0\\vsLiquidWater.bls",
+          "variant": 1
+        }
+      ]
+    },
+    {
+      "hash": "4d2a52a4d11bbad4",
+      "wordCount": 150,
+      "patched_fnv1a64": "d99be17003e2fdbd",
+      "patched_sha256": "6f05f4fda24a3cf63a1ea56b0b9ed17bd049200f098e2b0bacd5164cb4330bcf",
+      "model": 2,
+      "vertex": true,
+      "temp": 2,
+      "varying": 7,
+      "writes": 1,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_2_0\\vsLiquidWaterNoSpec.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\Vertex\\vs_2_0\\vsLiquidWaterNoSpec.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "58d812a8b1b84e70",
+      "wordCount": 51,
+      "patched_fnv1a64": "53f32c2f6cf00fb8",
+      "patched_sha256": "ed53550e3805b74a5cbe2ae1ebd37a90fad6b21d604c2853c3fccaf14da9c0ca",
+      "model": 2,
+      "vertex": false,
+      "temp": 2,
+      "varying": 7,
+      "writes": 1,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\pixel\\ps_2_0\\psLiquidWaterNoSpec.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\Pixel\\ps_2_0\\psLiquidWaterNoSpec.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "641e3182221a6adf",
+      "wordCount": 624,
+      "patched_fnv1a64": "ac859f3aa8a8aed9",
+      "patched_sha256": "8fd7234cdb84bc72509d7b467f04853eab3c2ee4469ee56d9822cfcb1a88eec4",
+      "model": 3,
+      "vertex": true,
+      "temp": 6,
+      "varying": 9,
+      "writes": 1,
+      "loops": 2,
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\vertex\\vs_3_0\\vsLiquidProcWater.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\vertex\\vs_3_0\\vsLiquidProcWater.bls",
+          "variant": 1
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\vertex\\vs_3_0\\vsLiquidProcWater.bls",
+          "variant": 2
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\vertex\\vs_3_0\\vsLiquidProcWater.bls",
+          "variant": 3
+        }
+      ]
+    },
+    {
+      "hash": "6aed203658c81950",
+      "wordCount": 318,
+      "patched_fnv1a64": "a4b78900143e5607",
+      "patched_sha256": "84e941404b854443bd087d3a54e8cf64e909a53fab96b8c06640f62e97527bae",
+      "model": 2,
+      "vertex": true,
+      "temp": 4,
+      "varying": 7,
+      "writes": 1,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_2_0\\vsLiquidWaterNoSpec.bls",
+          "variant": 3
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\Vertex\\vs_2_0\\vsLiquidWaterNoSpec.bls",
+          "variant": 3
+        }
+      ]
+    },
+    {
+      "hash": "6b3ac852d2346d3b",
+      "wordCount": 293,
+      "patched_fnv1a64": "5a9548d63a5e1717",
+      "patched_sha256": "6f523bd8889d8f70b7c34d9232c1718161b9ac682a63adac782efd0dc277f1c2",
+      "model": 3,
+      "vertex": true,
+      "temp": 4,
+      "varying": 6,
+      "writes": 1,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\Vertex\\vs_3_0\\vsLiquidWater.bls",
+          "variant": 2
+        }
+      ]
+    },
+    {
+      "hash": "70faf83955e2b668",
+      "wordCount": 256,
+      "patched_fnv1a64": "ea99a23880ec3d58",
+      "patched_sha256": "f7b42de0e08ebe23fed1e920d11818af600e862b5fdc0039bf4442de9eb83ba0",
+      "model": 3,
+      "vertex": true,
+      "temp": 4,
+      "varying": 5,
+      "writes": 1,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\Vertex\\vs_3_0\\vsLiquidWaterNoSpec.bls",
+          "variant": 2
+        }
+      ]
+    },
+    {
+      "hash": "7267e37a0600359f",
+      "wordCount": 666,
+      "patched_fnv1a64": "24af0102dfeab421",
+      "patched_sha256": "2dd64f1f89271318b4d70f0c2021fcbfe917e6c0889f1dc0dc7d8ebca660726d",
+      "model": 2,
+      "vertex": true,
+      "temp": 5,
+      "varying": 7,
+      "writes": 1,
+      "loops": 2,
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_2_0\\vsLiquidProcWater.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_2_0\\vsLiquidProcWater.bls",
+          "variant": 1
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_2_0\\vsLiquidProcWater.bls",
+          "variant": 2
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_2_0\\vsLiquidProcWater.bls",
+          "variant": 3
+        }
+      ]
+    },
+    {
+      "hash": "75a110398a07c0f5",
+      "wordCount": 262,
+      "patched_fnv1a64": "08f690ca1508d35a",
+      "patched_sha256": "e99f2ddc3504664eabb51aea6dd2b6cfb0a1edbe11bd81892591cd298f643219",
+      "model": 2,
+      "vertex": true,
+      "temp": 4,
+      "varying": 7,
+      "writes": 1,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_2_0\\vsLiquidWaterNoSpec.bls",
+          "variant": 2
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\Vertex\\vs_2_0\\vsLiquidWaterNoSpec.bls",
+          "variant": 2
+        }
+      ]
+    },
+    {
+      "hash": "7d4f078fa1876a09",
+      "wordCount": 82,
+      "patched_fnv1a64": "2a7cf7d23bb0dadb",
+      "patched_sha256": "00c2a23557415c6ecd678c596997468650c127ea02aa0fbf6623d340313ccb74",
+      "model": 3,
+      "vertex": false,
+      "temp": 4,
+      "varying": 5,
+      "writes": 2,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\Pixel\\ps_3_0\\psLiquidWater.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "8abda360b25632f0",
+      "wordCount": 304,
+      "patched_fnv1a64": "85fa833fe4cd6948",
+      "patched_sha256": "3398f97ccd36dfbd2db0042a92ff3944acb460249db0526653fdbc778ab3eadb",
+      "model": 2,
+      "vertex": false,
+      "temp": 6,
+      "varying": 7,
+      "writes": 1,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\pixel\\ps_2_0\\psLiquidProcWater.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "8fbd18a9917e01f9",
+      "wordCount": 208,
+      "patched_fnv1a64": "5bc452d81d9743a3",
+      "patched_sha256": "1c893cf5c400ffe5cd1f9647f93cbd2441f8bb594261794c5320fb0b48ccb827",
+      "model": 3,
+      "vertex": true,
+      "temp": 2,
+      "varying": 5,
+      "writes": 1,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\Vertex\\vs_3_0\\vsLiquidWaterNoSpec.bls",
+          "variant": 1
+        }
+      ]
+    },
+    {
+      "hash": "9ac005ef6269b629",
+      "wordCount": 666,
+      "patched_fnv1a64": "93b2aa9de9421e67",
+      "patched_sha256": "0e012c1cf702ee1477c12c65d4f1900dc577ca16a483c75abe9899e74dbae9d2",
+      "model": 2,
+      "vertex": true,
+      "temp": 5,
+      "varying": 7,
+      "writes": 1,
+      "loops": 2,
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\vertex\\vs_2_0\\vsLiquidProcWater.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\vertex\\vs_2_0\\vsLiquidProcWater.bls",
+          "variant": 1
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\vertex\\vs_2_0\\vsLiquidProcWater.bls",
+          "variant": 2
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\vertex\\vs_2_0\\vsLiquidProcWater.bls",
+          "variant": 3
+        }
+      ]
+    },
+    {
+      "hash": "9f78f30d80154df0",
+      "wordCount": 184,
+      "patched_fnv1a64": "ed6ecdf314e20448",
+      "patched_sha256": "ed84bc44b5893b17a2e263aa1b7067cd73381341be1b292cc117be2430a68a00",
+      "model": 2,
+      "vertex": true,
+      "temp": 3,
+      "varying": 7,
+      "writes": 1,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_2_0\\vsLiquidWater.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\vertex\\vs_2_0\\vsLiquidWater.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "a4ef2987a5621125",
+      "wordCount": 620,
+      "patched_fnv1a64": "c3378c79fda41237",
+      "patched_sha256": "6f5c7bd9448d95ff353d288aed8e2633938123b6ec9833a88bb16ac4bd95b98e",
+      "model": 3,
+      "vertex": true,
+      "temp": 6,
+      "varying": 9,
+      "writes": 1,
+      "loops": 2,
+      "sources": [
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\vertex\\vs_3_0\\vsLiquidProcWater.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\vertex\\vs_3_0\\vsLiquidProcWater.bls",
+          "variant": 1
+        },
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\vertex\\vs_3_0\\vsLiquidProcWater.bls",
+          "variant": 2
+        },
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\vertex\\vs_3_0\\vsLiquidProcWater.bls",
+          "variant": 3
+        }
+      ]
+    },
+    {
+      "hash": "a4ff11fcf649b8c8",
+      "wordCount": 366,
+      "patched_fnv1a64": "ec684fc7bf5b7d0b",
+      "patched_sha256": "cf5159528ad40c29e79177a0696ddc88e33f8da7a21bb3759dddc27717624c69",
+      "model": 3,
+      "vertex": false,
+      "temp": 5,
+      "varying": 8,
+      "writes": 2,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\pixel\\ps_3_0\\psLiquidProcWater.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "a63aa6ffcb030f5c",
+      "wordCount": 352,
+      "patched_fnv1a64": "031683df76a72133",
+      "patched_sha256": "7b7931a2c2e4096ed9085ae33ab3b86c4acb6f44e079664a6aa50087426432cd",
+      "model": 2,
+      "vertex": true,
+      "temp": 4,
+      "varying": 7,
+      "writes": 1,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_2_0\\vsLiquidWater.bls",
+          "variant": 3
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\vertex\\vs_2_0\\vsLiquidWater.bls",
+          "variant": 3
+        }
+      ]
+    },
+    {
+      "hash": "ad7c06a0edfbe512",
+      "wordCount": 401,
+      "patched_fnv1a64": "1988833b2d9367c2",
+      "patched_sha256": "41bc690695a15f3b056b481499585f68db93a09d7e9b95435a90349db3acf9eb",
+      "model": 2,
+      "vertex": true,
+      "temp": 7,
+      "varying": 7,
+      "writes": 1,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\vertex\\vs_2_0\\vsLiquidWater.bls",
+          "variant": 3
+        }
+      ]
+    },
+    {
+      "hash": "b4a68d1d7f52f1af",
+      "wordCount": 304,
+      "patched_fnv1a64": "51b0a96d511aef4b",
+      "patched_sha256": "e428a4207b706f82109eb95bf4c783e0c5eb86bd726c1144fc69d5b6133ee414",
+      "model": 2,
+      "vertex": false,
+      "temp": 6,
+      "varying": 7,
+      "writes": 1,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\pixel\\ps_2_0\\psLiquidProcWater.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "c533c9b728387531",
+      "wordCount": 261,
+      "patched_fnv1a64": "314c997ce87b925e",
+      "patched_sha256": "efde4398a7a6da940dc9fe413ef929259c89790b3e5cca270d2768bedc8e0ba5",
+      "model": 2,
+      "vertex": true,
+      "temp": 4,
+      "varying": 7,
+      "writes": 1,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\vertex\\vs_2_0\\vsLiquidWater.bls",
+          "variant": 1
+        }
+      ]
+    },
+    {
+      "hash": "cb5e47465d72644d",
+      "wordCount": 304,
+      "patched_fnv1a64": "c1ec78c20ffae595",
+      "patched_sha256": "acda9dc15f647a1cc91a451babd15d160fe68d77bf313e75f924bdaed4f1eb6a",
+      "model": 3,
+      "vertex": true,
+      "temp": 4,
+      "varying": 5,
+      "writes": 1,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\Vertex\\vs_3_0\\vsLiquidWaterNoSpec.bls",
+          "variant": 3
+        }
+      ]
+    },
+    {
+      "hash": "d61988b2321c47cd",
+      "wordCount": 624,
+      "patched_fnv1a64": "b40ea40b90d5328b",
+      "patched_sha256": "f7b404c0429e5329d8a0008c20781a68fde482801b4d4859afd10d6b67ac88d2",
+      "model": 3,
+      "vertex": true,
+      "temp": 6,
+      "varying": 9,
+      "writes": 1,
+      "loops": 2,
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_3_0\\vsLiquidProcWater.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_3_0\\vsLiquidProcWater.bls",
+          "variant": 1
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_3_0\\vsLiquidProcWater.bls",
+          "variant": 2
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_3_0\\vsLiquidProcWater.bls",
+          "variant": 3
+        }
+      ]
+    },
+    {
+      "hash": "e186eee6b5e19eb5",
+      "wordCount": 70,
+      "patched_fnv1a64": "25724390d40e5381",
+      "patched_sha256": "35840f63949803fa991c6f77c629f9859a448ca0d0a9c659ff38ec3d96213d30",
+      "model": 2,
+      "vertex": false,
+      "temp": 4,
+      "varying": 7,
+      "writes": 1,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\pixel\\ps_2_0\\psLiquidWater.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\pixel\\ps_2_0\\psLiquidWater.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\pixel\\ps_2_0\\psLiquidWater.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "eafd290841afcd65",
+      "wordCount": 664,
+      "patched_fnv1a64": "1765dcd8504234bf",
+      "patched_sha256": "497a104a81387ab83aa8432d81f87ebdd10b452c0f6dd4cd8e5b1b6b042db6b8",
+      "model": 2,
+      "vertex": true,
+      "temp": 5,
+      "varying": 7,
+      "writes": 1,
+      "loops": 2,
+      "sources": [
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\vertex\\vs_2_0\\vsLiquidProcWater.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\vertex\\vs_2_0\\vsLiquidProcWater.bls",
+          "variant": 1
+        },
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\vertex\\vs_2_0\\vsLiquidProcWater.bls",
+          "variant": 2
+        },
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\vertex\\vs_2_0\\vsLiquidProcWater.bls",
+          "variant": 3
+        }
+      ]
+    },
+    {
+      "hash": "fb0acc20bc2ba769",
+      "wordCount": 240,
+      "patched_fnv1a64": "8b36b5251c59ec96",
+      "patched_sha256": "2bf483daf2e43e5b44ba93bf37c695272f199a5e9f43e476db23c25dd2020e1b",
+      "model": 2,
+      "vertex": true,
+      "temp": 4,
+      "varying": 7,
+      "writes": 1,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_2_0\\vsLiquidWater.bls",
+          "variant": 1
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\vertex\\vs_2_0\\vsLiquidWater.bls",
+          "variant": 1
+        }
+      ]
+    },
+    {
+      "hash": "fb0fb6fd1fffc44c",
+      "wordCount": 206,
+      "patched_fnv1a64": "079fab0a68552339",
+      "patched_sha256": "0d1673fa09e2c3c4f68234d7f8475077ea706780c01d42cc849adcb6489105e5",
+      "model": 2,
+      "vertex": true,
+      "temp": 2,
+      "varying": 7,
+      "writes": 1,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_2_0\\vsLiquidWaterNoSpec.bls",
+          "variant": 1
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\Vertex\\vs_2_0\\vsLiquidWaterNoSpec.bls",
+          "variant": 1
+        }
+      ]
+    },
+    {
+      "hash": "fdd9528ed3ac30ea",
+      "wordCount": 197,
+      "patched_fnv1a64": "fca1df5dee9a3ca9",
+      "patched_sha256": "1f405c9e2b2772473317493cb698525e20bbf2c4dfa0437b17efcf596561bd19",
+      "model": 3,
+      "vertex": true,
+      "temp": 3,
+      "varying": 6,
+      "writes": 1,
+      "loops": 0,
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\Vertex\\vs_3_0\\vsLiquidWater.bls",
+          "variant": 0
+        }
+      ]
+    }
+  ],
+  "excluded": [
+    {
+      "hash": "007fdba2e20ddd80",
+      "reason": "shared with magma/editor family",
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\pixel\\ps_2_0\\psLiquidProcWater_Editor.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "02b110bb0bf28852",
+      "reason": "unsupported shader model",
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_1_1\\vsLiquidWaterNoSpec.bls",
+          "variant": 2
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\Vertex\\vs_1_1\\vsLiquidWaterNoSpec.bls",
+          "variant": 2
+        }
+      ]
+    },
+    {
+      "hash": "0670436b03f614f5",
+      "reason": "unsupported shader model",
+      "sources": [
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\vertex\\vs_1_1\\vsLiquidWater.bls",
+          "variant": 2
+        }
+      ]
+    },
+    {
+      "hash": "16f11a88d5aa81d1",
+      "reason": "shared with magma/editor family",
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_3_0\\vsLiquidProcWater_Editor.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_3_0\\vsLiquidProcWater_Editor.bls",
+          "variant": 1
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_3_0\\vsLiquidProcWater_Editor.bls",
+          "variant": 2
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_3_0\\vsLiquidProcWater_Editor.bls",
+          "variant": 3
+        }
+      ]
+    },
+    {
+      "hash": "16ffb24b6fdaf951",
+      "reason": "shared with magma/editor family",
+      "sources": [
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\vertex\\vs_3_0\\vsLiquidProcWater_Editor.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\vertex\\vs_3_0\\vsLiquidProcWater_Editor.bls",
+          "variant": 1
+        },
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\vertex\\vs_3_0\\vsLiquidProcWater_Editor.bls",
+          "variant": 2
+        },
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\vertex\\vs_3_0\\vsLiquidProcWater_Editor.bls",
+          "variant": 3
+        }
+      ]
+    },
+    {
+      "hash": "2965e7011e79b205",
+      "reason": "shared with magma/editor family",
+      "sources": [
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\pixel\\ps_2_0\\psLiquidMagma.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\pixel\\ps_2_0\\psLiquidMagma.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\pixel\\ps_2_0\\psLiquidMagma.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "388bb5eddb5e7337",
+      "reason": "shared with magma/editor family",
+      "sources": [
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\vertex\\vs_1_1\\vsLiquidMagma.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_1_1\\vsLiquidMagma.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\vertex\\vs_1_1\\vsLiquidMagma.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "3e6577aa93498181",
+      "reason": "unsupported shader model",
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_1_1\\vsLiquidWaterNoSpec.bls",
+          "variant": 3
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\Vertex\\vs_1_1\\vsLiquidWaterNoSpec.bls",
+          "variant": 3
+        }
+      ]
+    },
+    {
+      "hash": "41c8957a35d57e82",
+      "reason": "unsupported shader model",
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\pixel\\ps_1_4\\psLiquidWaterNoSpec.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\Pixel\\ps_1_4\\psLiquidWaterNoSpec.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "4ea4750aea146e6d",
+      "reason": "shared with magma/editor family",
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\vertex\\vs_2_0\\vsLiquidProcWater_Editor.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\vertex\\vs_2_0\\vsLiquidProcWater_Editor.bls",
+          "variant": 1
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\vertex\\vs_2_0\\vsLiquidProcWater_Editor.bls",
+          "variant": 2
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\vertex\\vs_2_0\\vsLiquidProcWater_Editor.bls",
+          "variant": 3
+        }
+      ]
+    },
+    {
+      "hash": "56bad58b793972e2",
+      "reason": "unsupported shader model",
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\pixel\\ps_1_1\\psLiquidWater.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\pixel\\ps_1_1\\psLiquidWater.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "57d51fd4eaf3592a",
+      "reason": "unsupported shader model",
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\pixel\\ps_1_1\\psLiquidWaterNoSpec.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\Pixel\\ps_1_1\\psLiquidWaterNoSpec.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "5ae01f3dfba83ace",
+      "reason": "shared with magma/editor family",
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\Pixel\\ps_3_0\\psLiquidMagma.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "5ea696ddb335da33",
+      "reason": "shared with magma/editor family",
+      "sources": [
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\pixel\\ps_2_0\\psLiquidProcWater_Editor.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "6493b347dd12d80f",
+      "reason": "shared with magma/editor family",
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_2_0\\vsLiquidMagma.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\vertex\\vs_2_0\\vsLiquidMagma.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "6779e7a8149f622e",
+      "reason": "unsupported shader model",
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_1_1\\vsLiquidWater.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\vertex\\vs_1_1\\vsLiquidWater.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "6c155e3220f6d5c3",
+      "reason": "shared with magma/editor family",
+      "sources": [
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\pixel\\ps_3_0\\psLiquidProcWater_Editor.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "7212bad8993f3ee4",
+      "reason": "shared with magma/editor family",
+      "sources": [
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\vertex\\vs_2_0\\vsLiquidMagma.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "73256eb96d40966c",
+      "reason": "unsupported shader model",
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_1_1\\vsLiquidWater.bls",
+          "variant": 3
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\vertex\\vs_1_1\\vsLiquidWater.bls",
+          "variant": 3
+        }
+      ]
+    },
+    {
+      "hash": "75f0bb2fa54a0a4a",
+      "reason": "unsupported shader model",
+      "sources": [
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\vertex\\vs_1_1\\vsLiquidWater.bls",
+          "variant": 3
+        }
+      ]
+    },
+    {
+      "hash": "761d8b8c71cf3d1f",
+      "reason": "unsupported shader model",
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_1_1\\vsLiquidWater.bls",
+          "variant": 2
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\vertex\\vs_1_1\\vsLiquidWater.bls",
+          "variant": 2
+        }
+      ]
+    },
+    {
+      "hash": "781dc8ea45dee2fd",
+      "reason": "shared with magma/editor family",
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\Vertex\\vs_3_0\\vsLiquidMagma.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "7d4e1812faba46e5",
+      "reason": "unsupported shader model",
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_1_1\\vsLiquidWaterNoSpec.bls",
+          "variant": 1
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\Vertex\\vs_1_1\\vsLiquidWaterNoSpec.bls",
+          "variant": 1
+        }
+      ]
+    },
+    {
+      "hash": "8fd0334c852033ff",
+      "reason": "unsupported shader model",
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_1_1\\vsLiquidWaterNoSpec.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\Vertex\\vs_1_1\\vsLiquidWaterNoSpec.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "975e8f58e5231311",
+      "reason": "shared with magma/editor family",
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\pixel\\ps_1_1\\psLiquidMagma.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\pixel\\ps_1_1\\psLiquidMagma.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "bbdd7a1b2be41abb",
+      "reason": "shared with magma/editor family",
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_2_0\\vsLiquidProcWater_Editor.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_2_0\\vsLiquidProcWater_Editor.bls",
+          "variant": 1
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_2_0\\vsLiquidProcWater_Editor.bls",
+          "variant": 2
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_2_0\\vsLiquidProcWater_Editor.bls",
+          "variant": 3
+        }
+      ]
+    },
+    {
+      "hash": "c2bd428acad25b41",
+      "reason": "shared with magma/editor family",
+      "sources": [
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\vertex\\vs_2_0\\vsLiquidProcWater_Editor.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\vertex\\vs_2_0\\vsLiquidProcWater_Editor.bls",
+          "variant": 1
+        },
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\vertex\\vs_2_0\\vsLiquidProcWater_Editor.bls",
+          "variant": 2
+        },
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\vertex\\vs_2_0\\vsLiquidProcWater_Editor.bls",
+          "variant": 3
+        }
+      ]
+    },
+    {
+      "hash": "c5805fd91f0510b5",
+      "reason": "unsupported shader model",
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\vertex\\vs_1_1\\vsLiquidWater.bls",
+          "variant": 1
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\vertex\\vs_1_1\\vsLiquidWater.bls",
+          "variant": 1
+        }
+      ]
+    },
+    {
+      "hash": "d1c452e178ffc98c",
+      "reason": "shared with magma/editor family",
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\pixel\\ps_1_4\\psLiquidMagma.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\pixel\\ps_1_4\\psLiquidMagma.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "d9c34779470d5378",
+      "reason": "shared with magma/editor family",
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\pixel\\ps_3_0\\psLiquidProcWater_Editor.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "db130d41798db721",
+      "reason": "unsupported shader model",
+      "sources": [
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\vertex\\vs_1_1\\vsLiquidWater.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "db741aef13cf4e10",
+      "reason": "shared with magma/editor family",
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\pixel\\ps_2_0\\psLiquidProcWater_Editor.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "de9ddbce690b6128",
+      "reason": "shared with magma/editor family",
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\pixel\\ps_3_0\\psLiquidProcWater_Editor.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "f329b8793c101569",
+      "reason": "unsupported shader model",
+      "sources": [
+        {
+          "archive": "data/common-2.mpq",
+          "path": "shaders\\vertex\\vs_1_1\\vsLiquidWater.bls",
+          "variant": 1
+        }
+      ]
+    },
+    {
+      "hash": "f4c48e5469302ad7",
+      "reason": "unsupported shader model",
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "_shaders\\pixel\\ps_1_4\\psLiquidWater.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\pixel\\ps_1_4\\psLiquidWater.bls",
+          "variant": 0
+        }
+      ]
+    },
+    {
+      "hash": "fff2688e121ddab3",
+      "reason": "shared with magma/editor family",
+      "sources": [
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\vertex\\vs_3_0\\vsLiquidProcWater_Editor.bls",
+          "variant": 0
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\vertex\\vs_3_0\\vsLiquidProcWater_Editor.bls",
+          "variant": 1
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\vertex\\vs_3_0\\vsLiquidProcWater_Editor.bls",
+          "variant": 2
+        },
+        {
+          "archive": "data/patch.mpq",
+          "path": "shaders\\vertex\\vs_3_0\\vsLiquidProcWater_Editor.bls",
+          "variant": 3
+        }
+      ]
+    }
+  ],
+  "game_launched": false
+}

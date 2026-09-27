@@ -1,0 +1,75 @@
+{
+  "source_sha256": "2cdc6c7fe49392cd791e8df23be10e8233113815ff9a1b24be94d73c8ca968de",
+  "game_launched": false,
+  "device_created": false,
+  "shaders": {
+    "LocalShadowVS": {
+      "target": "vs_3_0",
+      "bytes": 320,
+      "sha256": "31bc77bfc051cf04547ddd1fa572343f573d7fa63046eeefa6fd3bf73c67c16a",
+      "static_instruction_slots": 9,
+      "temporary_registers": 2,
+      "samplers": [],
+      "instructions": {
+        "mul": 3,
+        "add": 3,
+        "mov": 3
+      },
+      "cube_instruction_extra_slots": 0
+    },
+    "LocalShadowPS": {
+      "target": "ps_3_0",
+      "bytes": 568,
+      "sha256": "fac56df05d1a075c5fe0809708324b1d9b7acbba741909afe25c943bc445660a",
+      "static_instruction_slots": 26,
+      "temporary_registers": 2,
+      "samplers": [
+        0
+      ],
+      "instructions": {
+        "mul": 2,
+        "add": 5,
+        "mov": 6,
+        "dp3": 1,
+        "texkill": 2,
+        "cmp": 1,
+        "if": 1,
+        "texld": 1,
+        "else": 1,
+        "endif": 1,
+        "rcp": 1
+      },
+      "cube_instruction_extra_slots": 0
+    },
+    "LocalLighting": {
+      "target": "ps_3_0",
+      "bytes": 7920,
+      "sha256": "2f3bd62b570802f7241a320f6483f5e5c17d047c6f7913bcc1391e5fd7d75140",
+      "static_instruction_slots": 500,
+      "temporary_registers": 12,
+      "samplers": [
+        0,
+        1,
+        2
+      ],
+      "instructions": {
+        "mov": 77,
+        "rcp": 39,
+        "add": 110,
+        "frc": 2,
+        "mul": 98,
+        "max": 34,
+        "min": 13,
+        "texldl": 10,
+        "cmp": 41,
+        "if": 5,
+        "else": 5,
+        "endif": 5,
+        "dp3": 15,
+        "rsq": 4,
+        "abs": 10
+      },
+      "cube_instruction_extra_slots": 12
+    }
+  }
+}
