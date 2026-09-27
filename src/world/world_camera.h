@@ -127,8 +127,8 @@ template<class Reader> bool readCurrentBasis(Reader read,float projectionSign,Ca
     return decode(cameraData,view,projectionSign,out,diagnostic);
 }
 #ifdef _WIN32
-// TEMPORARY (0.3.20): the code-signature gate rejects this client (patched
-// executable bytes), which disabled the WMO/city path everywhere. The runtime
+// TEMPORARY (0.3.20): the code-signature gate rejected one development client
+// build, which disabled the WMO/city path everywhere. The runtime
 // checks that remain in readCurrent/decode (camera type id, device vtable id,
 // orthonormal basis, view/projection agreement and the 1 cm agreement with the
 // independent map/camera reader) validate every read. Set to false to restore.
