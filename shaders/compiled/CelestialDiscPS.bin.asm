@@ -6,10 +6,10 @@ def c51 = 0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 0.00000000e+00
 def c52 = -9.99999940e-01, 3.00000003e-03, 2.00000000e+00, -2.00000000e+00
 def c53 = -1.00000000e+00, 1.00000000e+00, -5.00000000e-01, -9.99989986e-01
 def c54 = -1.00000005e-03, -9.99999997e-07, 1.78571427e+00, 3.00000000e+00
-def c55 = 3.49999994e-01, -1.50000000e+00, 6.66666687e-01, 2.50000000e-01
+def c55 = 3.49999994e-01, -1.19999997e-01, -2.50000004e-02, -8.00000038e-03
 def c56 = 5.00000000e-01, 5.00000000e-01, 0.00000000e+00, 0.00000000e+00
-def c57 = -1.19999997e-01, -2.50000004e-02, 4.00000006e-01, -8.00000038e-03
-def c58 = -1.11000001e+00, -1.44269502e+00, 0.00000000e+00, 0.00000000e+00
+def c57 = 2.50000000e-01, 3.49999994e-01, 4.00000006e-01, -1.11000001e+00
+def c58 = 1.18257001e-01, 2.99457997e-01, 3.80526990e-01, -1.44269502e+00
 def c59 = 1.00000000e+00, 1.00000000e+00, 1.00000000e+00, 0.00000000e+00
 def c60 = 4.04499993e-02, 4.04499993e-02, 4.04499993e-02, 0.00000000e+00
 def c61 = 7.73993805e-02, 7.73993805e-02, 7.73993805e-02, 0.00000000e+00
@@ -212,65 +212,55 @@ if_ne r1.y, -r1.y
             add r5.xyz, c47.xyzx, r5.xyzx
             mov_sat r5.xyz, r5.xyzx
             mov_sat r1.z, c9.w
-            mov r1.w, c49.x
-            mul r5.w, r1.y, r1.y
-            mul r6.x, c12.y, c55.x
-            add r6.y, r1.y, -r6.x
-            add r6.x, c12.y, -r6.x
-            rcp r6.x, r6.x
-            mul r6.x, r6.y, r6.x
+            mul r1.w, r1.y, r1.y
+            mul r5.w, c12.y, c55.x
+            add r6.x, r1.y, -r5.w
+            add r5.w, c12.y, -r5.w
+            rcp r5.w, r5.w
+            mul r5.w, r6.x, r5.w
+            mov_sat r5.w, r5.w
+            mul r6.x, r5.w, r5.w
+            mul r5.w, r5.w, c52.z
+            add r5.w, -r5.w, c54.w
+            mul r5.w, r6.x, r5.w
+            add r5.w, -r5.w, c49.w
+            texldl r6.xyzw, c56.xyzw, s3
             mov_sat r6.x, r6.x
-            mul r6.y, r6.x, r6.x
-            mul r6.x, r6.x, c52.z
-            add r6.x, -r6.x, c54.w
-            mul r6.x, r6.y, r6.x
-            add r6.x, -r6.x, c49.w
-            texldl r7.xyzw, c56.xyzw, s3
-            mov_sat r6.y, r7.x
             texldl r7.xyzw, c56.xyzw, s5
-            mov_sat r6.z, r7.x
-            mul r6.z, c48.w, r6.z
-            add r6.w, r1.y, c55.y
-            mul r6.w, r6.w, c55.z
-            mov_sat r6.w, r6.w
-            mul r7.x, r6.w, r6.w
-            mul r6.w, r6.w, c52.z
-            add r6.w, -r6.w, c54.w
-            mul r6.w, r7.x, r6.w
-            mul r6.z, r6.z, r6.w
-            max r6.z, r6.y, r6.z
-            if_ne r0.z, -r0.z
-                mul r0.z, -c12.x, r5.w
-                exp r0.z, r0.z
-                mul r0.z, c12.z, r0.z
-                mul r0.z, r0.z, r6.y
-                mul r6.w, r5.w, c57.x
-                exp r6.w, r6.w
-                mul r6.w, r6.w, c55.w
-                mul r7.x, r5.w, c57.y
-                exp r7.x, r7.x
-                mul r7.x, r7.x, c55.x
-                add r6.w, r6.w, r7.x
-                mul r5.w, r5.w, c57.w
-                exp r5.w, r5.w
-                mul r5.w, r5.w, c57.z
-                add r5.w, r6.w, r5.w
-                mul r5.w, c47.w, r5.w
-                mul r5.w, r5.w, r6.z
-                add r0.z, r0.z, r5.w
-                mul r0.z, r0.z, r6.x
-                mov r1.w, c49.w
-            else
-            endif
-            mul r5.w, c12.z, c55.x
+            mov_sat r6.y, r7.x
+            mul r6.y, c48.w, r6.y
+            mul r6.z, r1.w, c55.y
+            exp r6.z, r6.z
+            mul r6.w, r1.w, c55.z
+            exp r6.w, r6.w
+            mul r7.x, r1.w, c55.w
+            exp r7.x, r7.x
+            mov r7.y, r6.z
+            mov r7.z, r6.w
+            mov r7.w, r7.x
+            mov r8.xyz, r7.yzwy
+            dp3 r6.z, r8.xyzx, c57.xyzx
+            mul r6.z, r6.x, r6.z
+            mov r7.xyz, r7.yzwy
+            dp3 r6.w, r7.xyzx, c58.xyzx
+            mul r6.y, r6.y, r6.w
+            max r6.y, r6.z, r6.y
+            mul r1.w, -c12.x, r1.w
+            exp r1.w, r1.w
+            mul r1.w, c12.z, r1.w
+            mul r1.w, r1.w, r6.x
+            mul r6.y, c47.w, r6.y
+            add r1.w, r1.w, r6.y
+            mul r1.w, r1.w, r5.w
+            mul r6.y, c12.z, c55.x
             add r1.y, r1.y, c50.x
             max r1.y, r1.y, c49.x
-            mul r1.y, r1.y, c58.x
+            mul r1.y, r1.y, c57.w
             exp r1.y, r1.y
-            mul r1.y, r5.w, r1.y
+            mul r1.y, r6.y, r1.y
+            mul r1.y, r1.y, r5.w
             mul r1.y, r1.y, r6.x
-            mul r1.y, r1.y, r6.y
-            cmp r0.z, -r1.w, r1.y, r0.z
+            cmp r0.z, -r0.z, r1.y, r1.w
             mul r0.z, r1.z, r0.z
             mov r1.y, r0.z
             add r1.z, c11.w, c53.z
@@ -305,7 +295,7 @@ if_ne r1.y, -r1.y
         texkill r0.y
         if_ne r1.x, -r1.x
             mov r0.yzw, r5.xxyz
-            mul r1.x, r0.x, c58.y
+            mul r1.x, r0.x, c58.w
             mul r0.yzw, r1.x, r0.xyzw
             exp r1.x, r0.y
             exp r1.y, r0.z

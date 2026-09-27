@@ -1153,7 +1153,7 @@ static HMODULE backend() {
     // Only DXVK keeps the legacy (unchecked, no RESZ dummy draw) rules; every
     // other runtime, including the system fallback, gets the native rules.
     if(module&&(result.fallback||(configured==NorthlightBackend::Kind::Legacy&&!last.info.dxvk)))selectedBackend=NorthlightBackend::Kind::Native;
-    logf("Northlight renderer 0.3.167; reference sun look (sun glow hue from native/sunHalo band, soft-shoulder glare, veil, sun-tinted haze), native sun/moon suppressed (F1b), lamps dimmed to 30 pct in direct sun, native moon02 skipped by texture identity, no game bytes in the DLL, MEMREAD self-read profile (RenderProfile), soft sun removal in shadow, jump-stable shadow anchor; backend=%s path=%ls loaded=%d error=%lu",
+    logf("Northlight renderer 0.3.168; reference sun look (sun glow hue from native/sunHalo band, soft-shoulder glare, veil, sun-tinted haze), native sun/moon suppressed (F1b), lamps dimmed to 30 pct in direct sun, native moon02 skipped by texture identity, no game bytes in the DLL, MEMREAD self-read profile (RenderProfile), soft sun removal in shadow, jump-stable shadow anchor; backend=%s path=%ls loaded=%d error=%lu",
          NorthlightBackend::name(configured),last.path.c_str(),module!=nullptr,module?0ul:(last.error?last.error:(unsigned long)ERROR_INVALID_PARAMETER));
     logAttempts(result.attempts);
     logHostExecutable(sys.selfPath);
