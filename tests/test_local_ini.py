@@ -11,7 +11,7 @@ from unittest.mock import patch
 from test_renderer_status import OnOff
 
 BROKEN={'percent':b'[paths]\narchive = ~/x%20y\nreference_exe = ~/a%zb/wow.exe\n',
-        'duplicate':b'[paths]\nclient = /nonexistent-a\nclient = /nonexistent-b\n',
+        'duplicate':b'[paths]\narchive = /nonexistent-a\narchive = /nonexistent-b\n',   # not client: renderer_status would rightly refuse it
         'no_section':b'client = /nonexistent\njust garbage\n',
         'binary':b'\xff\xfe\x00[paths\n'}
 

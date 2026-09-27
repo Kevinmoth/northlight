@@ -9,6 +9,48 @@ The repository holds no game files: every tool that needs game data reads it fro
 
 The changelog, release notes and validation records are not part of the public source.
 
+## What Northlight adds
+
+Every effect below is on by default and is drawn on top of the game's own frame.
+
+- **Sun and moon.** Its own sun and moon discs on an orbit that follows the game's clock; the game's
+  sun and moon billboards are hidden. The sun glows in the game's own sun colour for the zone and
+  time, and a veil softens trees, towers and ridges in front of it; fog and horizon haze take the
+  same hue toward the sun.
+- **Shadows.** Sun and moon shadows in two cascades (about 48 and 192 yards around the player), with
+  a cached static layer for terrain, buildings, trees and props, and distant terrain shadows out to
+  928 yards (4096 in the zones listed in `shadow-range-profiles.ini`). Characters, creatures, mounts,
+  doors, ships and other moving objects cast shadows too. The game's baked terrain shadows and the
+  round blob shadows under characters are replaced, and where the sun is blocked the game's painted
+  sunlight is removed smoothly, without facet steps.
+- **Global illumination.** Sky light and bounced light from probes ray traced against the world
+  geometry on a background thread, about 52 yards around the camera; characters add their own bounce
+  and occlusion.
+- **Ambient occlusion.** Screen-space AO with contact shading and a light bloom.
+- **Fog and air.** Volumetric sun and moon light with light shafts through the shadows; soft haze on
+  the far landscape and the lowest sky in the game's own fog colour; regional ground fog in forests,
+  wetlands and basins, denser at night, derived from the map.
+- **Lamps.** Up to 32 nearby lamps, lanterns, braziers and fires light the ground and walls around
+  them and glow in the fog; at night the brightest nearby lamp casts shadows. In direct sun lamps dim.
+- **Lighting art layer.** An MPQ patch (`patch-z`) built from your client's own `Light*.dbc`: retuned
+  outdoor clear-weather light and fog colours, warmer Mulgore, denser Stormwind day fog. Sky models
+  that paint their own sun or moon into the clear-weather sky lose it.
+- **Water.** The game's water is drawn unchanged; a liquid mask keeps the relighting and AO off the
+  surface, and fog is measured to the water surface.
+- **Settings.** `northlight-quality.ini` has three presets (Quality, the default, Balanced and
+  Performance) and about 30 keys for shadows, GI, lamps and haze; `celestial-profiles.ini` sets the
+  sun and moon look per zone.
+- **Hotkeys** (with Ctrl+Shift): F7 fog and haze, F8 GI, F9 shadows, F10 all effects, F12 debug views
+  (shadows, GI, fog volume). On a Mac, first remove macOS's own Control+F7 shortcut.
+- **Cost.** Northlight costs frame time, mostly on the game's main CPU thread. Character shadows are
+  the largest part in crowds (about 4-5 ms per frame): `ActorShadows=0` in `northlight-quality.ini`
+  keeps only the static shadows, and the Balanced and Performance presets trade small details for speed.
+- **Platforms and install.** macOS with WoWSilicon (preloaded as `mods/d3d9.dll`) and Windows (a
+  game-folder `d3d9.dll` on the bundled DXVK 2.7.1, the system D3D9, or an existing `d3d9.dll`). The
+  installer never writes `wow.exe`. It builds the world cache (terrain, models, lamps and fog
+  regions) and the lighting art layer from your own client on your machine, about 10-40 minutes and
+  at least 8 GB of RAM; nothing from the game is shipped. The packages bundle their own Python and StormLib, and uninstall restores every change.
+
 ## Layout
 
 | Path | Contents |
@@ -117,7 +159,7 @@ it is ignored by git), then a default. `python3 northlight_paths.py` prints what
 
 | Variable | Default | Used for |
 |---|---|---|
-| `NORTHLIGHT_CLIENT` | the repository's parent folder, if it holds `Wow.exe` and `Data/` | client data for tests, validators and pipeline scripts (not `renderer_status.py`, see below) |
+| `NORTHLIGHT_CLIENT` | the repository's parent folder, if it holds `Wow.exe` and `Data/` | client data for tests, validators and pipeline scripts, and the client `renderer_status.py` installs into |
 | `NORTHLIGHT_ZIG` | `tools/zig-*/zig`, then `zig` on `PATH` (must be 0.15.2) | DLL build, generators, shader tools |
 | `NORTHLIGHT_WINE` | WoWSilicon's bundled Wine, then `wine` on `PATH` | shader compilers only |
 | `NORTHLIGHT_STORMLIB` | `tools/storm-build/storm.framework/storm` | `mpq.py` |
@@ -152,15 +194,17 @@ it is ignored by git), then a default. `python3 northlight_paths.py` prints what
 
 ## Install on macOS (WoWSilicon)
 
-With the game closed, from the client folder:
+With the game closed:
 
 ```sh
 python3 <repository>/renderer_status.py status
 python3 <repository>/renderer_status.py on      # or: off
+python3 <repository>/renderer_status.py on --client <client folder>
 ```
 
-`renderer_status.py` always treats the repository's parent folder as the client and ignores
-`NORTHLIGHT_CLIENT`, so install and uninstall work only when the repository sits inside the client folder.
+The client is `--client PATH`, else `NORTHLIGHT_CLIENT`, else `northlight.local.ini` `[paths] client`,
+else the repository's parent folder if it holds `Wow.exe` and `Data/`; with none of these the tool
+stops with an error that names them.
 `on` installs `renderer/frd9.dll` as `mods/d3d9.dll`, and `off` restores the recorded
 transaction. Add `--dry-run` to preview. The Windows package template is in
 `renderer/windows-package/`.

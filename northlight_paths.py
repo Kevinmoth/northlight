@@ -77,7 +77,8 @@ def _missing(what, name, hint=''):
     raise Missing(f'{what} not found: set NORTHLIGHT_{name.upper()} or [paths] {name} in northlight.local.ini{hint}.')
 
 
-def _is_client(p):
+def is_client(p):
+    """A WoW client folder: Wow.exe and Data/."""
     has = lambda *names: any((p / n).exists() for n in names)
     return has('Wow.exe', 'wow.exe', 'WoW.exe') and has('Data', 'data')
 
@@ -85,9 +86,9 @@ def _is_client(p):
 def client_root(required=True):
     """The WoW 3.3.5a client folder. Default: the repository's parent, if it is a client."""
     p = _path('client')
-    if p is None and _is_client(REPO.parent):
+    if p is None and is_client(REPO.parent):
         p = REPO.parent
-    if p is None or not _is_client(p):
+    if p is None or not is_client(p):
         if required:
             _missing('WoW client (folder with Wow.exe and Data/)', 'client')
         return None
