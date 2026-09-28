@@ -21,6 +21,7 @@ KEEP={
  'LOGGER intervalMs':'indirect: reportLogCost() runs only in the gated MIRROR block',
  'EXTENSION fault':'error','DISABLED:':'error','Resources ':'one-off: resource (re)creation',
  'VIEWPORT GATE':'capped: first 8','WORLD skipped frame':'capped: first 8 (periodic tail gated)',
+ 'WORLD skip episode':'capped: first 32 runs of skipped world frames (tail gated; 0.3.169)','WORLD coverage hold':'capped: first 32 hold/retire episodes (tail gated; 0.3.169)',
  'FIRST EFFECT FRAME':'one-off','MIRROR mismatch':'error (the audit itself is functional and ungated)',
  'WORLD non-caster draw rejected':'capped: first 4 (periodic tail gated)','Projection rejected':'capped: first',
  'D3D9 device wrapped':'start-up','MEMORY async sampler':'error','MEMORY guard':'warning: low address space (pressure/trim/after-trim/recovery, cooldown-limited)',

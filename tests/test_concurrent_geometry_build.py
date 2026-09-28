@@ -30,10 +30,10 @@ work=work[:begin]+'''            // FIXTURE REGION BUILD
                 if(fixtureThrow.exchange(false))throw std::bad_alloc();
                 if(fixtureFail.exchange(false)){result->message="fixture build failure";publishError();continue;}
                 if(!currentGeometry()){++superseded;continue;}
-                std::string error;if(!replacement->build(fixtureScene(r.camera),error))throw std::runtime_error(error);
+                std::string error;if(!replacement->build(fixtureScene(r.geometryCenter),error))throw std::runtime_error(error);
                 built->plan=std::make_shared<NorthlightWorldMesh::WorldMeshUploadPlan>();built->prepared=std::make_shared<PreparedCommit>();
-                built->bvh=replacement;built->map=r.map;built->center=r.camera;built->fog=std::make_shared<NorthlightRegionalFog::Field>();
-                {std::lock_guard<std::mutex> lock(mutex);centers[replacement.get()]=r.camera;history.push_back(r.camera);lastBuilt=replacement;++buildsDone;}
+                built->bvh=replacement;built->map=r.map;built->center=r.geometryCenter;built->fog=std::make_shared<NorthlightRegionalFog::Field>();
+                {std::lock_guard<std::mutex> lock(mutex);centers[replacement.get()]=r.geometryCenter;history.push_back(r.geometryCenter);lastBuilt=replacement;++buildsDone;}
             }
 '''+work[end:]
 assert work.count('std::thread([&]{')==1 and 'FIXTURE REGION BUILD' in work
@@ -97,7 +97,7 @@ ORPHANED
  NorthlightGeometryMemory::StallWatch generationStall;
  NorthlightQuality::Settings quality;std::string root="fixture/";
  std::mutex mutex;std::condition_variable wake;Request request;bool stopping=false,pending=false;
- std::atomic<bool> workerBusy{false},workerMemoryTrim{false};std::atomic<unsigned> workerFaultCode{0};
+ std::atomic<bool> workerBusy{false},workerMemoryTrim{false};std::atomic<unsigned> workerFaultCode{0},geometryBuildEstimateMs{1000};
  std::shared_ptr<Snapshot> published;std::shared_ptr<const PaletteRegion> publishedPaletteRegion;
  // Fixture build controls and observations (guarded by mutex unless atomic).
  std::atomic<unsigned> fixtureBuildMs{60},fixtureDefers{0};std::atomic<bool> fixtureThrow{false},fixtureFail{false};
@@ -111,8 +111,9 @@ struct Harness {
  Fixture f;std::thread thread;std::map<uint64_t,V> cameras;
  Harness(unsigned threads,unsigned buildMs,unsigned defers){f.quality.giThreads=threads;f.fixtureBuildMs=buildMs;f.fixtureDefers=defers;thread=std::thread([this]{f.work();});}
  ~Harness(){if(thread.joinable())stop();}
- void issue(V camera,std::shared_ptr<const NorthlightActorGeometry::ActorJob> job=nullptr,const char* map="Azeroth"){
-  {std::lock_guard<std::mutex> lock(f.mutex);auto r=f.request;r.map=map;r.camera=r.probeCenter=camera;r.light=fixtureLight();r.actorJob=job;
+ // lead: the 0.3.169 geometry lead (region build centre ahead of the eye); 0 = centred on the eye.
+ void issue(V camera,std::shared_ptr<const NorthlightActorGeometry::ActorJob> job=nullptr,const char* map="Azeroth",float lead=0){
+  {std::lock_guard<std::mutex> lock(f.mutex);auto r=f.request;r.map=map;r.camera=r.probeCenter=camera;r.geometryCenter=V(camera.x+lead,camera.y,camera.z);r.light=fixtureLight();r.actorJob=job;
    r.reason=f.request.id?2u:1u;r.id=f.request.id+1;r.baseId=r.id;r.queuedAt=GetTickCount();f.request=r;f.pending=true;cameras[r.id]=camera;}
   f.wake.notify_one();}
  // The WorldRenderer destructor sequence.
@@ -218,11 +219,12 @@ int main(){
    NorthlightGeometryMemory::StallWatch v;v.deferred(1000);assert(!v.due(1000,10)&&!v.due(1009,10)&&v.due(1010,10));}
   Harness h(1,100,0);h.issue({3,5,4});assert(h.settled());
   struct Pending {std::shared_ptr<NorthlightGI::BVH> bvh;std::string map;};std::unique_ptr<Pending> pending;std::shared_ptr<Fixture::Snapshot> active;
-  // One render frame: adopt an applicable publication, retire an out-of-range active (updateWorldContext),
+  // (d) with the 0.3.169 hold the jumps are beyond its 160 limit: 200 units each.
+  // One render frame: adopt a publication, retire an active beyond the 0.3.169 hard limit (updateWorldContext),
   // then the 0.3.156 rule at the same site; without the rule the staged upload is never released.
   auto frame=[&](bool rule){std::lock_guard<std::mutex> lock(h.f.mutex);const auto& q=h.f.request;auto p=h.f.published;
-   if(p&&p!=active&&NorthlightWorldStreaming::applicable(p->map,p->center,q.map,q.camera))active=p;
-   if(active&&!NorthlightWorldStreaming::applicable(active->map,active->center,q.map,q.camera))active.reset();
+   if(p&&p!=active&&NorthlightWorldStreaming::adopts(p->map,p->center,bool(p->bvh),active&&active->bvh,q.map,q.camera))active=p;
+   if(active&&!NorthlightWorldStreaming::retained(active->map,active->center,q.map,q.camera))active.reset();
    if(rule&&Fixture::pendingOrphaned(pending.get(),active.get()))pending.reset();};
   frame(true);assert(active&&active->bvh);pending.reset(new Pending{active->bvh,active->map});std::weak_ptr<NorthlightGI::BVH> a=active->bvh;
   h.issue({203,5,4});frame(false);assert(!active&&pending); /* active retired; the staged upload stays (0.3.155) */
@@ -246,8 +248,8 @@ int main(){
   Harness h(1,150,0);h.issue({3,5,4});assert(h.settled());
   struct Pending {std::shared_ptr<NorthlightGI::BVH> bvh;std::string map;};std::unique_ptr<Pending> pending;std::shared_ptr<Fixture::Snapshot> active;
   auto frame=[&](bool rule){std::lock_guard<std::mutex> lock(h.f.mutex);const auto& q=h.f.request;auto p=h.f.published;
-   if(p&&p!=active&&NorthlightWorldStreaming::applicable(p->map,p->center,q.map,q.camera))active=p;
-   if(active&&!NorthlightWorldStreaming::applicable(active->map,active->center,q.map,q.camera))active.reset();
+   if(p&&p!=active&&NorthlightWorldStreaming::adopts(p->map,p->center,bool(p->bvh),active&&active->bvh,q.map,q.camera))active=p;
+   if(active&&!NorthlightWorldStreaming::retained(active->map,active->center,q.map,q.camera))active.reset();
    if(rule&&Fixture::pendingOrphaned(pending.get(),active.get()))pending.reset();};
   frame(true);assert(active);pending.reset(new Pending{active->bvh,active->map});std::weak_ptr<NorthlightGI::BVH> a=active->bvh;
   if(variant==1){h.issue({43,5,4});assert(h.waitFor([&]{return h.f.buildsDone==2&&h.f.published->bvh==h.f.lastBuilt.lock()&&!h.f.building;},30000));}
@@ -265,7 +267,43 @@ int main(){
    if(variant==1)assert(h.f.buildsStarted==started+1);}
   assert(h.settled());verifySettled(h,{3,5,4});
   std::printf("teleport %.0f variant=%d: still camera recovered (request id unchanged, staged generation freed, jump region adopted)\n",jump,variant);}
- std::puts("PASS concurrent geometry build: moves solved on the previous generation during builds; settled atlas bit-identical to a sequential final-generation solve; still-camera deferral; stop mid-build; builder and worker faults join; map change, build failure and stale adoption during builds; orphaned staged upload released (0.3.156); same-map teleports recover with a still camera");
+ // (f) 0.3.169 coverage hold: region A is active and staged when the camera jumps 120 or 150 units
+ // on the same map and stays still. A is beyond the 96 coverage but held (no vanilla frame) while
+ // B builds; B is adopted within the same hard limit, A's staged upload is released by the
+ // production rule and its generation freed, without a generation stall.
+ for(float jump:{120.f,150.f}){
+  Harness h(1,150,0);h.issue({3,5,4});assert(h.settled());
+  struct Pending {std::shared_ptr<NorthlightGI::BVH> bvh;std::string map;};std::unique_ptr<Pending> pending;std::shared_ptr<Fixture::Snapshot> active;
+  unsigned heldFrames=0,emptyFrames=0;
+  auto frame=[&]{std::lock_guard<std::mutex> lock(h.f.mutex);const auto& q=h.f.request;auto p=h.f.published;
+   if(p&&p!=active&&NorthlightWorldStreaming::adopts(p->map,p->center,bool(p->bvh),active&&active->bvh,q.map,q.camera))active=p;
+   if(active&&!NorthlightWorldStreaming::retained(active->map,active->center,q.map,q.camera))active.reset();
+   if(Fixture::pendingOrphaned(pending.get(),active.get()))pending.reset();
+   if(!active)++emptyFrames;else if(!NorthlightWorldStreaming::applicable(active->map,active->center,q.map,q.camera))++heldFrames;};
+  frame();assert(active&&active->bvh);pending.reset(new Pending{active->bvh,active->map});std::weak_ptr<NorthlightGI::BVH> a=active->bvh;
+  const V target(3+jump,5,4);h.issue(target);
+  frame();{std::lock_guard<std::mutex> lock(h.f.mutex);assert(active&&active->bvh==a.lock()&&pending&&!NorthlightWorldStreaming::applicable(active->map,active->center,h.f.request.map,h.f.request.camera));}
+  for(unsigned t=0;t<6000;++t){frame();{std::lock_guard<std::mutex> lock(h.f.mutex);if(active&&active->bvh==h.f.lastBuilt.lock()&&h.f.history.back().x==target.x)break;}
+   std::this_thread::sleep_for(std::chrono::milliseconds(5));}
+  {std::lock_guard<std::mutex> lock(h.f.mutex);
+   assert(active&&active->bvh==h.f.lastBuilt.lock()&&h.f.history.back().x==target.x&&!pending&&a.expired()&&!emptyFrames&&heldFrames>0);
+   assert(h.f.buildsStarted==2&&h.f.buildsDone==2&&!h.f.generationStall.armed);}
+  for(unsigned t=0;t<40;++t){frame();std::this_thread::sleep_for(std::chrono::milliseconds(5));}
+  assert(h.settled());verifySettled(h,{3,5,4});
+  std::printf("hold %.0f: A held for %u frames (no empty frame), B adopted, staged A released, no stall\n",jump,heldFrames);}
+ {// (g) 0.3.169 geometry lead: a region built 60 ahead of the eye. When the eye falls more than 64
+  // behind it while the lead point stays within the 32-unit refresh, the worker publishes it and
+  // waits for the next request: no pending re-run (spin), no extra build. It solves once the eye arrives.
+  Harness h(1,100,0);h.issue({3,5,4});assert(h.settled());
+  h.issue({23,5,4},nullptr,"Azeroth",60);assert(h.waitFor([&]{return h.f.buildsDone==2;},30000));
+  {std::lock_guard<std::mutex> lock(h.f.mutex);assert(h.f.history.back().x==83);}
+  h.issue({13,5,4},nullptr,"Azeroth",60); /* eye 70 behind the region, lead point 10 from it */
+  assert(h.waitFor([&]{return h.f.published&&h.f.published->bvh==h.f.lastBuilt.lock()&&!h.f.pending&&!h.f.workerBusy;},30000));
+  for(unsigned t=0;t<40;++t){std::this_thread::sleep_for(std::chrono::milliseconds(5));std::lock_guard<std::mutex> lock(h.f.mutex);assert(!h.f.pending&&!h.f.building&&h.f.buildsStarted==2);}
+  h.issue({33,5,4},nullptr,"Azeroth",60); /* eye 50 from the region: GI solves on it */
+  assert(h.settled());{std::lock_guard<std::mutex> lock(h.f.mutex);assert(h.f.buildsStarted==2&&h.f.buildsDone==2);}
+  verifySettled(h,{3,5,4});std::puts("lead: region built ahead, worker idles (no spin, no extra build) until the eye is within 64, then settles exactly");}
+ std::puts("PASS concurrent geometry build: moves solved on the previous generation during builds; settled atlas bit-identical to a sequential final-generation solve; still-camera deferral; stop mid-build; builder and worker faults join; map change, build failure and stale adoption during builds; orphaned staged upload released (0.3.156); same-map teleports recover with a still camera; 0.3.169 120/150 hold adopts without a stall; lead region idles without spinning");
 }
 '''.replace('SNAPSHOT',snapshot).replace('REQUEST',request).replace('PALETTE',palette).replace('ORPHANED',orphaned).replace('WORK',work)
 report={'status':'pass','game_launched':False,'runs':[],'sha256':{n:hashlib.sha256(fp.tracked(n).read_bytes()).hexdigest() for n in ['world_renderer.h','world_probe_progress.h','world_probe_cache.h','gi_solve_pool.h','world_gi.cpp','test_concurrent_geometry_build.py']}}

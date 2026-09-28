@@ -263,6 +263,8 @@ class Device final : public GuardedMirrorDevice {
     bool failed = false, projectionValid = false, key10 = false, key12=false;
     unsigned frame = 0, appliedFrames = 0, matchedTerrain = 0, matchedUI = 0, projectionRejects = 0;
     unsigned worldSkippedFrames=0;
+    // 0.3.169: one line per run of skipped world frames, with the first and last skipReason().
+    unsigned worldSkipRun=0,worldSkipEpisodes=0;DWORD worldSkipStart=0;const char* worldSkipFirst="";const char* worldSkipLast="";
     unsigned nonWorldCaptureRejects=0;
     unsigned drawCalls=0, missingVS=0, terrainDraws=0, terrainShadowDraws=0, viewportRejects=0, depthRejects=0, uiDraws=0, uiAfterTerrain=0;
     unsigned viewportReports=0;
@@ -502,9 +504,15 @@ class Device final : public GuardedMirrorDevice {
         ext->SetTexture(2,ao); ext->SetPixelShader(compositePS);
         if (error(quad(width,height),"composition pass")) return;
         gpuProfile->mark("AOComposite");
-        if(world&&debugMode==0&&!world->render(saved.targets[0],depthTex,width,height,sceneFormat,nearZ,farZ,worldMinDepth,worldMaxDepth,worldDebug,gpuProfile.get(),waterMask)){
-            if(++worldSkippedFrames<=8||(worldSkippedFrames%120==0&&diagnostics()))
-                logf("WORLD skipped frame=%u tick=%lu context=%d ready=%d count=%u",frame,(unsigned long)GetTickCount(),world->hasContext(),world->ready(),worldSkippedFrames);
+        if(world&&debugMode==0){
+            if(!world->render(saved.targets[0],depthTex,width,height,sceneFormat,nearZ,farZ,worldMinDepth,worldMaxDepth,worldDebug,gpuProfile.get(),waterMask)){
+                if(++worldSkippedFrames<=8||(worldSkippedFrames%120==0&&diagnostics()))
+                    logf("WORLD skipped frame=%u tick=%lu context=%d ready=%d count=%u reason=%s",frame,(unsigned long)GetTickCount(),world->hasContext(),world->ready(),worldSkippedFrames,world->lastSkipReason());
+                worldSkipLast=world->lastSkipReason();if(!worldSkipRun++){worldSkipStart=GetTickCount();worldSkipFirst=worldSkipLast;}
+            }else if(worldSkipRun){
+                if(++worldSkipEpisodes<=32||diagnostics())logf("WORLD skip episode reason=%s last=%s frames=%u ms=%lu",worldSkipFirst,worldSkipLast,worldSkipRun,(unsigned long)(GetTickCount()-worldSkipStart));
+                worldSkipRun=0;
+            }
         }
         if(kWaterEffectsEnabled&&world&&water&&debugMode==0&&worldDebug==0){NorthlightWaterContext waterContext;
             if(world->waterContext(waterContext,nearZ,farZ,worldMinDepth,worldMaxDepth))water->render(saved.targets[0],depthTex,width,height,sceneFormat,waterContext);
@@ -1153,7 +1161,7 @@ static HMODULE backend() {
     // Only DXVK keeps the legacy (unchecked, no RESZ dummy draw) rules; every
     // other runtime, including the system fallback, gets the native rules.
     if(module&&(result.fallback||(configured==NorthlightBackend::Kind::Legacy&&!last.info.dxvk)))selectedBackend=NorthlightBackend::Kind::Native;
-    logf("Northlight renderer 0.3.168; reference sun look (sun glow hue from native/sunHalo band, soft-shoulder glare, veil, sun-tinted haze), native sun/moon suppressed (F1b), lamps dimmed to 30 pct in direct sun, native moon02 skipped by texture identity, no game bytes in the DLL, MEMREAD self-read profile (RenderProfile), soft sun removal in shadow, jump-stable shadow anchor; backend=%s path=%ls loaded=%d error=%lu",
+    logf("Northlight renderer 0.3.169; reference sun look (sun glow hue from native/sunHalo band, soft-shoulder glare, veil, sun-tinted haze), native sun/moon suppressed (F1b), lamps dimmed to 30 pct in direct sun, native moon02 skipped by texture identity, no game bytes in the DLL, MEMREAD self-read profile (RenderProfile), soft sun removal in shadow, jump-stable shadow anchor, geometry coverage hold with travel lead; backend=%s path=%ls loaded=%d error=%lu",
          NorthlightBackend::name(configured),last.path.c_str(),module!=nullptr,module?0ul:(last.error?last.error:(unsigned long)ERROR_INVALID_PARAMETER));
     logAttempts(result.attempts);
     logHostExecutable(sys.selfPath);

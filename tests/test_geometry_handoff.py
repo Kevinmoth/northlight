@@ -26,7 +26,7 @@ template<class... T> void logf(const char*,T...){}
 struct Fixture {
  struct PreparedCommit {int tag=0;};
 SNAPSHOT
- struct Request {std::string map="Azeroth";V camera;uint64_t id=1;DWORD queuedAt=1;int actorJob=1;};
+ struct Request {std::string map="Azeroth";V camera,geometryCenter;uint64_t id=1;DWORD queuedAt=1;int actorJob=1;};
  Request request,original,consumed;
  std::mutex mutex;bool stopping=false,pending=false;
  unsigned superseded=0,retargeted=0,enteredGI=0;
@@ -60,7 +60,7 @@ int main(){
  for(float distance:{0.f,32.f,64.f,64.01f,96.f}){
   Fixture f;f.request.id=9;f.request.queuedAt=200;f.request.camera={distance,0,0};f.request.actorJob=19;f.pending=true;
   auto old=std::make_shared<Fixture::Snapshot>();old->map="Azeroth";old->serial=17;old->atlas.resize(2);old->bvh=std::make_shared<NorthlightGI::BVH>();
-  f.concurrentSolves=5;f.stallMs=40;f.published=old;f.run();
+  f.request.geometryCenter=f.request.camera;f.concurrentSolves=5;f.stallMs=40;f.published=old;f.run();
   assert(f.published!=old&&f.published->bvh==f.bvh&&f.published->meshPlan==f.scenePlan);
   assert(!f.concurrentSolves&&!f.stallMs);
   assert(f.published->center.x==0&&f.published->map=="Azeroth"&&f.published->serial==17&&f.published->atlas.size()==2);
@@ -78,14 +78,20 @@ int main(){
   if(kind==3)f.stopping=true;
   f.run();assert(f.published==old&&!f.enteredGI);if(kind<3)assert(f.pending&&f.superseded==1);
  }
+ // 0.3.169 lead: a region built ahead that the eye has not reached (>64, lead point within the
+ // 32-unit refresh) is published and waits for the next request: no pending re-run (no spin).
+ for(float lead:{0.f,10.f,40.f}){Fixture f;f.request.id=9;f.request.camera={-70,0,0};f.request.geometryCenter={-70+lead,0,0};f.pending=true;f.run();
+  assert(f.published&&f.published->bvh==f.bvh&&!f.enteredGI);
+  assert(f.pending==(lead<38)); /* lead point 70-lead from the centre: >32 wants a new region */}
  Fixture cross;cross.published=std::make_shared<Fixture::Snapshot>();cross.published->map="Kalimdor";cross.published->atlas.resize(4);cross.published->serial=99;
  cross.run();assert(cross.published->atlas.empty()&&cross.published->serial==0&&cross.enteredGI==1);
  Fixture previous;previous.previousLighting=std::make_shared<Fixture::Snapshot>();previous.previousLighting->map="Azeroth";previous.previousLighting->serial=5;
  previous.run();assert(previous.published->serial==5&&!previous.previousLighting);
  Fixture failed;failed.published=std::make_shared<Fixture::Snapshot>();failed.published->map="Azeroth";failed.published->bvh=failed.bvh;
  auto kept=failed.published;assert(!failed.failure()&&failed.published==kept);
- failed.request.camera={97,0,0};assert(failed.failure()&&failed.published==failed.result);
- std::puts("PASS actual geometry handoff: publish before GI; latest camera/actor request; fixed geometry center; 32/64/96 boundaries; same-map immutable GI fallback; cross-map/distant/nonfinite/stop rejection; failed replacement retains usable geometry; swap diagnostics reset at publication");
+ failed.request.camera={97,0,0};assert(!failed.failure()&&failed.published==kept); /* 0.3.169: retained (160), not applicable (96) */
+ failed.request.camera={160.01f,0,0};assert(failed.failure()&&failed.published==failed.result);
+ std::puts("PASS actual geometry handoff: publish before GI; latest camera/actor request; fixed geometry center; 32/64/96 boundaries; same-map immutable GI fallback; cross-map/distant/nonfinite/stop rejection; failed replacement retains usable geometry up to the 160 hold limit; lead region waits without re-running; swap diagnostics reset at publication");
 }
 '''.replace('SNAPSHOT', snapshot).replace('HANDOFF', handoff).replace('ERROR', error)
 report = {'game_launched': False, 'production_sha256': hashlib.sha256(source.encode()).hexdigest(), 'runs': []}

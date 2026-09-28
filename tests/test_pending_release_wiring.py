@@ -6,7 +6,11 @@ a geometry generation alive; with an out-of-range published build that filled
 Generations<BVH,2> and the builder deferred for ever (0.3.155 game log). The release rule
 must run where upload() cannot: before render()'s ready() gate and at the out-of-range
 active.reset() site, both on the D3D thread. The watchdog only logs. Writes nothing.
-The behaviour itself runs in test_concurrent_geometry_build.py case (d)."""
+The behaviour itself runs in test_concurrent_geometry_build.py case (d).
+0.3.169 coverage hold: the out-of-range site retires on the hard limit (retained, 160) or a map
+change, never on the 96-unit applicable(); adoption uses the same limit (adopts) so a held
+snapshot and an unadoptable build cannot fill both generations, and the builder's error
+publication keeps a retained region. Hold/retire and skip-episode diagnostics are wired."""
 import sys; from pathlib import Path; sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root
 import northlight_paths as fp
 import re
@@ -20,6 +24,10 @@ render=method('    bool render(IDirect3DSurface9* targetSurface');upload=method(
 context=method('    void updateWorldContext(const char* map,const float* camera,const NorthlightWmoContext::Lighting* global=nullptr){');helper=method('    void releaseOrphanedPending(const char* site){')
 gate='if(!ready()||!resources(w,h,fmt)||!upload(streamBudget)){'
 reset='active.reset();}'
+retire='const char* retired=active&&!NorthlightWorldStreaming::retained(active->map,active->center,r.map,r.camera)?(active->map!=r.map?"map":"retired"):nullptr;'
+adopt='if(published&&published!=active&&NorthlightWorldStreaming::adopts(published->map,published->center,bool(published->bvh),active&&active->bvh,r.map,r.camera)){'
+builder=w[w.index('    void work() {'):w.index('\n    bool check(HRESULT h,const char* s)')]
+error=builder[builder.index('auto publishError='):builder.index('// Geometry validity is spatial')]
 admission='if(!generations.canAdmit()){++generationDeferrals;'
 checks={
  'one release rule: the upload() predicate as a static helper, shared by the fixture':
@@ -32,6 +40,24 @@ checks={
  'render(): release before the ready() gate':render.count('releaseOrphanedPending("render");')==1 and render.count(gate)==1 and render.index('releaseOrphanedPending("render");')<render.index(gate),
  'updateWorldContext(): release right after the out-of-range active.reset()':
   context.count(reset)==1 and context.count('releaseOrphanedPending("range");')==1 and context.index(reset)<context.index('releaseOrphanedPending("range");')<context.index('DWORD now=GetTickCount();'),
+ '0.3.169 retire on the hard limit or a map change, then the release rule (A2, A5)':
+  context.count(retire)==1 and context.index(retire)<context.index(reset)<context.index('releaseOrphanedPending("range");')
+  and 'if(retired){retirementBacklog.retireOrFree(reaper,active,snapshotRetireBytes(*active));active.reset();}' in context
+  and 'NorthlightWorldStreaming::applicable(active->map,active->center,r.map,r.camera)){retirementBacklog' not in context,
+ '0.3.169 adoption uses the same hard limit and never takes an error snapshot over a drawable one (A1, A3)':
+  context.count(adopt)==1 and context.index(adopt)<context.index(retire)
+  and 'inline bool adopts(' in fp.src('world_streaming.h').read_text() and 'return (drawable||!activeDrawable)&&retained(map,center,currentMap,camera);' in fp.src('world_streaming.h').read_text(),
+ '0.3.169 builder error publication keeps a retained region (A3)':
+  'if(published&&published->bvh&&NorthlightWorldStreaming::retained(published->map,published->center,request.map,request.camera)){' in error,
+ '0.3.169 handoff and builder coverage checks stay at 96 (A6)':
+  'return !stopping&&NorthlightWorldStreaming::applicable(r.map,r.geometryCenter,request.map,request.camera);' in builder
+  and 'if(!NorthlightWorldStreaming::applicable(sceneMap,sceneCenter,request.map,request.camera)){' in builder and builder.count('retained(')==1,
+ '0.3.169 D1/D2: hold begin/end once per episode, independent of pendingMesh; coverMax on the camera line':
+  context.count('logf("WORLD coverage hold begin dist=')==1 and context.count('logf("WORLD coverage hold end ms=')==1
+  and 'coverMax=%.1f lead=%.1f' in context and context.count('coverMax=0;')==1 and 'if(distance>coverMax)coverMax=distance;' in context,
+ '0.3.169 D3: a reason for every false render() and one skip-episode line per run':
+  render.count('skipReason=')>=5 and 'skipReason="fault";if(workerFault())return false;' in render
+  and r.count('logf("WORLD skip episode reason=%s last=%s frames=%u ms=%lu"')==1 and 'world->lastSkipReason()' in r,
  'no other pendingMesh release path changed':w.count('retirePendingCpu();pendingMesh.reset();')==3,
  'updateWorldContext runs only from the draw-hook context readers (D3D thread, like render())':
   w.count('updateWorldContext(map,')==2 and 'updateWorldContext(map,camera.camera,globalRead?&light:nullptr);' in method('    bool wmoContext(IDirect3DVertexShader9* shader){') and 'updateWorldContext(map,camera,globalRead?&global:nullptr);' in method('    void terrainContext(){')
@@ -49,4 +75,4 @@ checks={
 }
 for k,v in checks.items():print(('PASS ' if v else 'FAIL ')+k)
 assert all(checks.values())
-print('PASS pending release wiring: one rule before the ready() gate, at the out-of-range site and in upload(); log-only stall watchdog')
+print('PASS pending release wiring: one rule before the ready() gate, at the out-of-range site and in upload(); log-only stall watchdog; 0.3.169 hold/adopt on the 160 hard limit with diagnostics')

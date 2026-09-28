@@ -11,6 +11,10 @@ constexpr float Radius=928.f;
 // Far cached cascade: radius 240 including its margin, depth half-span 640.
 // Its enclosing sphere is <725u. Add 80u maximum camera orbit distance and
 // 96u publication/upload applicability margin: 928u covers every direction.
+// 0.3.169: the render thread holds a snapshot past 96u until its replacement
+// applies (hard limit 160u, world_streaming.h). Between 123u and 160u, low-sun
+// terrain casters at the extreme far-cascade corner can be missing for up to
+// one build; the near cascade stays inside the local box.
 constexpr double Origin=17066.666666666666,Chunk=100.0/3.0;
 inline std::pair<int,int> chunk(Vec3 a,Vec3 b,Vec3 c){
     const double x=std::floor((Origin-(double(a.y)+b.y+c.y)/3)/Chunk);

@@ -126,8 +126,9 @@ class WorldRenderer {
         NorthlightGI::MovingSolveStats movingStats;size_t pathRecordBytes=0;
         bool staticOnly=false,partial=false;
     };
-    // probeCenter (0.3.153 GIProbeAhead): probe window origin, solve order and move trigger; camera (eye) for everything else.
-    struct Request { std::shared_ptr<const NorthlightActorGeometry::ActorJob> actorJob;uint64_t actorSerial=0; V camera,probeCenter; NorthlightGI::Lighting light; std::string map; uint64_t id=0,baseId=0;DWORD queuedAt=0;unsigned reason=0; };
+    // probeCenter (0.3.153 GIProbeAhead): probe window origin, solve order and move trigger; geometryCenter (0.3.169 lead):
+    // the region build centre and its refresh trigger; camera (eye) for everything else, including every coverage check.
+    struct Request { std::shared_ptr<const NorthlightActorGeometry::ActorJob> actorJob;uint64_t actorSerial=0; V camera,probeCenter,geometryCenter; NorthlightGI::Lighting light; std::string map; uint64_t id=0,baseId=0;DWORD queuedAt=0;unsigned reason=0; };
     IDirect3DDevice9* d;
     std::string root;
     std::unique_ptr<StaticShadow::Streamer> staticStream;
@@ -150,6 +151,7 @@ class WorldRenderer {
     static constexpr uint32_t GenerationStallLogMs=10000;
     std::atomic<bool> workerBusy{false};DWORD actorRequestTick=0;
     std::atomic<unsigned> workerFaultCode{0};
+    std::atomic<unsigned> geometryBuildEstimateMs{1000}; /* 0.3.169: builder's smoothed build time, read by the render thread's lead */
 public:
     // Read-only access to the COMMITTED terrain pages. Never start uploads,
     // loads, shadow updates or mesh publication from the native sky draw hook.
@@ -189,6 +191,11 @@ private:
     bool valid=false,failed=false,reportedContext=false;
     unsigned contextRejects=0,frames=0,slowReports=0;
     DWORD diagnosticTick=0;
+    // 0.3.169 coverage hold and geometry lead (render thread). coverMax: largest eye-to-active
+    // distance since the last WORLD camera line. A hold episode is active beyond 96 units.
+    NorthlightWorldStreaming::Motion geometryMotion;float geometryLead=0,coverMax=0,holdMax=0;
+    bool coverageHold=false;DWORD holdStart=0;unsigned holdEpisodes=0;
+    const char* skipReason="";
     bool gpuDiagnosticArmed=true;unsigned gpuDiagnosticCaptures=0;
     std::string gpuDiagnosticDirectory;
     IDirect3DTexture9* regionalFogTexture=nullptr;
@@ -845,23 +852,23 @@ private:
                 paletteRegion=next;
                 {std::lock_guard<std::mutex> lock(mutex);publishedPaletteRegion=next;}
             }
-            if(!wanted&&builtValid&&!NorthlightWorldStreaming::needsGeometry(builtMap,builtCenter,r.map,r.camera))continue;
+            if(!wanted&&builtValid&&!NorthlightWorldStreaming::needsGeometry(builtMap,builtCenter,r.map,r.geometryCenter))continue;
             builtValid=false;
-            auto result=std::make_shared<Snapshot>();result->map=r.map;result->center=r.camera;
+            auto result=std::make_shared<Snapshot>();result->map=r.map;result->center=r.geometryCenter;
             DWORD started=GetTickCount();result->requestId=r.id;result->requestedAt=r.queuedAt;result->queueMs=started-r.queuedAt;
             auto publishError=[&](){
                 std::lock_guard<std::mutex> lock(mutex);
                 if(stopping||request.id!=r.id){++superseded;return false;}
                 // A failed replacement must not replace usable geometry with
                 // an empty error snapshot. Its existing spatial expiry remains.
-                if(published&&published->bvh&&NorthlightWorldStreaming::applicable(published->map,published->center,request.map,request.camera)){
+                if(published&&published->bvh&&NorthlightWorldStreaming::retained(published->map,published->center,request.map,request.camera)){
                     logf("WORLD replacement deferred; previous region retained: %s",result->message.c_str());return false;
                 }
                 published=result;return true;
             };
             // Geometry validity is spatial, independent of the latest GI
             // request ID. A camera retarget must not discard a usable build.
-            auto currentGeometry=[&](){std::lock_guard<std::mutex> lock(mutex);return !stopping&&NorthlightWorldStreaming::applicable(r.map,r.camera,request.map,request.camera);};
+            auto currentGeometry=[&](){std::lock_guard<std::mutex> lock(mutex);return !stopping&&NorthlightWorldStreaming::applicable(r.map,r.geometryCenter,request.map,request.camera);};
             auto deferBuild=[&](const char* stage,NorthlightGeometryMemory::Sample sample,unsigned delay){
                 DWORD now=GetTickCount();if(!memoryReportAt||now-memoryReportAt>=1000){memoryReportAt=now;logGeometryMemory(stage,sample,generations.live(),workerMemoryExact);}
                 // The consumed request must survive a stationary camera. Never
@@ -891,8 +898,9 @@ private:
                 if(!NorthlightGeometryMemory::admits(memory,NorthlightGeometryMemory::buildBudget(64*NorthlightGeometryMemory::MiB))){deferBuild("build-deferred",memory,1000);continue;}
                 if(NorthlightDiagnostics::enabled())logGeometryMemory("before-load",memory,generations.live(),workerMemoryExact);
                 std::string error;
-                int tx=int(std::floor((17066.6666667-r.camera.y)/533.3333333));
-                int ty=int(std::floor((17066.6666667-r.camera.x)/533.3333333));
+                const V center=r.geometryCenter;
+                int tx=int(std::floor((17066.6666667-center.y)/533.3333333));
+                int ty=int(std::floor((17066.6666667-center.x)/533.3333333));
                 std::vector<std::string> tiles;
                 for(int y=ty-1;y<=ty+1;++y)for(int x=tx-1;x<=tx+1;++x){
                     char name[512];std::snprintf(name,sizeof name,"%sworld-cache/%s/%d_%d.fg3",root.c_str(),r.map.c_str(),x,y);
@@ -907,7 +915,7 @@ private:
                 };
                 auto replacement=std::make_shared<NorthlightGI::BVH>();
                 if(!generations.track(replacement))throw std::runtime_error("Geometry generation admission invariant");
-                if(tiles.empty()||!localGeometry.build(tiles,root+"world-cache/models",r.map,r.camera-V(288,288,320),r.camera+V(288,288,320),*replacement,error,localAdmission,quality.giFastBVH!=0)||!replacement->triangleCount()){
+                if(tiles.empty()||!localGeometry.build(tiles,root+"world-cache/models",r.map,center-V(288,288,320),center+V(288,288,320),*replacement,error,localAdmission,quality.giFastBVH!=0)||!replacement->triangleCount()){
                     replacement.reset();
                     if(localDeferred){localGeometry.reset();deferBuild("local-geometry-retry",workerMemory(),1000);continue;}
                     result->message=error.empty()?"No cached geometry for "+r.map:error;publishError();continue;
@@ -939,12 +947,12 @@ private:
                     logf("WORLD terrain allocation requestMiB=%.2f requiredContiguousMiB=%.2f",double(bytes)/1048576,double(bytes+NorthlightGeometryMemory::ContiguousMargin)/1048576);
                     return false;
                 };
-                const float reach=shadowRanges.at(r.map,NorthlightRegionalFog::zoneAt(paletteRegion->region,r.camera.x,r.camera.y));
+                const float reach=shadowRanges.at(r.map,NorthlightRegionalFog::zoneAt(paletteRegion->region,center.x,center.y));
                 const bool extended=reach>NorthlightShadowTerrain::Radius;
                 const int tileReach=extended?int(std::ceil(reach/NorthlightRegionalFog::TileSize)):2;
                 std::function<bool(V,V)> terrainFilter,terrainChunkFilter;
-                if(extended)terrainFilter=[center=r.camera](V lo,V hi){return NorthlightRegionalShadow::selected(center,lo,hi);};
-                if(extended)terrainChunkFilter=[center=r.camera](V lo,V hi){return NorthlightRegionalShadow::selectedChunk(center,lo,hi);};
+                if(extended)terrainFilter=[center](V lo,V hi){return NorthlightRegionalShadow::selected(center,lo,hi);};
+                if(extended)terrainChunkFilter=[center](V lo,V hi){return NorthlightRegionalShadow::selectedChunk(center,lo,hi);};
                 std::vector<std::string> shadowTiles;
                 for(int y=ty-tileReach;y<=ty+tileReach;++y)for(int x=tx-tileReach;x<=tx+tileReach;++x){
                     const double zero=NorthlightRegionalFog::WorldZero,size=NorthlightRegionalFog::TileSize;
@@ -953,9 +961,9 @@ private:
                     FILE* f=std::fopen(name,"rb");if(f){std::fclose(f);shadowTiles.emplace_back(name);}
                 }
                 NorthlightGI::WorldScene shadowTerrain;
-                const bool terrainLoaded=NorthlightGI::loadInstancedScenes(shadowTiles,root+"world-cache/models",r.camera-V(reach,reach,reach),r.camera+V(reach,reach,reach),shadowTerrain,error,1,terrainAdmission,terrainFilter,terrainChunkFilter);
+                const bool terrainLoaded=NorthlightGI::loadInstancedScenes(shadowTiles,root+"world-cache/models",center-V(reach,reach,reach),center+V(reach,reach,reach),shadowTerrain,error,1,terrainAdmission,terrainFilter,terrainChunkFilter);
                 const double terrainLoadMs=phaseElapsed();
-                if(!terrainLoaded||!NorthlightShadowTerrain::build(replacement->scene(),shadowTerrain,r.camera,*plan,error,terrainAdmission,reach)){
+                if(!terrainLoaded||!NorthlightShadowTerrain::build(replacement->scene(),shadowTerrain,center,*plan,error,terrainAdmission,reach)){
                     if(terrainDeferred){shadowTerrain=NorthlightGI::WorldScene{};plan.reset();replacement.reset();deferBuild("shadow-terrain-retry",workerMemory(),1000);continue;}
                     result->message=error;publishError();continue;
                 }
@@ -981,13 +989,13 @@ private:
                 std::shared_ptr<const PreparedCommit> prepared;
                 if(PreparedCommitData){try {auto next=std::make_shared<PreparedCommit>();next->plan=plan.get();next->owners=StaticShadow::makeOwners(ownerPlacements(*plan));
                     next->fixed=std::make_shared<const FixedChunks>(plan->fixedTerrainChunks);prepared=std::move(next);}catch(...){prepared.reset();}}
-                built->plan=plan;built->prepared=std::move(prepared);built->bvh=replacement;built->map=r.map;built->center=r.camera;
-                float eye[]={r.camera.x,r.camera.y,r.camera.z};
+                built->plan=plan;built->prepared=std::move(prepared);built->bvh=replacement;built->map=r.map;built->center=center;
+                float eye[]={center.x,center.y,center.z};
                 if(lightCache.loadLights(r.map,eye,520,built->rawLights))for(auto& light:built->rawLights)
                     built->lights.push_back({vec(light.position),vec(light.diffuse)*3.14159265f,light.attenuationStart,light.attenuationEnd});
                 if(NorthlightDiagnostics::enabled())logf("GI local lights map=%s count=%zu (indirect only; authored direct light retained)",r.map.c_str(),built->lights.size());
                 const auto& region=paletteRegion->region;
-                built->fog=std::make_shared<NorthlightRegionalFog::Field>(NorthlightRegionalFog::buildField(replacement->scene(),region,r.camera.x,r.camera.y));
+                built->fog=std::make_shared<NorthlightRegionalFog::Field>(NorthlightRegionalFog::buildField(replacement->scene(),region,center.x,center.y));
                 if(NorthlightDiagnostics::enabled())logf("REGIONAL FOG map=%s tiles=%zu missing=%u groundCells=%u fogCells=%u airCells=%u indoorCells=%u citySurfaceCells=%u",r.map.c_str(),region.tiles.size(),region.missing,built->fog->groundCells,built->fog->fogCells,built->fog->airCells,built->fog->indoorCells,built->fog->citySurfaceCells);
                 const double environmentMs=phaseElapsed();const auto& memoryAfter=workerAdmissionProbe.stats();
                 if(NorthlightDiagnostics::enabled())logf("WORLD geometry phases buildId=%llu localMs=%.3f terrainLoadMs=%.3f shadowPlanMs=%.3f pagesMs=%.3f environmentMs=%.3f memoryMs=%.3f memoryRequests=%llu witnessHits=%llu fullScans=%llu regionQueries=%llu memoryTimeIncluded=1",
@@ -997,12 +1005,13 @@ private:
             }
             // END REGION BUILD
             built->id=r.id;built->ms=GetTickCount()-started;built->superseded=superseded;
+            geometryBuildEstimateMs.store((3*geometryBuildEstimateMs.load(std::memory_order_relaxed)+unsigned(std::min<DWORD>(built->ms,4000)))/4,std::memory_order_relaxed);
             // Replaces an unadopted older build; it satisfies every earlier worker request.
             // The replaced build (tens of MB) is freed after unlocking, never under the mutex.
             {std::lock_guard<std::mutex> lock(mutex);if(stopping||builderExit)return;
              std::swap(builtGeometry,built);geometryWanted=false;}
             wake.notify_one();built.reset();
-            builtMap=r.map;builtCenter=r.camera;builtValid=true;wanted=false;superseded=0;
+            builtMap=r.map;builtCenter=r.geometryCenter;builtValid=true;wanted=false;superseded=0;
           }
           }catch(const std::bad_alloc&){workerFaultCode.store(1);}
            catch(const std::exception&){workerFaultCode.store(2);}
@@ -1038,7 +1047,7 @@ private:
                 bvh=std::move(adopted->bvh);scenePlan=std::move(adopted->plan);scenePrepared=std::move(adopted->prepared);sceneFog=std::move(adopted->fog);
                 sceneLights=std::move(adopted->lights);rawSceneLights=std::move(adopted->rawLights);sceneMap=std::move(adopted->map);sceneCenter=adopted->center;
                 sceneBuild=adopted->id;superseded+=adopted->superseded;if(stalled){stallMs+=GetTickCount()-stallStart;stalled=false;}
-            }else if(!bvh||NorthlightWorldStreaming::needsGeometry(sceneMap,sceneCenter,r.map,r.camera)){
+            }else if(!bvh||NorthlightWorldStreaming::needsGeometry(sceneMap,sceneCenter,r.map,r.geometryCenter)){
                 // The builder is replacing this region. Borrow the published
                 // previous generation and keep its probe cache while the original
                 // 64-unit GI region holds; the new generation clears it on adoption.
@@ -1086,8 +1095,10 @@ private:
              }
              // The geometry is already drawable up to the existing 96-unit
              // limit. GI still needs its original, stricter 64-unit region.
+             // 0.3.169: a region built ahead (lead) that the eye has not reached
+             // yet waits for the next request instead of re-running this check.
              if(!NorthlightWorldStreaming::within(sceneCenter,request.camera,64)){
-                 pending=true;continue;
+                 pending=NorthlightWorldStreaming::needsGeometry(sceneMap,sceneCenter,request.map,request.geometryCenter);continue;
              }
              if(request.id!=r.id){++retargeted;r=request;pending=false;}
              result->map=sceneMap;result->center=sceneCenter;result->requestId=r.id;result->requestedAt=r.queuedAt;
@@ -1673,6 +1684,7 @@ public:
         lastCaptureSkipped=captureMode==CaptureSkipped;actorCaptureDecided=false;actorJob.reset();captureMode=CaptureUndecided;actorVerticesEvaluated=actorDraws=actorSkippedAlpha=0;
     }
     bool ready()const{return valid&&active&&active->bvh&&!failed&&!workerFault();}
+    const char* lastSkipReason()const{return skipReason;} /* 0.3.169: valid after render() returned false */
     bool captureSkippedLastFrame()const{return lastCaptureSkipped;} /* for the sampled CPU profile, logged after endFrame */
     unsigned capturePhaseReadsLastFrame()const{return lastCapturePhaseReads;} /* 0.3.150: clock reads of the capture-phase subset (inside the capture timers), likewise */
     bool hasContext()const{return valid&&!failed&&!workerFault();}
@@ -1826,19 +1838,25 @@ public:
         r.probeCenter=r.camera;
         if(quality.giProbeAhead){const V view=V(context.inverseView[8],context.inverseView[9],0)*projection[2];const float length=std::sqrt(NorthlightGI::dot(view,view));
             if(length>1e-3f)r.probeCenter=r.camera+view*(float(quality.giProbeAhead)/length);}
+        // 0.3.169 geometry lead: centre the region build ahead along the travel velocity.
+        {const V forward=V(context.inverseView[8],context.inverseView[9],context.inverseView[10])*projection[2];const float length=std::sqrt(NorthlightGI::dot(forward,forward));
+         geometryMotion.update(r.map,r.camera,length>1e-6f?r.camera+forward*(pivotDistance/length):r.camera,GetTickCount());
+         r.geometryCenter=NorthlightWorldStreaming::leadCenter(r.camera,geometryMotion.velocity(),float(geometryBuildEstimateMs.load(std::memory_order_relaxed))*.001f);
+         geometryLead=std::sqrt(NorthlightGI::dot(r.geometryCenter-r.camera,r.geometryCenter-r.camera));}
         if(lastRequest.map==r.map&&completedActorSceneMap()==r.map){r.actorJob=completedActorJob();r.actorSerial=actorJobSerial();}
         std::shared_ptr<Snapshot> retiredSnapshot;
         {std::lock_guard<std::mutex> lock(mutex);
             if(published&&published!=observedPublication.lock()){
                 observedPublication=published;if(!published->message.empty())logf("WORLD cache: %s",published->message.c_str());
             }
-            if(published&&published!=active&&NorthlightWorldStreaming::applicable(published->map,published->center,r.map,r.camera)){
+            if(published&&published!=active&&NorthlightWorldStreaming::adopts(published->map,published->center,bool(published->bvh),active&&active->bvh,r.map,r.camera)){
                 bool newGI=published->serial&&(!active||active->serial!=published->serial);retiredSnapshot=std::move(active);active=published;
                 if(newGI&&NorthlightDiagnostics::enabled())logf("GI activated tick=%lu id=%llu ageMs=%lu queueMs=%lu geometryMs=%lu actorMs=%lu solveMs=%lu reused=%u solved=%u cancelled=%u origin=(%.1f %.1f %.1f) dynamicReused=%u dynamicSolved=%u staticOnly=%u partial=%u processed=%u generation=%llu retargeted=%u actorTextureDecode=worker actorTextures=%u actorTextureBytes=%zu pathRecorded=%llu pathReplayedRays=%llu pathRetracedRays=%llu pathRecordKB=%zu",(unsigned long)GetTickCount(),(unsigned long long)active->requestId,(unsigned long)(GetTickCount()-active->requestedAt),(unsigned long)active->queueMs,(unsigned long)active->geometryMs,(unsigned long)active->actorMs,(unsigned long)active->solveMs,active->reusedProbes,active->solvedProbes,active->superseded,active->origin.x,active->origin.y,active->origin.z,active->dynamicReused,active->dynamicSolved,unsigned(active->staticOnly),unsigned(active->partial),active->processedProbes,(unsigned long long)active->lightingGeneration,active->retargeted,active->actorTexturesDecoded,active->actorTextureEncodedBytes,(unsigned long long)active->movingStats.recorded,(unsigned long long)active->movingStats.replayed,(unsigned long long)active->movingStats.retraced,active->pathRecordBytes/1024);
             }
             r.reason=(lastRequest.map!=r.map?1u:0u)|(different(quantize(lastRequest.probeCenter,float(quality.giProbeMoveStep)),quantize(r.probeCenter,float(quality.giProbeMoveStep)),.1f)?2u:0u)|
                 (different(lastRequest.light.sunDirection,r.light.sunDirection,.02f)?4u:0u)|(different(lastRequest.light.sunIrradiance,r.light.sunIrradiance,.03f)?8u:0u)|(different(lastRequest.light.skyRadiance,r.light.skyRadiance,.01f)?16u:0u)|
-                (lastRequest.light.additionalDirections.empty()||different(lastRequest.light.additionalDirections[0].direction,r.light.additionalDirections[0].direction,.02f)||different(lastRequest.light.additionalDirections[0].irradiance,r.light.additionalDirections[0].irradiance,.03f)?32u:0u);
+                (lastRequest.light.additionalDirections.empty()||different(lastRequest.light.additionalDirections[0].direction,r.light.additionalDirections[0].direction,.02f)||different(lastRequest.light.additionalDirections[0].irradiance,r.light.additionalDirections[0].irradiance,.03f)?32u:0u)|
+                (different(lastRequest.geometryCenter,r.geometryCenter,NorthlightWorldStreaming::GeometryLeadMoveStep)?128u:0u);
             if(r.reason){r.id=request.id+1;r.baseId=r.id;r.queuedAt=GetTickCount();request=r;lastRequest=r;pending=true;wake.notify_one();
                 if(NorthlightDiagnostics::enabled())logf("GI request tick=%lu id=%llu reason=%u camera=(%.2f %.2f %.2f) sun=(%.5f %.5f %.5f)",(unsigned long)r.queuedAt,(unsigned long long)r.id,r.reason,r.camera.x,r.camera.y,r.camera.z,r.light.sunDirection.x,r.light.sunDirection.y,r.light.sunDirection.z);
             }
@@ -1853,12 +1871,32 @@ public:
             }
         {auto phase=streamingPhases.measure(NorthlightStreaming::PhaseProfile::Retire);
          auto& reaper=NorthlightStreaming::cpuRetirement();retirementBacklog.retry(reaper);
+         const bool adopted=retiredSnapshot&&active&&retiredSnapshot->bvh!=active->bvh; /* a new region, not a GI publication */
          if(retiredSnapshot)retirementBacklog.retireOrFree(reaper,retiredSnapshot,snapshotRetireBytes(*retiredSnapshot));
          retiredSnapshot.reset();
-         if(active&&!NorthlightWorldStreaming::applicable(active->map,active->center,r.map,r.camera)){retirementBacklog.retireOrFree(reaper,active,snapshotRetireBytes(*active));active.reset();}
-         releaseOrphanedPending("range");}
+         // 0.3.169: hold the snapshot past its 96-unit coverage until a replacement applies (above)
+         // or the hard limit or a map change retires it.
+         const char* retired=active&&!NorthlightWorldStreaming::retained(active->map,active->center,r.map,r.camera)?(active->map!=r.map?"map":"retired"):nullptr;
+         const V held=active?active->center:V();
+         if(retired){retirementBacklog.retireOrFree(reaper,active,snapshotRetireBytes(*active));active.reset();}
+         releaseOrphanedPending("range");
+         const float distance=active&&active->map==r.map?std::sqrt(NorthlightGI::dot(r.camera-active->center,r.camera-active->center)):0.f;
+         if(distance>coverMax)coverMax=distance;
+         const bool holding=active&&!NorthlightWorldStreaming::applicable(active->map,active->center,r.map,r.camera);
+         const bool logHold=holdEpisodes<=32||NorthlightDiagnostics::enabled();
+         if(retired||(coverageHold&&(adopted||!holding))){
+             if(!coverageHold){++holdEpisodes;holdStart=GetTickCount();holdMax=0;} /* retired in one step: a teleport or a map change */
+             if(retired)holdMax=std::max(holdMax,std::sqrt(NorthlightGI::dot(r.camera-held,r.camera-held)));
+             if(logHold)logf("WORLD coverage hold end ms=%lu maxDist=%.1f reason=%s",(unsigned long)(GetTickCount()-holdStart),holdMax,retired?retired:adopted?"adopted":"returned");
+             coverageHold=false;
+         }
+         if(!coverageHold&&holding){coverageHold=true;++holdEpisodes;holdStart=GetTickCount();holdMax=distance;
+             if(holdEpisodes<=32||NorthlightDiagnostics::enabled())logf("WORLD coverage hold begin dist=%.1f eye=(%.1f %.1f %.1f) centre=(%.1f %.1f %.1f) fwd=(%.3f %.3f %.3f) pivotDistance=%.1f lead=%.1f",distance,r.camera.x,r.camera.y,r.camera.z,active->center.x,active->center.y,active->center.z,
+                 context.inverseView[8]*projection[2],context.inverseView[9]*projection[2],context.inverseView[10]*projection[2],pivotDistance,geometryLead);
+         }else if(coverageHold)holdMax=std::max(holdMax,distance);}
         DWORD now=GetTickCount();if(NorthlightDiagnostics::enabled()&&now-diagnosticTick>=250){diagnosticTick=now;
-            logf("WORLD camera tick=%lu rendered=%u eye=(%.2f %.2f %.2f) forward=(%.4f %.4f %.4f) sun=(%.5f %.5f %.5f) GI=%llu pivotDistance=%.1f pivotUpdates=%u",(unsigned long)now,frames,context.camera[0],context.camera[1],context.camera[2],context.inverseView[8]*projection[2],context.inverseView[9]*projection[2],context.inverseView[10]*projection[2],context.lightDirection[0],context.lightDirection[1],context.lightDirection[2],(unsigned long long)(active?active->serial:0),pivotDistance,pivotUpdates);
+            logf("WORLD camera tick=%lu rendered=%u eye=(%.2f %.2f %.2f) forward=(%.4f %.4f %.4f) sun=(%.5f %.5f %.5f) GI=%llu pivotDistance=%.1f pivotUpdates=%u coverMax=%.1f lead=%.1f",(unsigned long)now,frames,context.camera[0],context.camera[1],context.camera[2],context.inverseView[8]*projection[2],context.inverseView[9]*projection[2],context.inverseView[10]*projection[2],context.lightDirection[0],context.lightDirection[1],context.lightDirection[2],(unsigned long long)(active?active->serial:0),pivotDistance,pivotUpdates,coverMax,geometryLead);
+            coverMax=0;
         }
     }
     IDirect3DPixelShader9* terrainShadowReplacement(IDirect3DPixelShader9* shader){
@@ -2296,7 +2334,9 @@ public:
     bool render(IDirect3DSurface9* targetSurface,IDirect3DTexture9* depth,UINT w,UINT h,D3DFORMAT fmt,float nearZ,float farZ,float minZ,float maxZ,int debug,NorthlightGpuProfile* profile,IDirect3DTexture9* waterMask){
         shadowsComposited=false;lastRenderDebug=debug;
         if(debug!=1)gpuDiagnosticArmed=true;
-        if(workerFault())return false;
+        // 0.3.169 lastSkipReason(): why this call returned false. Untagged returns below the
+        // upload gate are failed device calls in the draw stages ("draw").
+        skipReason="fault";if(workerFault())return false;
         DWORD submissionStart=GetTickCount();
         // false only when this frame's model capture was skipped: no replays, and every
         // per-frame replay consumer (selection history and fate frame, GPU cache, bounds,
@@ -2325,6 +2365,8 @@ public:
         NorthlightStreaming::Budget streamBudget;
         releaseOrphanedPending("render"); /* 0.3.156: also while !ready(), when upload() never runs */
         if(!ready()||!resources(w,h,fmt)||!upload(streamBudget)){
+            skipReason=!valid?"context":failed?"failed":workerFault()?"fault":!active?"inactive":!active->bvh?"nobvh":
+                !vertices||!indices||uploadedMap!=active->map?"mesh":"upload";
             // Cache maintenance must not depend on the local GI becoming ready.
             // No new GPU allocation competes with a deferred world build here.
             updateStaticCasters(false,&streamBudget);return false;
@@ -2332,9 +2374,11 @@ public:
         streamBudget.pause();
         auto timedTerrain=[&]{auto phase=streamingPhases.measure(NorthlightStreaming::PhaseProfile::Terrain);return uploadLiveTerrain();};
         auto timedReplay=[&]{if(uploadWindowStart)uploadWindowTicks=QpcClock::now()-uploadWindowStart;auto phase=streamingPhases.measure(NorthlightStreaming::PhaseProfile::Replay);return uploadReplay();};
-        if(effects.shadows&&(!timedTerrain()||(replayShadows&&!timedReplay()))){streamBudget.resume();updateStaticCasters(false,&streamBudget);return false;}
+        skipReason="terrain";bool terrainUploaded=false;
+        if(effects.shadows&&(!(terrainUploaded=timedTerrain())||(replayShadows&&!timedReplay()))){if(terrainUploaded)skipReason="replay";streamBudget.resume();updateStaticCasters(false,&streamBudget);return false;}
         streamBudget.resume();
-        SavedState save(d,&stateBlocks);if(!save.ok)return false;
+        skipReason="state";SavedState save(d,&stateBlocks);if(!save.ok)return false;
+        skipReason="draw";
         if(profile)profile->mark("WorldUpload");
         {auto phase=streamingPhases.measure(NorthlightStreaming::PhaseProfile::Static);
          updateStaticCasters(effects.shadows,&streamBudget);

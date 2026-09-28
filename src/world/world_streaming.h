@@ -1,5 +1,6 @@
 #pragma once
 #include "world_mesh_plan.h"
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <string>
@@ -27,6 +28,53 @@ inline bool applicable(const std::string& map,NorthlightGI::Vec3 center,
                        const std::string& currentMap,NorthlightGI::Vec3 camera) {
     return map==currentMap&&within(center,camera,GeometryCoverageDistance);
 }
+// 0.3.169 coverage hold: the render thread keeps a snapshot past the 96-unit coverage
+// until a replacement applies, up to this hard limit. The near cascade (pivot <= eye+80,
+// radius 48) stays inside the +-288 local box up to 288-128=160.
+inline constexpr float GeometryRetainDistance=160.f;
+inline bool retained(const std::string& map,NorthlightGI::Vec3 center,
+                     const std::string& currentMap,NorthlightGI::Vec3 camera) {
+    return map==currentMap&&within(center,camera,GeometryRetainDistance);
+}
+// Render-thread adoption of a publication. The same hard limit as the hold, so a held
+// snapshot and an unadoptable build can never fill both geometry generations; an error
+// snapshot (no BVH) never replaces a drawable one.
+inline bool adopts(const std::string& map,NorthlightGI::Vec3 center,bool drawable,bool activeDrawable,
+                   const std::string& currentMap,NorthlightGI::Vec3 camera) {
+    return (drawable||!activeDrawable)&&retained(map,center,currentMap,camera);
+}
+// 0.3.169 geometry lead: at speed the build is centred ahead of the eye by the travel
+// expected during one build, capped so that while the lead point is within the 32-unit
+// refresh of a region the eye stays within its 96-unit coverage (60+32 < 96).
+// Builds still start per 32 units of lead-point travel: no extra builds.
+inline constexpr float GeometryLeadMax=60.f,GeometryLeadMinSpeed=10.f,GeometryLeadMoveStep=8.f;
+inline NorthlightGI::Vec3 leadCenter(NorthlightGI::Vec3 camera,NorthlightGI::Vec3 velocity,float expectedSeconds){
+    const float speed=std::sqrt(velocity.x*velocity.x+velocity.y*velocity.y+velocity.z*velocity.z);
+    if(!std::isfinite(speed)||!std::isfinite(expectedSeconds)||speed<GeometryLeadMinSpeed||expectedSeconds<=0)return camera;
+    const float scale=std::min(speed*expectedSeconds,GeometryLeadMax)/speed;
+    return NorthlightGI::Vec3(camera.x+velocity.x*scale,camera.y+velocity.y*scale,camera.z+velocity.z*scale);
+}
+// Travel velocity for the lead: smoothed eye and pivot (eye + forward*pivotDistance)
+// velocities, the slower of the two. A third-person flick moves the eye but not the
+// pivot; a first-person turn with a wrong pivot distance moves the pivot but not the eye.
+struct Motion {
+    static constexpr float TimeConstantMs=500.f,JumpDistance=40.f;static constexpr uint32_t GapMs=500;
+    NorthlightGI::Vec3 eye,pivot,eyeVelocity,pivotVelocity;std::string map;uint32_t at=0;bool valid=false;
+    static float length(NorthlightGI::Vec3 v){return std::sqrt(v.x*v.x+v.y*v.y+v.z*v.z);}
+    static void step(NorthlightGI::Vec3& last,NorthlightGI::Vec3& velocity,NorthlightGI::Vec3 now,float ms){
+        const NorthlightGI::Vec3 d(now.x-last.x,now.y-last.y,now.z-last.z);last=now;
+        if(!(length(d)<=JumpDistance)){velocity=NorthlightGI::Vec3();return;} /* teleport, or non-finite */
+        const float a=std::min(1.f,ms/TimeConstantMs),k=1000.f/ms;
+        velocity=NorthlightGI::Vec3(velocity.x+(d.x*k-velocity.x)*a,velocity.y+(d.y*k-velocity.y)*a,velocity.z+(d.z*k-velocity.z)*a);
+    }
+    void update(const std::string& currentMap,NorthlightGI::Vec3 eyeNow,NorthlightGI::Vec3 pivotNow,uint32_t now){
+        const uint32_t ms=now-at;
+        if(!valid||map!=currentMap||ms>GapMs){eye=eyeNow;pivot=pivotNow;eyeVelocity=pivotVelocity=NorthlightGI::Vec3();map=currentMap;at=now;valid=true;return;}
+        if(!ms)return; /* same tick: the displacement accumulates into the next step */
+        step(eye,eyeVelocity,eyeNow,float(ms));step(pivot,pivotVelocity,pivotNow,float(ms));at=now;
+    }
+    NorthlightGI::Vec3 velocity()const{return length(eyeVelocity)<=length(pivotVelocity)?eyeVelocity:pivotVelocity;}
+};
 // Source and plan are immutable and retained together by the caller. Validate
 // their identity and all upload sizes BEFORE making any resource allocation.
 // Per-index validity is established by buildUploadPlan on the worker.
