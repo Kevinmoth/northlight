@@ -55,7 +55,9 @@
             // Do not destroy excluded constant-bank owners. GI has already
             // copied its packets; shadows alone see this reduced, ordered list.
             if(shadowFate.active())for(const auto& p:replays)shadowFate.record(p->fateSlot,NorthlightShadowFate::Fate(p->fateClass),p->shadowSelected,p->fateDistance);
+            rigidMemoryObserve(); /* 0.3.172 rigid memory: every captured group, before the unselected leave */
             NorthlightReplayShadowPolicy::retainSelected(replays,heldShadowReplays);
+            rigidMemoryInject(); /* remembered groups the game did not draw: after selection, before bounds and upload */
         }catch(...){
             for(auto& p:replays)p->shadowSelected=true;actorShadowHistory.clear();
             logf("SHADOW experiment selection allocation failed; current captured shadows retained");return;

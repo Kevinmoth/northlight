@@ -13,7 +13,7 @@ from pathlib import Path
 import re,sys
 HERE=Path(__file__).resolve().parent
 FILES=['renderer.cpp','world_renderer.h','world_shadow_experiment.inl','world_point_rendering.inl','celestial_disc_renderer.h',
-       'shadow_blob_filter.h','water_renderer.h','gpu_profile.h','world_diagnostics.h','world_persistent_casters.inl','world_replay_probe.inl']
+       'shadow_blob_filter.h','water_renderer.h','gpu_profile.h','world_diagnostics.h','world_persistent_casters.inl','world_replay_probe.inl','world_rigid_memory.inl']
 # 0.3.149: profiling()/profileSampled() = RenderProfile, which requires Diagnostics=1 (NorthlightQuality::renderProfile).
 GATES=('NorthlightDiagnostics::enabled()','diagnostics()','sampled()','captureSampled','if(diagnostics)','shadowFate.active()','sampledFrame','profiling()','profileSampled()')
 # Ungated lines that stay with Diagnostics=0: format prefix -> label.

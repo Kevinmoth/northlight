@@ -16,6 +16,7 @@
         {const auto before=replaySnapshots.indexCacheBytes();replaySnapshots.clearIndexCache();t.indices=before-std::min(before,replaySnapshots.indexCacheBytes());} /* clears snapshots too */
         t.pool=pooledSnapshotBytes+freeReplays.size()*sizeof(Replay);freeReplays.clear();freeReplays.shrink_to_fit();pooledSnapshotBytes=0;
         t.gpu=replayGpuCache.bytes();replayGpuCache.clear();
+        rigidMemoryClear(); /* 0.3.172: remembered rigid replays (their shared meshes and COM references) */
         workerMemoryTrim.store(true,std::memory_order_relaxed);
         return t;
     }
