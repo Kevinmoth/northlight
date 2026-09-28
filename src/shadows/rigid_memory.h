@@ -139,7 +139,7 @@ private:
     }
     Track* track(std::uint32_t serial){auto it=trackIndex_.find(serial);if(it!=trackIndex_.end()&&it->second<tracks_.size()&&tracks_[it->second].serial==serial)return &tracks_[it->second];
         for(auto& t:tracks_)if(t.serial==serial)return &t; /* appended this frame */return nullptr;}
-    void reindex(){trackIndex_.clear();trackIndex_.reserve(tracks_.size());for(std::size_t i=0;i<tracks_.size();++i)trackIndex_[tracks_[i].serial]=i;}
+    static bool trackBefore(const Track& a,const Track& b){return a.shape!=b.shape?a.shape<b.shape:a.serial<b.serial;}
     void note(Event::Kind kind,std::uint64_t shape,const float* at,State state=State::NotDrawn,Reason reason=Reason::None){
         if(!recordEvents_||events_.size()>=256)return;Event e;e.kind=kind;e.shape=shape;std::memcpy(e.at,at,12);e.state=state;e.reason=reason;events_.push_back(e);}
     void drop(std::size_t i,std::uint64_t& counter,Reason why){++counter;auto& e=entries_[i];stats_.bytes-=std::min(stats_.bytes,e.bytes);note(Event::Drop,e.shape,e.world+9,e.state,why);
@@ -166,6 +166,15 @@ public:
     bool screening()const{return screening_;}
     // Map change, device loss, trim, shadows off: everything is forgotten (payloads released).
     void clear(){stats_.cleared+=entries_.size();entries_.clear();tracks_.clear();trackIndex_.clear();stats_.bytes=0;hasPivot_=false;screening_=false;}
+    // Tests: tracks strictly in (shape, serial) order (= a full sort), the serial index exact, every
+    // entry's track pointing back at it.
+    bool consistent()const{
+        for(std::size_t i=1;i<tracks_.size();++i)if(!trackBefore(tracks_[i-1],tracks_[i]))return false;
+        if(trackIndex_.size()!=tracks_.size())return false;
+        for(std::size_t i=0;i<tracks_.size();++i){auto it=trackIndex_.find(tracks_[i].serial);if(it==trackIndex_.end()||it->second!=i)return false;}
+        std::size_t linked=0;for(const auto& t:tracks_)if(t.entry>=0){++linked;if(std::size_t(t.entry)>=entries_.size()||entries_[std::size_t(t.entry)].track!=t.serial)return false;}
+        return linked==entries_.size();
+    }
     // The cumulative counters (the renderer: on a map change).
     void resetStats(){const auto bytes=stats_.bytes;stats_=Stats{};stats_.bytes=bytes;stats_.entries=entries_.size();stats_.tracks=tracks_.size();}
     void events(bool on){recordEvents_=on;if(!on)events_.clear();}
@@ -247,17 +256,29 @@ public:
             ++i;}
         // Forget tracks (never one with an entry): unsettled, held or mobile after shortForgetMs
         // unseen, settled free ones after forgetMs; then the oldest above maxTracks.
-        const std::size_t before=tracks_.size();
-        tracks_.erase(std::remove_if(tracks_.begin(),tracks_.end(),[&](const Track& t){
+        // Order-preserving: `prefix` counts the survivors of the ordered part [0,sorted) (this frame's
+        // new tracks follow them); positions before `first` keep their index.
+        const std::size_t before=tracks_.size();std::size_t prefix=sorted,first=tracks_.size();
+        auto compact=[&](auto gone){std::size_t w=0,kept=0;
+            for(std::size_t i=0;i<tracks_.size();++i){auto& t=tracks_[i];if(gone(t)){trackIndex_.erase(t.serial);first=std::min(first,w);continue;}
+                kept+=i<prefix;if(w!=i)tracks_[w]=std::move(t);++w;}
+            tracks_.resize(w);prefix=kept;};
+        compact([&](const Track& t){
             const bool free=!t.mobile&&!t.held&&t.frames>=t_.settleFrames&&unsigned(t.lastSeenMs-t.sinceMs)>=t_.settleMs;
-            return t.entry<0&&unsigned(now-t.lastSeenMs)>=(free?t_.forgetMs:t_.shortForgetMs);}),tracks_.end());
+            return t.entry<0&&unsigned(now-t.lastSeenMs)>=(free?t_.forgetMs:t_.shortForgetMs);});
         if(tracks_.size()>t_.maxTracks){std::vector<std::pair<unsigned,std::uint32_t>> age;for(const auto& t:tracks_)if(t.entry<0)age.push_back({unsigned(now-t.lastSeenMs),t.serial});
             std::sort(age.begin(),age.end(),[](const auto& a,const auto& b){return a.first!=b.first?a.first>b.first:a.second<b.second;});
             std::vector<std::uint32_t> gone;for(std::size_t i=0;i<age.size()&&tracks_.size()-gone.size()>t_.maxTracks;++i)gone.push_back(age[i].second);std::sort(gone.begin(),gone.end());
-            tracks_.erase(std::remove_if(tracks_.begin(),tracks_.end(),[&](const Track& t){return std::binary_search(gone.begin(),gone.end(),t.serial);}),tracks_.end());}
+            compact([&](const Track& t){return std::binary_search(gone.begin(),gone.end(),t.serial);});}
         stats_.tracksForgotten+=before-tracks_.size();changed=changed||tracks_.size()!=before;
+        // (shape, serial) order: the new tracks sorted and merged into the ordered survivors (the keys are
+        // unique, so this is exactly the full sort); only positions from the first change are reindexed.
         if(changed){const auto started=std::chrono::steady_clock::now();
-            std::sort(tracks_.begin(),tracks_.end(),[](const Track& a,const Track& b){return a.shape!=b.shape?a.shape<b.shape:a.serial<b.serial;});reindex();
+            const auto middle=tracks_.begin()+std::ptrdiff_t(prefix);std::size_t start=first;
+            if(middle!=tracks_.end()){std::sort(middle,tracks_.end(),trackBefore);
+                start=std::min(start,std::size_t(std::lower_bound(tracks_.begin(),middle,*middle,trackBefore)-tracks_.begin()));
+                std::inplace_merge(tracks_.begin(),middle,tracks_.end(),trackBefore);}
+            for(std::size_t i=start;i<tracks_.size();++i)trackIndex_[tracks_[i].serial]=i;
             for(std::size_t j=0;j<entries_.size();++j)if(auto* t=track(entries_[j].track))t->entry=int(j);
             stats_.sortMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();}
         else stats_.sortMs=0;

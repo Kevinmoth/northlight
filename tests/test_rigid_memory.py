@@ -57,6 +57,9 @@ checks['placement index stepped while incomplete with tracks (doodad bodies afte
     and observe.index('rigidMemory.frame(')<observe.index('rigidIndexStep();') and 'static constexpr size_t RigidIndexStep=2048;' in m
     and m.count('rigidIndexStep()')==2 and 'if(!rigidIndexCurrent())return false;const auto& x=rigidIndex;' in m
     and re.search(r'bool rigidIndexCurrent\(\)const\{\s*return staticScene&&staticScene->map==lastRequest.map&&rigidIndex.scene==staticScene.get\(\)&&rigidIndex.revision==rigidSceneRevision\(\*staticScene\)&&rigidIndex.complete;\}',m) is not None)
+hdr=fp.src('rigid_memory.h').read_text()
+checks['tracks: new ones sorted and merged into the ordered survivors (no full sort), partial reindex']=('std::inplace_merge(tracks_.begin(),middle,tracks_.end(),trackBefore);' in hdr
+    and 'std::sort(middle,tracks_.end(),trackBefore);' in hdr and 'std::sort(tracks_.begin(),tracks_.end()' not in hdr and 'for(std::size_t i=start;i<tracks_.size();++i)trackIndex_[tracks_[i].serial]=i;' in hdr)
 for name,ok in checks.items():print(('PASS ' if ok else 'FAIL ')+name)
 assert all(checks.values())
 with tempfile.TemporaryDirectory(prefix='northlight-rigid-memory-') as tmp:

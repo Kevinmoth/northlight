@@ -186,6 +186,24 @@ static void states(){
      std::vector<int> many(600);for(auto& x:many)keys.add(&x,1);assert(keys.size()==512);keys.clear();assert(keys.empty()&&!keys.contains(&a,150));}
     std::puts("PASS states: LiveUnselected kept and not drawn, DrawnNotCaptured (complete or shortfall) drawn and never dropped, DrawnMoved dropped at once, W0 missing -> NotDrawn; key set");
 }
+// D1 (0.3.174): new tracks are sorted and merged into the ordered survivors; only moved positions are
+// reindexed. Random sessions (new tracks, forgetting, the track cap, entries, settles, teleports): after
+// every frame the table is in strict (shape, serial) order - with unique keys exactly the full sort -, the
+// serial index is exact and every entry's track points back at it.
+static void trackMerge(){
+    unsigned frames=0,checks=0;
+    for(unsigned seed=1;seed<=12;++seed){std::mt19937 rng(seed);Tuning t;t.maxTracks=seed%3==0?150:2048;Scene s(t);
+        std::uniform_int_distribution<unsigned> coin(0,99),shape(1,40);std::uniform_real_distribution<float> at(-60,60);
+        std::vector<Observation> still;for(unsigned i=0;i<30;++i)still.push_back(sign(shape(rng),at(rng),at(rng),float(i%5)));
+        for(unsigned f=0;f<700;++f){std::vector<Observation> list;
+            for(const auto& o:still)if(coin(rng)<85)list.push_back(o); /* settled signs, sometimes not drawn */
+            for(unsigned r=coin(rng)%12;r-->0;)list.push_back(sign(shape(rng),at(rng),at(rng),at(rng)*.1f)); /* riders' weapons: new tracks */
+            if(coin(rng)<2){s.pivot[0]+=coin(rng)<50?150.f:-150.f;} /* teleport */
+            s.step(list,coin(rng)<50?s.away:s.toward,coin(rng)<80,coin(rng)<5?2100u:16u);
+            assert(s.reg.consistent());++checks;}
+        frames+=700;assert(s.reg.stats().remembered>0);}
+    std::printf("PASS track merge: %u random frames (12 sessions: new tracks every frame, 2 s forgetting, the 150/2048 cap, entries, teleports), order == full sort, serial index exact, entry links exact after every frame (%u checks)\n",frames,checks);
+}
 static void caps(){
     // 70 signs at 2..71 yd (both orders): the 64 nearest stay, the farthest go.
     for(bool reversed:{false,true}){Scene s;std::vector<Observation> all;for(unsigned i=0;i<70;++i){const unsigned k=reversed?69-i:i;all.push_back(sign(100+k,-2.f-k,0,2));}
@@ -332,6 +350,6 @@ static void staticFlood(){
     std::printf("PASS static-doodad flood: %zu doodads in range (%zu real world-cache placements, scale .4-2.2) screened and never remembered, %zu beyond 72 yd never screened, 11 signs and a spawned crate beside its static twin remembered (%u frames), %u screen calls\n",statics,sizeof tradeDistrict/sizeof*tradeDistrict,far,frame,screens);
 }
 int main(int argc,char** argv){
-    assert(argc>1);settle();sticky();ranges();held();forgetting();identity();absence();states();caps();rebaseRoundTrip();oneBoneProgram(argv[1]);realSign();staticFlood();
+    assert(argc>1);settle();sticky();ranges();held();forgetting();identity();absence();states();trackMerge();caps();rebaseRoundTrip();oneBoneProgram(argv[1]);realSign();staticFlood();
     std::puts("rigid memory: all passed");
 }
