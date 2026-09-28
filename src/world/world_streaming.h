@@ -57,9 +57,13 @@ inline NorthlightGI::Vec3 leadCenter(NorthlightGI::Vec3 camera,NorthlightGI::Vec
 // Travel velocity for the lead: smoothed eye and pivot (eye + forward*pivotDistance)
 // velocities, the slower of the two. A third-person flick moves the eye but not the
 // pivot; a first-person turn with a wrong pivot distance moves the pivot but not the eye.
+// The lead arms only after ArmMs of consistent travel (both speeds >= GeometryLeadMinSpeed,
+// ratio within [0.75, 1.33]): a flick with a wrong pivot distance, a zoom, a camera-collision
+// snap or a blink never arms it. Once armed a flick during travel keeps it; it disarms
+// when the slower speed drops below GeometryLeadMinSpeed.
 struct Motion {
-    static constexpr float TimeConstantMs=500.f,JumpDistance=40.f;static constexpr uint32_t GapMs=500;
-    NorthlightGI::Vec3 eye,pivot,eyeVelocity,pivotVelocity;std::string map;uint32_t at=0;bool valid=false;
+    static constexpr float TimeConstantMs=500.f,JumpDistance=40.f,MinRatio=.75f,MaxRatio=1.33f;static constexpr uint32_t GapMs=500,ArmMs=1000;
+    NorthlightGI::Vec3 eye,pivot,eyeVelocity,pivotVelocity;std::string map;uint32_t at=0,consistentSince=0;bool valid=false,consistent=false,armed=false;
     static float length(NorthlightGI::Vec3 v){return std::sqrt(v.x*v.x+v.y*v.y+v.z*v.z);}
     static void step(NorthlightGI::Vec3& last,NorthlightGI::Vec3& velocity,NorthlightGI::Vec3 now,float ms){
         const NorthlightGI::Vec3 d(now.x-last.x,now.y-last.y,now.z-last.z);last=now;
@@ -69,12 +73,26 @@ struct Motion {
     }
     void update(const std::string& currentMap,NorthlightGI::Vec3 eyeNow,NorthlightGI::Vec3 pivotNow,uint32_t now){
         const uint32_t ms=now-at;
-        if(!valid||map!=currentMap||ms>GapMs){eye=eyeNow;pivot=pivotNow;eyeVelocity=pivotVelocity=NorthlightGI::Vec3();map=currentMap;at=now;valid=true;return;}
+        if(!valid||map!=currentMap||ms>GapMs){eye=eyeNow;pivot=pivotNow;eyeVelocity=pivotVelocity=NorthlightGI::Vec3();map=currentMap;at=now;valid=true;consistent=armed=false;return;}
         if(!ms)return; /* same tick: the displacement accumulates into the next step */
         step(eye,eyeVelocity,eyeNow,float(ms));step(pivot,pivotVelocity,pivotNow,float(ms));at=now;
+        const float e=length(eyeVelocity),p=length(pivotVelocity);
+        if(armed){if(!(std::min(e,p)>=GeometryLeadMinSpeed))armed=consistent=false;return;}
+        const bool steady=e>=GeometryLeadMinSpeed&&p>=GeometryLeadMinSpeed&&e>=MinRatio*p&&e<=MaxRatio*p;
+        if(!steady){consistent=false;return;}
+        if(!consistent){consistent=true;consistentSince=now;}
+        armed=now-consistentSince>=ArmMs;
     }
-    NorthlightGI::Vec3 velocity()const{return length(eyeVelocity)<=length(pivotVelocity)?eyeVelocity:pivotVelocity;}
+    NorthlightGI::Vec3 velocity()const{if(!armed)return NorthlightGI::Vec3();return length(eyeVelocity)<=length(pivotVelocity)?eyeVelocity:pivotVelocity;}
 };
+// Request trigger for a moved lead point (reason 128). Only while a lead exists in the new or
+// the previous request: with no lead the geometry centre is the eye, already covered by the
+// probe-centre trigger, so the 0.3.168 request cadence is unchanged below the lead speed.
+// The previous request's lead keeps the stop transition (lead -> 0) as a request.
+inline bool leadMoved(NorthlightGI::Vec3 lastCamera,NorthlightGI::Vec3 lastCenter,NorthlightGI::Vec3 camera,NorthlightGI::Vec3 center){
+    auto apart=[](NorthlightGI::Vec3 a,NorthlightGI::Vec3 b,float e){const float x=a.x-b.x,y=a.y-b.y,z=a.z-b.z;return x*x+y*y+z*z>e*e;};
+    return (apart(lastCenter,lastCamera,0)||apart(center,camera,0))&&apart(lastCenter,center,GeometryLeadMoveStep);
+}
 // Source and plan are immutable and retained together by the caller. Validate
 // their identity and all upload sizes BEFORE making any resource allocation.
 // Per-index validity is established by buildUploadPlan on the worker.

@@ -1097,6 +1097,11 @@ private:
              // limit. GI still needs its original, stricter 64-unit region.
              // 0.3.169: a region built ahead (lead) that the eye has not reached
              // yet waits for the next request instead of re-running this check.
+             // Liveness: waiting needs the lead point within the 32-unit refresh and
+             // the eye beyond 64, so a lead of at least 64-32. Its decay or reversal
+             // (stop, turn back) moves the lead point by more than the reason-128 step,
+             // which issues that next request.
+             static_assert(64-NorthlightWorldStreaming::GeometryRefreshDistance>NorthlightWorldStreaming::GeometryLeadMoveStep,"lead waiting liveness");
              if(!NorthlightWorldStreaming::within(sceneCenter,request.camera,64)){
                  pending=NorthlightWorldStreaming::needsGeometry(sceneMap,sceneCenter,request.map,request.geometryCenter);continue;
              }
@@ -1856,7 +1861,7 @@ public:
             r.reason=(lastRequest.map!=r.map?1u:0u)|(different(quantize(lastRequest.probeCenter,float(quality.giProbeMoveStep)),quantize(r.probeCenter,float(quality.giProbeMoveStep)),.1f)?2u:0u)|
                 (different(lastRequest.light.sunDirection,r.light.sunDirection,.02f)?4u:0u)|(different(lastRequest.light.sunIrradiance,r.light.sunIrradiance,.03f)?8u:0u)|(different(lastRequest.light.skyRadiance,r.light.skyRadiance,.01f)?16u:0u)|
                 (lastRequest.light.additionalDirections.empty()||different(lastRequest.light.additionalDirections[0].direction,r.light.additionalDirections[0].direction,.02f)||different(lastRequest.light.additionalDirections[0].irradiance,r.light.additionalDirections[0].irradiance,.03f)?32u:0u)|
-                (different(lastRequest.geometryCenter,r.geometryCenter,NorthlightWorldStreaming::GeometryLeadMoveStep)?128u:0u);
+                (NorthlightWorldStreaming::leadMoved(lastRequest.camera,lastRequest.geometryCenter,r.camera,r.geometryCenter)?128u:0u);
             if(r.reason){r.id=request.id+1;r.baseId=r.id;r.queuedAt=GetTickCount();request=r;lastRequest=r;pending=true;wake.notify_one();
                 if(NorthlightDiagnostics::enabled())logf("GI request tick=%lu id=%llu reason=%u camera=(%.2f %.2f %.2f) sun=(%.5f %.5f %.5f)",(unsigned long)r.queuedAt,(unsigned long long)r.id,r.reason,r.camera.x,r.camera.y,r.camera.z,r.light.sunDirection.x,r.light.sunDirection.y,r.light.sunDirection.z);
             }
