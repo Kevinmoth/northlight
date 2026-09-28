@@ -23,7 +23,18 @@
     std::unordered_map<IDirect3DVertexShader9*,bool> rigidAudited;
     NorthlightRigidGeometry::PlacementIndex rigidIndex;static constexpr size_t RigidIndexStep=2048; /* ~0.1 ms */
     std::string rigidMap;DWORD rigidMapMs=0;unsigned rigidInjected=0;double rigidObserveMs=0;
-    void rigidMemoryClear(){rigidMemory.clear();rigidAudited.clear();rigidIndex.reset(nullptr,0);rigidGroupDraws.clear();}
+    NorthlightRigidMemory::DrawKeySet rigidDrawKeys; /* (original shader, primitives) of every remembered draw: the drawn test at capture */
+    std::vector<NorthlightRigidMemory::Event> rigidEvents;unsigned rigidEventTokens=0,rigidEventLines=0,rigidEventSuppressed=0;DWORD rigidEventRefillMs=0;
+    static constexpr unsigned RigidEventsPerSecond=20,RigidEventLines=2000; /* RIGID event lines: rate and session cap */
+    void rigidMemoryClear(){rigidMemory.clear();rigidAudited.clear();rigidIndex.reset(nullptr,0);rigidGroupDraws.clear();rigidDrawKeys.clear();}
+    void rigidDrawKeysRebuild(){rigidDrawKeys.clear();for(const auto& e:rigidMemory.entries())for(const auto& c:e.payload.draws)rigidDrawKeys.add(c.originalShader.p,c.count);}
+    // captureModel, before any rejection: a draw whose (shader, primitives) is remembered. Bone 0's
+    // world matrix W0 (the mirror-answered rows of paletteRows()) against the entries' W0.
+    void rigidMemoryDrawn(IDirect3DVertexShader9* shader,UINT count){
+        float rows[12],w0[12];const auto* program=paletteRows(shader,rows);
+        if(!program||program->paletteBase!=31||!NorthlightRigidGeometry::worldBone(rows,context.inverseView,w0))return;
+        rigidMemory.markDrawn(w0,[&](const auto& e){for(const auto& c:e.payload.draws)if(c.originalShader.p==shader&&c.count==count)return true;return false;});
+    }
     // Audited palette programs (c31.. rows, 3 per bone): the four-weight blend (SkinEnvelope)
     // and the one-influence program (oneBoneTemplate). Cached per original shader.
     const NorthlightActorDeformation::Program* rigidProgram(IDirect3DVertexShader9* shader){
@@ -52,16 +63,20 @@
     }
     // One constant group [first,end) of the captured replays: a non-rigid group gives a body
     // root, a rigid one (every skinned draw shared, audited, one bone) an observation of its
-    // selected draws.
+    // selected draws, or (0.3.173 F4) of its captured non-small draws when selection kept none:
+    // LiveUnselected, matched only (no copy).
     void rigidObserveGroup(size_t first,size_t end){
-        const Replay* head=nullptr;const Replay* selectedHead=nullptr;float bone=NAN;bool rigid=true;
-        NorthlightRigidMemory::Observation o;std::uint64_t shape=NorthlightRigidMemory::ShapeSeed;
+        const Replay* head=nullptr;const Replay* selectedHead=nullptr;const Replay* unselectedHead=nullptr;float bone=NAN;bool rigid=true;
+        NorthlightRigidMemory::Observation o,u;std::uint64_t shape=NorthlightRigidMemory::ShapeSeed,unselectedShape=NorthlightRigidMemory::ShapeSeed;
         const size_t copies=rigidGroupDraws.size();
         for(size_t k=first;k<end;++k){const auto& p=*replays[k];if(!p.shadowSkinned)continue;if(!head)head=&p;
             if(rigid){float b=NAN;const auto* program=p.shared?rigidProgram(p.originalShader):nullptr;const D3DVERTEXELEMENT9* elements=nullptr;UINT count=0;
                 if(program&&declarationCache.get(p.decl,elements,count))b=rigidBones.bone(*program,p.mesh(),p.shared,p.decl,elements,count);
                 rigid=!std::isnan(b)&&(std::isnan(bone)||b==bone);bone=b;}
-            if(!p.shadowSelected)continue;if(!selectedHead)selectedHead=&p;
+            if(!p.shadowSelected){if(p.shadowSmall)continue; /* small at capture: never observed */
+                if(!unselectedHead)unselectedHead=&p;++u.draws;u.triangles+=p.count;u.bytes+=p.mesh().byteSize();
+                NorthlightRigidMemory::mixShape(unselectedShape,p.originalShader,p.decl,p.mesh().vertexCount,p.mesh().primitiveCount,p.mesh().byteSize());continue;}
+            if(!selectedHead)selectedHead=&p;
             ++o.draws;o.triangles+=p.count;o.bytes+=p.mesh().byteSize();
             NorthlightRigidMemory::mixShape(shape,p.originalShader,p.decl,p.mesh().vertexCount,p.mesh().primitiveCount,p.mesh().byteSize());
             if(o.draws<=rigidMemory.tuning().maxDraws)rigidGroupDraws.push_back(&p);}
@@ -69,9 +84,13 @@
         if(!rigid){rigidGroupDraws.resize(copies);auto program=actorPrograms.find(head->originalShader);float root[3];
             if(program!=actorPrograms.end()&&NorthlightActorDeformation::rootWorld(program->second,head->constants,context.inverseView,root))rigidBodies.insert(rigidBodies.end(),root,root+3);
             return;}
-        if(!selectedHead||!(bone>=0&&bone<=74&&std::floor(bone)==bone)||!rigidMemory.small(o)||
-           !NorthlightRigidGeometry::worldBone(selectedHead->constants+4*(31+3*unsigned(bone)),context.inverseView,o.world)){rigidGroupDraws.resize(copies);return;}
-        o.shape=shape;rigidObservations.push_back(o);rigidGroups.push_back({copies,unsigned(bone)});
+        if(!(bone>=0&&bone<=74&&std::floor(bone)==bone)){rigidGroupDraws.resize(copies);return;}
+        if(selectedHead){
+            if(!rigidMemory.small(o)||!NorthlightRigidGeometry::worldBone(selectedHead->constants+4*(31+3*unsigned(bone)),context.inverseView,o.world)){rigidGroupDraws.resize(copies);return;}
+            o.hasWorld0=NorthlightRigidGeometry::worldBone(selectedHead->constants+4*31,context.inverseView,o.world0);
+            o.shape=shape;rigidObservations.push_back(o);rigidGroups.push_back({copies,unsigned(bone)});}
+        else if(unselectedHead&&rigidMemory.small(u)&&NorthlightRigidGeometry::worldBone(unselectedHead->constants+4*(31+3*unsigned(bone)),context.inverseView,u.world)){
+            u.shape=unselectedShape;u.selected=false;rigidObservations.push_back(u);rigidGroups.push_back({copies,unsigned(bone)});}
     }
     RigidPayload rigidCopy(size_t n){
         RigidPayload out;out.bone=rigidGroups[n].second;const size_t end=n+1<rigidGroups.size()?rigidGroups[n+1].first:rigidGroupDraws.size();
@@ -83,20 +102,29 @@
             c.usage=p.constantUsage;c.projectionKind=p.projectionKind;c.cutoff=p.cutoff;c.addressU=p.addressU;c.addressV=p.addressV;c.type=p.type;c.count=p.count;c.indexed=p.indexed;}
         return out;
     }
+    // A body root on a static-cache placement origin is a doodad (a lantern, a banner): it holds
+    // nothing. Unknown (no scene for this map, index incomplete): it counts as a body.
+    bool rigidStaticBody(const float* root){
+        if(!staticScene||staticScene->map!=lastRequest.map)return false;const auto& x=rigidIndex;
+        if(x.scene!=staticScene.get()||x.revision!=rigidSceneRevision(*staticScene)||!x.complete)return false;
+        return x.find(root,rigidMemory.tuning().staticBodyTolerance,[](std::uint32_t){return true;}); /* the index holds categories 1 and 3 only */
+    }
     // Before retainSelected: observe, decide, copy the replays of remembered groups.
     void rigidMemoryObserve(){
         rigidInjected=0;rigidObserveMs=0;
         if(!effects.shadows){rigidMemoryClear();return;}
         const auto started=std::chrono::steady_clock::now();const DWORD now=GetTickCount();
-        if(lastRequest.map!=rigidMap){rigidMemoryClear();rigidMap=lastRequest.map;rigidMapMs=now;}
+        if(lastRequest.map!=rigidMap){rigidMemoryClear();rigidMemory.resetStats();rigidMap=lastRequest.map;rigidMapMs=now;}
+        rigidMemory.events(NorthlightDiagnostics::enabled());
         rigidObservations.clear();rigidBodies.clear();rigidGroupDraws.clear();rigidGroups.clear();
         for(size_t i=0;i<replays.size();){const unsigned group=replays[i]->constantGroup;size_t j=i;
             while(j<replays.size()&&replays[j]->constantGroup==group)++j;
             rigidObserveGroup(i,j);i=j;}
         const float* pivot=actorShadowOriginValid?actorShadowOrigin:context.camera;
         rigidMemory.frame(rigidObservations,rigidBodies.data(),rigidBodies.size()/3,now,pivot,context.inverseView,projection,!captureShortfall,
-            [&](size_t n){return rigidStaticCovered(rigidObservations[n],now);});
+            [&](size_t n){return rigidStaticCovered(rigidObservations[n],now);},[&](const float* root){return rigidStaticBody(root);});
         for(size_t n=0;n<rigidObservations.size();++n)if(rigidObservations[n].action!=NorthlightRigidMemory::Observation::None)rigidMemory.store(rigidObservations[n],rigidCopy(n),now);
+        rigidDrawKeysRebuild(); /* after store: the drawn test of the next capture frame */
         if(rigidMemory.screening())rigidIndexStep();
         rigidGroupDraws.clear();
         rigidObserveMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
@@ -117,12 +145,22 @@
                     std::memcpy(p->constantStorage+4*(31+3*e.payload.bone),rows,sizeof rows);
                     p->constantUsage=c.usage;p->projectionKind=c.projectionKind;p->cutoff=c.cutoff;p->addressU=c.addressU;p->addressV=c.addressV;
                     p->type=c.type;p->base=0;p->min=0;p->vertices=p->mesh().vertexCount;p->start=0;p->count=c.count;p->indexed=c.indexed;
-                    p->pointBounds={};p->gpuCached=false;p->shadowSkinned=p->shadowSelected=true;p->fateSlot=-1;p->fateClass=NorthlightShadowFate::NotRanked;p->fateDistance=0;
+                    p->pointBounds={};p->gpuCached=false;p->shadowSkinned=p->shadowSelected=true;p->shadowSmall=false;p->fateSlot=-1;p->fateClass=NorthlightShadowFate::NotRanked;p->fateDistance=0;
                     p->staticProofMask=0;p->constantGroup=++group;
                     replays.emplace_back(p.release());++rigidInjected;}});
         }
         if(captureSampled){const auto& s=rigidMemory.stats();const double ms=rigidObserveMs+std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
-            logf("RIGID memory tracks=%zu entries=%zu injected=%u seen=%zu held=%zu static=%zu mobile=%zu droppedInView=%llu droppedRange=%llu droppedTeleport=%llu droppedMoved=%llu droppedUnseen=%llu evicted=%llu remembered=%llu indexComplete=%d bytes=%zu ms=%.3f",
+            logf("RIGID memory tracks=%zu entries=%zu injected=%u seen=%zu held=%zu static=%zu mobile=%zu droppedInView=%llu droppedRange=%llu droppedTeleport=%llu droppedMoved=%llu droppedUnseen=%llu evicted=%llu remembered=%llu indexComplete=%d bytes=%zu ms=%.3f drawn=%zu drawnNotCaptured=%zu liveUnselected=%zu notDrawn=%zu drawnMoved=%llu rememberGateFar=%llu tracksForgotten=%llu refreshSkipped=%llu sortMs=%.3f eventsSuppressed=%u",
                 s.tracks,s.entries,rigidInjected,s.seen,s.held,s.statics,s.mobile,(unsigned long long)s.droppedInView,(unsigned long long)s.droppedRange,(unsigned long long)s.droppedTeleport,
-                (unsigned long long)s.droppedMoved,(unsigned long long)s.droppedUnseen,(unsigned long long)s.evicted,(unsigned long long)s.remembered,int(rigidIndex.complete),s.bytes,ms);}
+                (unsigned long long)s.droppedMoved,(unsigned long long)s.droppedUnseen,(unsigned long long)s.evicted,(unsigned long long)s.remembered,int(rigidIndex.complete),s.bytes,ms,
+                s.drawn,s.drawnNotCaptured,s.liveUnselected,s.notDrawn,(unsigned long long)s.droppedDrawnMoved,(unsigned long long)s.rememberGateFar,(unsigned long long)s.tracksForgotten,(unsigned long long)s.refreshSkipped,s.sortMs,rigidEventSuppressed);}
+        // F6 (Diagnostics=1): RIGID event lines, at most RigidEventsPerSecond, RigidEventLines a session.
+        if(NorthlightDiagnostics::enabled()){rigidMemory.takeEvents(rigidEvents);const DWORD now=GetTickCount();
+            for(const auto& v:rigidEvents){if(now-rigidEventRefillMs>=1000){rigidEventRefillMs=now;rigidEventTokens=RigidEventsPerSecond;}
+                if(!rigidEventTokens||rigidEventLines>=RigidEventLines){++rigidEventSuppressed;continue;}--rigidEventTokens;++rigidEventLines;
+                float eye=0,pivot=0;const float* p=actorShadowOriginValid?actorShadowOrigin:context.camera;
+                for(unsigned k=0;k<3;++k){eye+=(v.at[k]-context.camera[k])*(v.at[k]-context.camera[k]);pivot+=(v.at[k]-p[k])*(v.at[k]-p[k]);}
+                logf("RIGID event %s reason=%s state=%s shape=%016llx at=(%.1f %.1f %.1f) eye=%.1f pivot=%.1f body=%d bodyAt=(%.1f %.1f %.1f) bodyDistance=%.1f ratio=%.2f",
+                    NorthlightRigidMemory::eventName(v.kind),NorthlightRigidMemory::reasonName(v.reason),NorthlightRigidMemory::stateName(v.state),(unsigned long long)v.shape,
+                    v.at[0],v.at[1],v.at[2],std::sqrt(eye),std::sqrt(pivot),int(v.hasBody),v.body[0],v.body[1],v.body[2],v.bodyDistance,v.ratio);}}
     }

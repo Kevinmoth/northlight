@@ -88,6 +88,9 @@ checks={
  'RenderProfile needs Diagnostics (its log gates count as diagnostics gates)':'inline bool renderProfile(const Settings& s){return s.diagnostics&&s.renderProfile;}' in fp.src('quality_settings.h').read_text(),
  'near capture reserve counters only on the sampled MODEL frame capture line':(lambda t:t.count('nearAdmitted=%u nearBytes=%zu nearRefused=%u nearSelf=%d nearReserve=%zu')==1
    and 'if(captureSampled)logf("MODEL frame capture skinnedCandidates=' in t[t.rindex('\n',0,t.index('nearAdmitted=%u')):t.index('nearAdmitted=%u')])(w),
+ 'RIGID event lines (0.3.173): Diagnostics only, rate-limited and capped; recording off otherwise':(lambda t:t.count('logf("RIGID event ')==1
+   and 'if(NorthlightDiagnostics::enabled()){rigidMemory.takeEvents(rigidEvents);' in t and 'rigidMemory.events(NorthlightDiagnostics::enabled());' in t
+   and 'if(!rigidEventTokens||rigidEventLines>=RigidEventLines){++rigidEventSuppressed;continue;}' in t)(fp.src('world_rigid_memory.inl').read_text()),
  'point/envelope diagnostics gated':'const bool diagnostics=NorthlightDiagnostics::enabled()&&(frames==0||frames%120==0);' in fp.src('world_point_rendering.inl').read_text(),
 }
 for name,ok in checks.items():print(('PASS ' if ok else 'FAIL ')+name)

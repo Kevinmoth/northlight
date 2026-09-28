@@ -37,6 +37,21 @@ checks['observes every captured skinned group; bodies are the non-rigid ones; id
     and 'NorthlightRigidMemory::mixShape(shape,p.originalShader,p.decl,p.mesh().vertexCount,p.mesh().primitiveCount,p.mesh().byteSize());' in m and 'shared.get()' not in m)
 checks['shortfall frames record and draw; only the despawn test needs a complete frame']='!captureShortfall,' in m and m.count('captureShortfall')==1
 checks['logged on sampled frames']='if(captureSampled){const auto& s=rigidMemory.stats();' in inject and 'logf("RIGID memory tracks=%zu entries=%zu injected=%u seen=%zu held=%zu static=%zu mobile=%zu droppedInView=' in inject
+capture=w[w.index('    void captureModel(D3DPRIMITIVETYPE type,'):w.index('    // One directional replay draw in the 0.3.142 order')]
+drawn='if(!rigidDrawKeys.empty()&&rigidDrawKeys.contains(current,count))rigidMemoryDrawn(current,count);'
+checks['0.3.173 drawn test: only with entries, right after the shader lookup, before the 4096 cap, budget, blend and projection checks']=(capture.count(drawn)==1
+    and capture.index('const auto& metadata=it->second;')<capture.index(drawn)<capture.index('if(replays.size()>=4096)')<capture.index('if(replaySnapshots.captureExhausted(priority))')
+    and capture.index(drawn)<capture.index('D3DRS_ALPHABLENDENABLE')<capture.index('kind==1?4:2,q,4'))
+checks['drawn test reuses the mirror-answered palette rows of drawRoot (one read site), bone 0 at c31']=(w.count('GetVertexShaderConstantF(UINT(program->second.paletteBase),rows,3)')==1
+    and 'float rows[12];const auto* program=paletteRows(shader,rows);if(!program)return false;' in w and 'const auto* program=paletteRows(shader,rows);' in m and 'program->paletteBase!=31' in m)
+observe=m[m.index('    void rigidMemoryObserve(){'):m.index('    void rigidMemoryInject(){')]
+checks['key set rebuilt after store every capture frame, cleared with the memory; drawn marks per frame']=(observe.index('rigidMemory.store(rigidObservations[n],rigidCopy(n),now);')<observe.index('rigidDrawKeysRebuild();')
+    and 'rigidDrawKeys.clear();}' in m and 'rigidMemory.clearDrawn(); /* 0.3.173' in w[w.index('    void endFrame('):])
+checks['LiveUnselected: captured non-small draws only (small at capture never observed), no copy']=('if(!p.shadowSelected){if(p.shadowSmall)continue;' in m and 'u.selected=false;' in m
+    and 'p->shadowSmall=smallShadow;' in w)
+checks['RIGID event lines: Diagnostics only, 20 per second, 2000 a session']=('if(NorthlightDiagnostics::enabled()){rigidMemory.takeEvents(rigidEvents);' in m and 'RigidEventsPerSecond=20,RigidEventLines=2000;' in m
+    and 'if(!rigidEventTokens||rigidEventLines>=RigidEventLines){++rigidEventSuppressed;continue;}' in m and 'rigidMemory.events(NorthlightDiagnostics::enabled());' in m)
+checks['counters reset on a map change; doodad bodies from the static index']=('if(lastRequest.map!=rigidMap){rigidMemoryClear();rigidMemory.resetStats();' in m and 'return rigidStaticBody(root);' in m)
 for name,ok in checks.items():print(('PASS ' if ok else 'FAIL ')+name)
 assert all(checks.values())
 with tempfile.TemporaryDirectory(prefix='northlight-rigid-memory-') as tmp:

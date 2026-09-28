@@ -524,7 +524,7 @@ private:
         NorthlightDrawSnapshot::Mesh snapshot; // owned copy: DYNAMIC/UP draws and misses the cache could not store
         std::shared_ptr<const NorthlightDrawSnapshot::Mesh> shared; // immutable snapshot: tracked generations or legacy static cache
         const NorthlightDrawSnapshot::Mesh& mesh()const{return shared?*shared:snapshot;}
-        bool gpuCached=false,shadowSkinned=false,shadowSelected=true;int fateSlot=-1;unsigned char fateClass=0;float fateDistance=0; /* shadow fate diagnostics */
+        bool gpuCached=false,shadowSkinned=false,shadowSelected=true,shadowSmall=false;int fateSlot=-1;unsigned char fateClass=0;float fateDistance=0; /* shadow fate diagnostics */
         uint32_t staticProofMask=0;uint64_t staticProofRevision=0;std::string staticProofModel;
         V staticProofLow,staticProofHigh;
         D3DPRIMITIVETYPE type;INT base;UINT min,vertices,start,count;bool indexed;
@@ -1601,7 +1601,7 @@ public:
     void reset(){shadowsComposited=false;pivotValid=false;pivotDistance=12.f;cascadeAnchor.reset();endFrame();replaySnapshots.clearIndexCache();actorJobComplete.reset();actorJobSerial_=0;actorSceneMap_.clear();lastActorCapture=0;terrainBoundsCache.clearPersistent();previousCacheHits=0;freeReplays.clear();pooledSnapshotBytes=0;valid=false;failed=false;releaseGPU();}
     void endFrame(bool retainPool=true){
         replayBoundsAbandon(); /* render() joined it; packets are recycled below */
-        paletteFrameValid=false;staticPivotReady=false;
+        paletteFrameValid=false;staticPivotReady=false;rigidMemory.clearDrawn(); /* 0.3.173: drawn marks are per capture frame */
         if(!valid||failed||workerFault())stateBlocks.clear();
         /* 0.3.149 RenderProfile lines: after every measured span of the frame */
         if(profileSampled())logRenderProfile();else{replayProfileUsed.clear();replayGiPacked.clear();}
@@ -2197,14 +2197,19 @@ public:
             captureMode=skip?CaptureSkipped:CaptureFresh;if(skip)++captureSkippedFrames;else captureDemand=false;}
         return captureMode==CaptureSkipped;
     }
-    // Palette root (bone 0 origin, world) of the draw about to be issued: its 3 palette rows
-    // (answered by the device mirror) through the capture's inverse view. False: not a palette
-    // program, or the rows cannot be read.
+    // The 3 palette rows (bone 0, at paletteBase) of the draw about to be issued, answered by the
+    // device mirror. Null: not a palette program, or the rows cannot be read.
+    const NorthlightActorDeformation::Program* paletteRows(IDirect3DVertexShader9* shader,float* rows){
+        auto program=actorPrograms.find(shader);
+        if(program==actorPrograms.end()||program->second.paletteBase<0||program->second.paletteBase+2>=256||FAILED(d->GetVertexShaderConstantF(UINT(program->second.paletteBase),rows,3)))return nullptr;
+        return &program->second;
+    }
+    // Palette root (bone 0 origin, world) of the draw about to be issued: paletteRows() through
+    // the capture's inverse view. False: not a palette program, or the rows cannot be read.
     bool drawRoot(IDirect3DVertexShader9* shader,float* root){
-        auto program=actorPrograms.find(shader);float rows[12];
-        if(program==actorPrograms.end()||program->second.paletteBase<0||program->second.paletteBase+2>=256||FAILED(d->GetVertexShaderConstantF(UINT(program->second.paletteBase),rows,3)))return false;
-        float bank[4*256];std::memcpy(bank+4*program->second.paletteBase,rows,sizeof rows);
-        return NorthlightActorDeformation::rootWorld(program->second,bank,context.inverseView,root);
+        float rows[12];const auto* program=paletteRows(shader,rows);if(!program)return false;
+        float bank[4*256];std::memcpy(bank+4*program->paletteBase,rows,sizeof rows);
+        return NorthlightActorDeformation::rootWorld(*program,bank,context.inverseView,root);
     }
     // 0.3.172 near capture reserve (near_reserve.h): asked only for a skinned draw the budget is
     // about to turn away for bytes. The anchor is taken once per capture frame, at the first ask
@@ -2222,6 +2227,8 @@ public:
         if(modelCaptureSkipped())return; /* previous replays/actor packets are not needed this frame */
         auto it=captureShaders.find(current);if(it==captureShaders.end()){if(sample)++unknownCaptureCalls;return;}
         const auto& metadata=it->second;
+        // 0.3.173 rigid memory: did the game draw a remembered prop? Before every capture rejection.
+        if(!rigidDrawKeys.empty()&&rigidDrawKeys.contains(current,count))rigidMemoryDrawn(current,count);
         // Shadow fate (diagnostic window only): the outcome recorded at return.
         struct FateScope {NorthlightShadowFate::Tracker& tracker;int slot=-1;NorthlightShadowFate::Fate reason=NorthlightShadowFate::Unknown;
             ~FateScope(){tracker.record(slot,reason,false);}} fate{shadowFate};
@@ -2280,7 +2287,7 @@ public:
         // A rejected draw returns its record to the pool as well. Exhausted
         // geometry budgets must not allocate/zero a fresh constant bank per draw.
         phase.next(CaptureSnapshot);fate.reason=NorthlightShadowFate::Snapshot;
-        std::unique_ptr<Replay,ReplayRecycle> p(acquireReplay().release(),ReplayRecycle{this});p->shadowSkinned=priority;p->shadowSelected=!smallShadow;p->fateSlot=-1;p->fateClass=smallShadow?NorthlightShadowFate::Small:NorthlightShadowFate::NotRanked;p->fateDistance=0;p->projectionKind=kind;p->shader=metadata.replacement;p->shader->AddRef();p->originalShader=current;p->originalShader->AddRef();p->pointBounds={};
+        std::unique_ptr<Replay,ReplayRecycle> p(acquireReplay().release(),ReplayRecycle{this});p->shadowSkinned=priority;p->shadowSelected=!smallShadow;p->shadowSmall=smallShadow;p->fateSlot=-1;p->fateClass=smallShadow?NorthlightShadowFate::Small:NorthlightShadowFate::NotRanked;p->fateDistance=0;p->projectionKind=kind;p->shader=metadata.replacement;p->shader->AddRef();p->originalShader=current;p->originalShader->AddRef();p->pointBounds={};
         if(FAILED(d->GetVertexDeclaration(&p->decl))||!p->decl)return;
         NorthlightDrawSnapshot::Draw draw{type,base,minimum,vertexTotal,start,count,indexed};NorthlightDrawSnapshot::Diagnostics why;
         const size_t readBefore=replaySnapshots.bytesRead();

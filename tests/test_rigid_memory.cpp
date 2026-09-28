@@ -34,30 +34,36 @@ static void rotZ(float angle,float scale,float* M){const float c=std::cos(angle)
 // W of a model placed with row-major M (column vector) at t: axis a -> column a of M.
 static void placed(const float* M,float x,float y,float z,float* W){for(unsigned a=0;a<3;++a)for(unsigned w=0;w<3;++w)W[a*3+w]=M[w*3+a];W[9]=x;W[10]=y;W[11]=z;}
 static Observation sign(std::uint64_t shape,float x,float y,float z,float yaw=.3f,std::size_t bytes=4000,unsigned draws=1,unsigned triangles=150){
-    Observation o;o.shape=shape;float M[9];rotZ(yaw,1,M);placed(M,x,y,z,o.world);o.draws=draws;o.triangles=triangles;o.bytes=bytes;return o;}
+    Observation o;o.shape=shape;float M[9];rotZ(yaw,1,M);placed(M,x,y,z,o.world);std::memcpy(o.world0,o.world,48);o.hasWorld0=true;o.draws=draws;o.triangles=triangles;o.bytes=bytes;return o;}
+static Observation unselected(Observation o){o.selected=false;return o;}
 struct Scene {
     Reg reg;unsigned now=1000;std::vector<Observation> obs;std::vector<float> bodies;int covered=0;unsigned injected=0,stored=0,refreshed=0,screens=0;std::shared_ptr<int> token=std::make_shared<int>(0);
-    float pivot[3]={0,0,0};Camera away=facing(0,0,2,-1,0),toward=facing(0,0,2,1,0);
+    float pivot[3]={0,0,0};Camera away=facing(0,0,2,-1,0),toward=facing(0,0,2,1,0);std::vector<std::array<float,3>> doodads; /* static-cache placement origins (staticBody) */
     explicit Scene(Tuning t=Tuning{}):reg(t){}
-    void step(std::vector<Observation> list,const Camera& c,bool complete=true,unsigned dt=16){now+=dt;obs=std::move(list);
-        reg.frame(obs,bodies.data(),bodies.size()/3,now,pivot,c.inverse,c.projection,complete,[&](std::size_t){++screens;return covered;});
+    // drawn: bone-0 matrices of game draws this capture frame (markDrawn, the renderer's test at capture).
+    void step(std::vector<Observation> list,const Camera& c,bool complete=true,unsigned dt=16,std::vector<std::array<float,12>> drawn={}){now+=dt;obs=std::move(list);
+        for(const auto& w:drawn)reg.markDrawn(w.data(),[](const Reg::Entry&){return true;});
+        reg.frame(obs,bodies.data(),bodies.size()/3,now,pivot,c.inverse,c.projection,complete,[&](std::size_t){++screens;return covered;},
+            [&](const float* r){for(const auto& d:doodads)if(std::fabs(d[0]-r[0])<=.25f&&std::fabs(d[1]-r[1])<=.25f&&std::fabs(d[2]-r[2])<=.25f)return true;return false;});
         for(const auto& o:obs)if(o.action!=Observation::None&&reg.store(o,Payload{token,{},0},now)){if(o.action==Observation::Remember)++stored;else ++refreshed;}
         injected=0;reg.forAbsent([&](Reg::Entry&){++injected;});}
     // Frames at dt until remembered (or `limit` frames): the count.
-    unsigned settle(const Observation& o,const Camera& c,unsigned dt=16,unsigned limit=1000){for(unsigned k=1;k<=limit;++k){step({o},c,true,dt);if(reg.entries().size())return k;}return 0;}
+    unsigned settle(const Observation& o,const Camera& c,unsigned dt=16,unsigned limit=1000){const auto before=reg.stats().remembered;
+        for(unsigned k=1;k<=limit;++k){step({o},c,true,dt);if(reg.stats().remembered>before)return k;}return 0;}
 };
+static std::array<float,12> w0(const Observation& o){std::array<float,12> w;std::memcpy(w.data(),o.world0,48);return w;}
 // Frames at 16 ms until a new track is remembered: the first, then 125 more (2000 ms).
 constexpr unsigned Settle=126;
 static void settle(){
-    // Time AND capture frames: 16 ms frames need the whole 2 s (125 frames after the first); 1 s frames need a 4th frame.
+    // Time AND capture frames AND 8 complete observed frames: 16 ms frames need the whole 2 s; 1 s frames need an 8th frame.
     {Scene s;const auto o=sign(1,20,0,3);assert(s.settle(o,s.away)==Settle&&s.stored==1&&s.reg.stats().remembered==1);}
-    {Scene s;const auto o=sign(1,20,0,3);for(unsigned k=0;k<3;++k){s.step({o},s.away,true,1000);assert(s.reg.entries().empty());} /* 2 s, 3 frames: not yet */
+    {Scene s;const auto o=sign(1,20,0,3);for(unsigned k=0;k<7;++k){s.step({o},s.away,true,1000);assert(s.reg.entries().empty());} /* 7 s, 7 frames: not yet */
      s.step({o},s.away,true,1000);assert(s.reg.entries().size()==1);}
     {Scene s;const auto o=sign(1,20,0,3);for(unsigned k=0;k<40;++k){s.step({o},s.away,true,16);}assert(s.reg.entries().empty());} /* 40 frames, 640 ms: not yet */
     // A creeping object (0.03 yd per frame, below the travel limit) restarts the settle every frame.
     {Scene s;for(unsigned k=0;k<16;++k){s.step({sign(1,20+.03f*k,0,3)},s.away);}for(unsigned k=0;k<16;++k)s.step({sign(1,20.45f,0,3)},s.away);
      assert(s.reg.entries().empty());assert(s.settle(sign(1,20.45f,0,3),s.away)==Settle-17);} /* settles from its stop: the anchor is the 16th frame */
-    std::puts("PASS settle: 2000 ms AND 4 capture frames (either alone is not enough), motion restarts it");
+    std::puts("PASS settle: 2000 ms AND 4 capture frames AND 8 complete frames (none alone is enough), motion restarts it");
 }
 static void sticky(){
     // Mobile: travelled 0.6 yd, then still for 10 s: never remembered. Turned 0.06: likewise.
@@ -65,20 +71,53 @@ static void sticky(){
      assert(s.reg.entries().empty()&&s.reg.stats().mobile==1);}
     {Scene s;for(unsigned k=0;k<=6;++k)s.step({sign(1,20,0,3,.3f+.01f*k)},s.away);for(unsigned k=0;k<625;++k)s.step({sign(1,20,0,3,.36f)},s.away);
      assert(s.reg.entries().empty()&&s.reg.stats().mobile==1);}
-    // Held: a body root within 4 yd in a single frame, then gone for good: never remembered. 4.1 yd: remembered.
-    {Scene s;s.bodies={22,0,0};s.step({sign(1,20,0,3)},s.away);s.bodies.clear();for(unsigned k=0;k<625;++k)s.step({sign(1,20,0,3)},s.away);
-     assert(s.reg.entries().empty()&&s.reg.stats().held==1);}
-    {Scene s;s.bodies={20,4.1f,3};assert(s.settle(sign(1,20,0,3),s.away)==Settle&&s.reg.stats().held==0);
-     // A body coming within 4 yd of a remembered object (its owner back in the capture): dropped, held for good.
-     s.bodies={20,3.9f,3};s.step({sign(1,20,0,3)},s.away);assert(s.reg.entries().empty()&&s.reg.stats().held==1);
-     s.bodies.clear();for(unsigned k=0;k<300;++k)s.step({sign(1,20,0,3)},s.away);assert(s.reg.entries().empty());}
     // Static: covered once -> never; not covered -> remembered; unknown -> asked again every frame.
     {Scene s;s.covered=1;for(unsigned k=0;k<300;++k)s.step({sign(1,20,0,3)},s.away);assert(s.reg.entries().empty()&&s.reg.stats().statics==1&&s.screens==1);}
     {Scene s;s.covered=-1;for(unsigned k=0;k<200;++k)s.step({sign(1,20,0,3)},s.away);assert(s.reg.entries().empty()&&s.reg.screening()&&s.screens==200-Settle+1);
      s.covered=0;s.step({sign(1,20,0,3)},s.away);assert(s.reg.entries().size()==1&&!s.reg.screening());}
     // Too large: more than 4 draws, 4096 triangles or 256 KiB of mesh.
     for(const auto& o:{sign(1,20,0,3,.3f,4000,5),sign(1,20,0,3,.3f,4000,1,4097),sign(1,20,0,3,.3f,(256u<<10)+1)}){Scene s;assert(!s.settle(o,s.away,16,300));}
-    std::puts("PASS sticky: mobile (travel 0.5 yd, turn 0.05), held (a body root within 4 yd in any frame, also after remembering), static screen once; small only");
+    std::puts("PASS sticky: mobile (travel 0.5 yd, turn 0.05), static screen once; small only");
+}
+// F1: remembered only within 72 yd of the pivot, dropped beyond 80 (hysteresis), no track beyond 80.
+static void ranges(){
+    {Scene s;for(unsigned k=0;k<500;++k)s.step({sign(1,76,0,0)},s.away);const auto& st=s.reg.stats();
+     assert(st.remembered==0&&st.droppedRange==0&&st.rememberGateFar>0&&st.tracks==1&&s.stored==0);} /* no churn */
+    {Scene s;assert(s.settle(sign(1,70,0,0),s.away)==Settle);
+     for(unsigned k=1;k<=9;++k){s.pivot[0]=-float(k);s.step({sign(1,70,0,0)},s.away);assert(s.reg.entries().size()==1);} /* 79 yd: kept */
+     s.pivot[0]=-11;s.step({sign(1,70,0,0)},s.away);assert(s.reg.entries().empty()&&s.reg.stats().droppedRange==1);}
+    {Scene s;for(unsigned k=0;k<300;++k)s.step({sign(1,85,0,0),sign(2,0,90,0)},s.away);assert(s.reg.stats().tracks==0&&s.reg.stats().remembered==0);}
+    std::puts("PASS ranges: remembered within 72 yd only (76 yd: no churn over 500 frames), kept to 80 yd, no track beyond 80 yd");
+}
+// F2: held is the share of complete observed frames with a body root within 4 yd (a state), doodad bodies ignored.
+static void held(){
+    const auto o=sign(1,20,0,3);
+    // A still guard's polearm: a body within 3 yd on every frame -> held, never remembered.
+    {Scene s;s.bodies={20,3,3};for(unsigned k=0;k<625;++k)s.step({o},s.away);assert(s.reg.stats().remembered==0&&s.reg.stats().held==1);}
+    // The same with every other frame a shortfall frame on which the body is not captured: still held.
+    // (Counterfactual, must fail: counting the shortfall frames would give a ratio of 0.5 and remember it.)
+    {Scene s;for(unsigned k=0;k<625;++k){const bool complete=k%2==0;s.bodies=complete?std::vector<float>{20,3,3}:std::vector<float>{};s.step({o},s.away,complete);}
+     assert(s.reg.stats().remembered==0&&s.reg.stats().held==1);}
+    // A body passing within 3 yd for 1 s (1.5-2.5 s) during a 4 s observation: remembered.
+    {Scene s;for(unsigned k=0;k<250;++k){s.bodies=k>=94&&k<156?std::vector<float>{20,3,3}:std::vector<float>{};s.step({o},s.away);}
+     assert(s.reg.stats().remembered==1&&s.reg.entries().size()==1);}
+    // An entry with a body parked 2 yd away for 10 s: kept (held never drops), then drawn by us off screen.
+    {Scene s;s.settle(o,s.away);s.bodies={20,2,3};for(unsigned k=0;k<625;++k){s.step({o},s.away);assert(s.reg.entries().size()==1);}
+     assert(s.reg.stats().held==1);s.bodies.clear();s.step({},s.away);assert(s.injected==1&&s.reg.entries().size()==1);}
+    // A body root on a static-cache placement origin (a lantern) holds nothing.
+    {Scene s;s.bodies={20,3,3};s.doodads={{20.1f,3,3}};assert(s.settle(o,s.away)==Settle&&s.reg.stats().held==0);}
+    std::puts("PASS held: >= 80% of >= 8 complete frames (shortfall frames excluded), a passer-by does not hold, an entry is never dropped by a body, doodad bodies ignored");
+}
+// F3: unsettled, held or mobile tracks are forgotten after 2 s unseen; settled free ones after 60 s.
+static void forgetting(){
+    {Scene s;unsigned peak=0;for(unsigned f=0;f<625;++f){std::vector<Observation> riders;for(unsigned r=0;r<4;++r){const float t=.05f*float(f)+1.57f*float(r); /* 1.5 yd per frame on a rising circle: never the same spot twice */
+             riders.push_back(sign(10+r,30*std::cos(t),30*std::sin(t),.01f*float(f)+2*float(r)));}
+         s.step(riders,s.away);peak=std::max<unsigned>(peak,unsigned(s.reg.stats().tracks));}
+     assert(peak<=4*(2000/16+2)&&s.reg.stats().tracksForgotten>=1500);std::printf("  riders: 2500 moving observations, peak %u tracks, %llu forgotten\n",peak,(unsigned long long)s.reg.stats().tracksForgotten);}
+    {Scene s;s.covered=-1;for(unsigned k=0;k<200;++k)s.step({sign(1,20,0,3)},s.away);assert(s.reg.stats().tracks==1);
+     s.step({},s.away,true,30000);assert(s.reg.stats().tracks==1); /* 30 s unseen, settled and free: kept */
+     s.covered=0;s.step({sign(1,20,0,3)},s.away);assert(s.reg.entries().size()==1);}
+    std::puts("PASS forgetting: moving rigid parts leave the table after 2 s, a settled free track waiting for the screen survives 30 s unseen");
 }
 static void identity(){
     // The renderer's identity: draw shapes, never the snapshot pointer. A snapshot re-created every 10 frames keeps the entry.
@@ -89,21 +128,24 @@ static void identity(){
      assert(frame==Settle);for(;frame<400;++frame){s.step({sign(shape(frame,false),20,0,3)},s.away);assert(s.reg.entries().size()==1&&s.injected==0);}
      assert(s.stored==1&&s.refreshed==400-Settle);}
     // Counterfactual (must fail): the snapshot pointer in the identity rekeys every 160 ms and never settles.
-    {Scene s;for(unsigned frame=0;frame<400;++frame)s.step({sign(shape(frame,true),20,0,3)},s.away);assert(s.reg.entries().empty()&&s.reg.stats().tracks==40);}
-    std::puts("PASS identity: shapes + origin; a re-created snapshot keeps the entry (counterfactual with the pointer: 40 tracks, never remembered)");
+    {Scene s;for(unsigned frame=0;frame<400;++frame)s.step({sign(shape(frame,true),20,0,3)},s.away);assert(s.reg.entries().empty()&&s.reg.stats().remembered==0&&s.reg.stats().tracks<=14);}
+    std::puts("PASS identity: shapes + origin; a re-created snapshot keeps the entry (counterfactual with the pointer: a new track every 160 ms, never remembered)");
 }
 static void absence(){
-    const auto o=sign(1,20,0,3);
-    // Off screen (camera away): drawn for 120 s.
+    const auto o=sign(1,20,0,3); /* 20 yd in front of the toward camera */
+    // Off screen (camera away): drawn for 120 s. In view on shortfall frames: drawn, the clock held.
     {Scene s;s.settle(o,s.away);for(unsigned k=0;k<120;++k){s.step({},s.away,true,1000);assert(s.injected==1);}
-     // In view on shortfall frames: still drawn (the draw may be one the budget turned away).
-     unsigned drawn=0,gated=0;for(unsigned k=0;k<50;++k){const bool complete=false;s.step({},s.toward,complete);drawn+=s.injected;gated+=complete?s.injected:0;}
-     assert(drawn==50&&gated==0); /* counterfactual (must fail): drawing only on complete frames draws nothing here */
-     // In view on complete frames: dropped after 2 frames AND 150 ms; a shortfall frame in between holds.
-     unsigned k=0;for(;k<40&&s.reg.entries().size();++k)s.step({},s.toward,k!=3);
-     assert(s.reg.stats().droppedInView==1&&k==11);} /* frames at 0,16,32,(48 shortfall),64..160: dropped at 160 ms, the 10th complete one */
-    // Not in view on a complete frame resets the count.
-    {Scene s;s.settle(o,s.away);for(unsigned k=0;k<300;++k){s.step({},k%2?s.toward:s.away);assert(s.injected==1);}}
+     unsigned drawn=0,gated=0;for(unsigned k=0;k<200;++k){const bool complete=false;s.step({},s.toward,complete);drawn+=s.injected;gated+=complete?s.injected:0;}
+     assert(drawn==200&&gated==0&&s.reg.entries().size()==1); /* counterfactual (must fail): drawing only on complete frames draws nothing here */
+     // NotDrawn in view within 25 yd on complete frames: dropped after 1000 ms AND 6 frames; a shortfall frame in between holds.
+     unsigned k=0;for(;k<200&&s.reg.entries().size();++k)s.step({},s.toward,k!=3);
+     assert(s.reg.stats().droppedInView==1&&k==64); /* dropped 1008 ms after the first in-view frame (62 complete frames; the shortfall frame holds the count, not the time) */
+     // Then a fresh settle: not remembered again before another 2000 ms of observation.
+     const unsigned again=s.settle(o,s.toward);assert(again>=Settle-2&&again<=Settle);}
+    // NotDrawn in view at 30 yd (beyond 25 from the eye): kept.
+    {Scene s;const auto far=sign(1,30,0,3);s.settle(far,s.away);for(unsigned k=0;k<313;++k){s.step({},s.toward);assert(s.injected==1);}assert(s.reg.stats().droppedInView==0);}
+    // Out of view on a complete frame resets the clock.
+    {Scene s;s.settle(o,s.away);for(unsigned k=0;k<300;++k){s.step({},k%10==9?s.away:s.toward);assert(s.injected==1);}}
     // Range: walking away 1 yd per frame; dropped beyond 80 yd from the pivot.
     {Scene s;s.settle(o,s.away);unsigned k=0;for(;k<200&&s.reg.entries().size();++k){s.pivot[0]=-float(k);s.step({},s.away);}
      assert(s.reg.stats().droppedRange==1&&k==61);} /* at pivot x=-60: |(80,0,3)| = 80.06 > 80 */
@@ -115,22 +157,45 @@ static void absence(){
     // Seen again with other axes (a door that opened) or moved within the identity: dropped and mobile for good.
     for(const auto& moved:{sign(1,20,0,3,.3f+.02f),sign(1,20.1f,0,3)}){Scene s;s.settle(o,s.away);s.step({moved},s.away);
         assert(s.reg.entries().empty()&&s.reg.stats().droppedMoved==1&&s.reg.stats().mobile==1);for(unsigned k=0;k<300;++k)s.step({moved},s.away);assert(s.reg.entries().empty());}
-    std::puts("PASS absence: off screen and shortfall frames draw, in-view despawn after 2 complete frames and 150 ms, range 80, teleport and clear release everything, 10 min timeout, seen changed -> dropped and mobile");
+    std::puts("PASS absence: off screen and shortfall frames draw, NotDrawn in view within 25 yd dropped after 1000 ms and 6 complete frames then a fresh settle, 30 yd kept, range 80, teleport and clear release everything, 10 min timeout, seen changed -> dropped and mobile");
+}
+// F4 and the drawn-by-the-game states (markDrawn at capture).
+static void states(){
+    const auto o=sign(1,10,0,3); /* 10 yd in view of the toward camera */
+    // LiveUnselected: selection kept none of its draws for 20 frames in view: neither drawn by us nor dropped.
+    {Scene s;s.settle(o,s.away);for(unsigned k=0;k<80;++k){s.step({unselected(o)},s.toward);assert(s.injected==0&&s.reg.entries().size()==1&&s.reg.stats().liveUnselected==1);}
+     assert(s.stored==1&&s.refreshed==0);} /* no copy for an unselected group */
+    // DrawnNotCaptured: the game drew it (blend fade-in on complete frames, or the budget on shortfall frames) for 5 s in view: drawn by us, never dropped.
+    for(bool complete:{true,false}){Scene s;s.settle(o,s.away);
+        for(unsigned k=0;k<313;++k){s.step({},s.toward,complete,16,{w0(o)});assert(s.injected==1&&s.reg.stats().drawnNotCaptured==1);}assert(s.reg.stats().droppedInView==0);}
+    // DrawnMoved: drawn with bone 0 turned 30 degrees (a door opened): dropped at once, mobile.
+    {Scene s;s.settle(o,s.away);const auto opened=sign(1,10,0,3,.3f+.5236f);s.step({},s.toward,true,16,{w0(opened)});
+     assert(s.reg.entries().empty()&&s.reg.stats().droppedDrawnMoved==1&&s.reg.stats().mobile==1&&s.injected==0);}
+    // Drawn elsewhere (another sign of the same shape 2 yd away): not this entry.
+    {Scene s;s.settle(o,s.away);s.step({},s.toward,true,16,{w0(sign(1,12,0,3))});assert(s.reg.stats().drawnNotCaptured==0&&s.reg.stats().notDrawn==1);}
+    // Without a finite W0 at record time there is no drawn test: NotDrawn, the despawn clock runs.
+    {Scene s;auto bad=o;bad.hasWorld0=false;s.settle(bad,s.away);unsigned k=0;for(;k<200&&s.reg.entries().size();++k)s.step({},s.toward,true,16,{w0(o)});
+     assert(s.reg.stats().droppedInView==1&&k==64);}
+    // The key set: (shader, primitive count) pairs, one probe per draw.
+    {DrawKeySet keys;int a=0,b=0;assert(keys.empty()&&!keys.contains(&a,150));keys.add(&a,150);keys.add(&a,150);keys.add(&b,32);
+     assert(keys.size()==2&&keys.contains(&a,150)&&keys.contains(&b,32)&&!keys.contains(&a,32)&&!keys.contains(&b,150));
+     std::vector<int> many(600);for(auto& x:many)keys.add(&x,1);assert(keys.size()==512);keys.clear();assert(keys.empty()&&!keys.contains(&a,150));}
+    std::puts("PASS states: LiveUnselected kept and not drawn, DrawnNotCaptured (complete or shortfall) drawn and never dropped, DrawnMoved dropped at once, W0 missing -> NotDrawn; key set");
 }
 static void caps(){
-    // 70 signs at 5..74 yd (both orders): the 64 nearest stay, the farthest go.
-    for(bool reversed:{false,true}){Scene s;std::vector<Observation> all;for(unsigned i=0;i<70;++i){const unsigned k=reversed?69-i:i;all.push_back(sign(100+k,-5.f-k,0,3));}
-        for(unsigned f=0;f<130;++f)s.step(all,s.toward); /* in view but seen: kept */
-        assert(s.reg.entries().size()==64);float far=0;for(const auto& e:s.reg.entries())far=std::max(far,-e.world[9]);assert(far==68);
+    // 70 signs at 2..71 yd (both orders): the 64 nearest stay, the farthest go.
+    for(bool reversed:{false,true}){Scene s;std::vector<Observation> all;for(unsigned i=0;i<70;++i){const unsigned k=reversed?69-i:i;all.push_back(sign(100+k,-2.f-k,0,2));}
+        for(unsigned f=0;f<130;++f)s.step(all,s.toward);
+        assert(s.reg.entries().size()==64);float far=0;for(const auto& e:s.reg.entries())far=std::max(far,-e.world[9]);assert(far==65);
         assert(s.reg.stats().evicted==(reversed?6u:0u));for(unsigned f=0;f<30;++f)s.step(all,s.toward);assert(s.reg.stats().remembered==(reversed?70u:64u));}
     // 2 MiB of mesh: eight 256 KiB entries; a nearer ninth evicts the farthest.
     {Scene s;std::vector<Observation> all;for(unsigned i=0;i<8;++i)all.push_back(sign(200+i,-10.f-i,0,3,.3f,256u<<10));for(unsigned f=0;f<130;++f)s.step(all,s.toward);
      assert(s.reg.entries().size()==8&&s.reg.stats().bytes==(2u<<20));all.push_back(sign(300,-5,0,3,.3f,256u<<10));for(unsigned f=0;f<130;++f)s.step(all,s.toward);
      assert(s.reg.entries().size()==8&&s.reg.stats().evicted==1&&s.reg.stats().bytes==(2u<<20));for(const auto& e:s.reg.entries())assert(e.world[9]!=-17);}
-    // Tracks: at most 2048 (the oldest without an entry go); unseen 60 s forgotten.
+    // Tracks: at most 2048 (the oldest without an entry go); unsettled ones forgotten after 2 s unseen.
     {Scene s;std::vector<Observation> crowd;for(unsigned i=0;i<2100;++i)crowd.push_back(sign(1000+i,float(i%50),float(i/50),0));s.step(crowd,s.away);assert(s.reg.stats().tracks==2048);
-     s.step({},s.away,true,60000);assert(s.reg.stats().tracks==0);}
-    std::puts("PASS caps: 64 entries and 2 MiB with farthest eviction (either arrival order), 2048 tracks, forgotten after 60 s unseen");
+     s.step({},s.away,true,2000);assert(s.reg.stats().tracks==0);}
+    std::puts("PASS caps: 64 entries and 2 MiB with farthest eviction (either arrival order), 2048 tracks");
 }
 static void rebaseRoundTrip(){
     std::mt19937 rng(172);std::uniform_real_distribution<float> angle(-3.1f,3.1f),pos(-9000,9000),near(-60,60),scale(.4f,2.2f);double worst=0;
@@ -201,7 +266,7 @@ struct PropScene {
             const float bone=bones.scanMesh(*p.mesh,gameLayout.data(),gameLayout.size());assert(bone==0);
             Observation o;o.shape=ShapeSeed;mixShape(o.shape,reinterpret_cast<const void*>(p.key),&gameLayout,p.mesh->vertexCount,p.mesh->primitiveCount,p.mesh->byteSize());
             o.draws=1;o.triangles=p.mesh->primitiveCount;o.bytes=p.mesh->byteSize();assert(worldBone(banks.back().data()+4*31,c.inverse,o.world));obs.push_back(o);who.push_back(n);}
-        reg.frame(obs,nullptr,0,now,pivot,c.inverse,c.projection,true,[&](size_t k){++screens;++props[who[k]].screens;return covered(obs[k]);});
+        reg.frame(obs,nullptr,0,now,pivot,c.inverse,c.projection,true,[&](size_t k){++screens;++props[who[k]].screens;return covered(obs[k]);},[](const float*){return false;});
         for(size_t k=0;k<obs.size();++k)if(obs[k].action!=Observation::None){Payload x;x.constants=banks[k];x.bone=0;if(reg.store(obs[k],std::move(x),now))props[who[k]].remembered=true;}
     }
 };
@@ -253,15 +318,16 @@ static void staticFlood(){
     auto orbit=[&](double yaw,double* eye){eye[0]=player[0]-12*std::cos(yaw);eye[1]=player[1]-12*std::sin(yaw);eye[2]=player[2]+5;return looking(eye,player);};
     unsigned frame=0;for(;frame<1500;++frame){index.complete=frame>=150;double eye[3];const Camera c=orbit(.01*frame,eye);scene.frame(eye,c,pivot,true,frame);
         bool all=frame>=300;for(const auto& p:props)all=all&&(p.placed||p.remembered);if(all)break;}
-    size_t statics=0,signs=0;
-    for(const auto& p:props){if(p.placed){++statics;assert(!p.remembered&&p.screens>=1);}else{assert(p.remembered);++signs;}}
+    size_t statics=0,signs=0,far=0; /* placed props beyond 72 yd of the pivot are never screened (0.3.173: the remember gate; no track beyond 80) */
+    for(const auto& p:props){if(p.placed){float q=0;for(unsigned a=0;a<3;++a)q+=(p.t[a]-pivot[a])*(p.t[a]-pivot[a]);const bool inRange=q<=72.f*72.f;
+            assert(!p.remembered&&(p.screens>=1)==inRange);if(inRange)++statics;else ++far;}else{assert(p.remembered);++signs;}}
     const auto& st=scene.reg.stats();assert(signs==12&&st.statics==statics&&st.remembered==12&&scene.reg.entries().size()==12);
     const unsigned screens=scene.screens;
     for(unsigned i=0;i<600;++i){double eye[3];const Camera c=orbit(.01*(frame+i),eye);scene.frame(eye,c,pivot,true,frame+i);}
     assert(scene.screens==screens&&scene.reg.entries().size()==12&&scene.reg.stats().statics==statics); /* screened once: never asked again */
-    std::printf("PASS static-doodad flood: %zu doodads (%zu real world-cache placements, scale .4-2.2) screened and never remembered, 11 signs and a spawned crate beside its static twin remembered (%u frames), %u screen calls\n",statics,sizeof tradeDistrict/sizeof*tradeDistrict,frame,screens);
+    std::printf("PASS static-doodad flood: %zu doodads in range (%zu real world-cache placements, scale .4-2.2) screened and never remembered, %zu beyond 72 yd never screened, 11 signs and a spawned crate beside its static twin remembered (%u frames), %u screen calls\n",statics,sizeof tradeDistrict/sizeof*tradeDistrict,far,frame,screens);
 }
 int main(int argc,char** argv){
-    assert(argc>1);settle();sticky();identity();absence();caps();rebaseRoundTrip();oneBoneProgram(argv[1]);realSign();staticFlood();
+    assert(argc>1);settle();sticky();ranges();held();forgetting();identity();absence();states();caps();rebaseRoundTrip();oneBoneProgram(argv[1]);realSign();staticFlood();
     std::puts("rigid memory: all passed");
 }
