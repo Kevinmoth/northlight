@@ -15,11 +15,14 @@ body=r'''
 #include "replay_bulk_layout.h"
 #include <cassert>
 #include <cstdio>
+#include <random>
 static size_t alive=0;static unsigned freshLocks=0,plainLocks=0,overlaps=0; /* resident uploads; asserted by main only: fixture users run archived flags-0 caches */
+#include <map>
+static std::map<const void*,const unsigned*> registry;static unsigned long long addRefs=0; /* 0.3.176 (U3'): every live buffer's count */
 template<class T,class D>struct Buffer:T{
  unsigned refs=1;std::vector<unsigned char> data;D desc;bool fail=false;bool dynamic=false;std::vector<std::pair<UINT,UINT>> written;
- Buffer(size_t n):data(n){desc.Size=UINT(n);alive+=n;}~Buffer(){alive-=data.size();}
- unsigned AddRef()override{return ++refs;}unsigned Release()override{auto n=--refs;if(!n)delete this;return n;}
+ Buffer(size_t n):data(n){desc.Size=UINT(n);alive+=n;registry[static_cast<T*>(this)]=&refs;}~Buffer(){alive-=data.size();registry.erase(static_cast<T*>(this));}
+ unsigned AddRef()override{++addRefs;return ++refs;}unsigned Release()override{auto n=--refs;if(!n)delete this;return n;}
  HRESULT GetDesc(D* d)override{*d=desc;return D3D_OK;}
  HRESULT Lock(UINT o,UINT n,void** p,DWORD flags)override{if(fail||o+n>data.size())return E_POINTER;
   // Resident buffers are fresh and written once: NOOVERWRITE (upload_lock.h), disjoint ranges. Test readbacks are READONLY.
@@ -99,6 +102,12 @@ class WorldRenderer {public:
  ~WorldRenderer(){replays.clear();replayGpuCache.clear();for(auto& p:replayVerticesGPU)drop(p);drop(replayIndicesGPU);}
  void add(std::shared_ptr<const NorthlightDrawSnapshot::Mesh> m,bool cached){
   auto p=std::make_unique<Replay>();if(cached)p->shared=m;else p->snapshot=*m;replays.push_back(std::move(p));}
+ // 0.3.176 (U3'): at a frame boundary every live buffer holds its owner's reference (the cache entry,
+ // its batch or the bulk buffer member) plus one per replay binding: the 0.3.175 balance.
+ void balance(){std::map<const void*,unsigned> held;
+  for(auto& p:replays){for(auto* s:p->stream)if(s)++held[s];if(p->index)++held[p->index];}
+  for(auto& b:registry){auto h=held.find(b.first);assert(*b.second==1+(h==held.end()?0:h->second));}
+  for(auto& h:held)assert(registry.count(h.first));}
  void verify(){for(auto& p:replays){const auto& m=p->mesh();for(unsigned s=0;s<4;++s){if(m.streams[s].bytes.empty()){assert(!p->stream[s]);continue;}
   auto* actual=static_cast<Buffer<IDirect3DVertexBuffer9,D3DVERTEXBUFFER_DESC>*>(p->stream[s]);
   /* BaseVertexIndex (indexed) or StartVertex (non-indexed) of batched residency */
@@ -194,6 +203,25 @@ int main(){Device d;auto a=mesh(),b=mesh(480),c=mesh(96);
   crowd(1e30,g0,c0,o0);crowd(0,g1,c1,o1);
   assert(g0==g1&&g0.back()>0&&o0==0&&o1>0&&c1.back()<=c0.back());std::printf("crowd: growths=%llu (both runs) overrides=%llu\n",(unsigned long long)g0.back(),(unsigned long long)o1); /* deferral caused no extra growth; the guard fired */
   NorthlightReplayGPU::createBudgetMs()=saved;}
+ // 0.3.176 (U3'): replays kept across uploads (bind-loop rebinding, repeated frames) with random
+ // additions, removals, cache/bulk switches, bulk growth and cache clears. Reference counts balance at
+ // every frame boundary, and a repeated upload of unchanged bindings takes no reference at all.
+ {std::mt19937 rng(1760);unsigned steady=0;
+  for(unsigned run=0;run<6;++run){WorldRenderer world(&d);std::vector<std::shared_ptr<const NorthlightDrawSnapshot::Mesh>> pool;
+   for(unsigned i=0;i<12;++i)pool.push_back(mesh(96+48*(rng()%9)));
+   for(unsigned frame=0;frame<60;++frame){
+    const unsigned change=rng()%6;
+    if(change==0&&!world.replays.empty())world.replays.erase(world.replays.begin()+rng()%world.replays.size());
+    else if(change==1)world.add(pool[rng()%pool.size()],rng()%4!=0);
+    else if(change==2){pool[rng()%pool.size()]=mesh(96+48*(rng()%9));world.add(pool[rng()%pool.size()],true);}
+    else if(change==3&&world.replays.size()<40)world.add(mesh(2400+48*(rng()%30)),rng()%2); /* bulk growth */
+    const bool allowCache=rng()%11!=0;world.forceBulkPressure=rng()%13==0;
+    assert(world.uploadReplay(allowCache));world.verify();world.balance();
+    world.forceBulkPressure=false;
+    for(unsigned repeat=0;repeat<3;++repeat){const auto before=addRefs;assert(world.uploadReplay(allowCache));world.verify();world.balance();
+     if(repeat==2&&allowCache){assert(addRefs==before);++steady;}}
+   }}
+  assert(steady>200&&alive==0&&registry.empty());std::printf("refcount balance: %u steady re-uploads took no reference\n",steady);}
  assert(alive==0&&freshLocks>0&&!plainLocks&&!overlaps);puts("PASS production uploadReplay: mixed cache/bulk offsets, reordered draws, all-cached zero upload, modified geometry, allocation-failure fallback and COM cleanup; creation time bound keeps bulk bytes identical and never forces bulk growth");
 }
 """

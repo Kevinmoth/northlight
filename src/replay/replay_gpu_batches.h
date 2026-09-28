@@ -236,8 +236,10 @@ public:
             }else{reused_+=e.bytes;++hits_;}
             const Entry& ready=*it->second;
             IDirect3DVertexBuffer9* streams[4]={ready.batch?ready.batch->vertices:ready.vertices[0],ready.vertices[1],ready.vertices[2],ready.vertices[3]};
-            for(unsigned s=0;s<4;++s){if(vb[s])vb[s]->Release();vb[s]=streams[s];if(vb[s])vb[s]->AddRef();}
-            if(ib)ib->Release();ib=ready.batch?(mesh->indices.empty()?nullptr:ready.batch->indices):ready.indices;if(ib)ib->AddRef();
+            // 0.3.176 (U3'): a binding already held keeps its reference (no Release/AddRef pair).
+            for(unsigned s=0;s<4;++s)if(vb[s]!=streams[s]){if(vb[s])vb[s]->Release();vb[s]=streams[s];if(vb[s])vb[s]->AddRef();}
+            IDirect3DIndexBuffer9* const index=ready.batch?(mesh->indices.empty()?nullptr:ready.batch->indices):ready.indices;
+            if(ib!=index){if(ib)ib->Release();ib=index;if(ib)ib->AddRef();}
             at=ready.at;return true;
         }catch(...){return false;}
     }

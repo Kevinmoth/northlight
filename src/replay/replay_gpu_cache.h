@@ -162,8 +162,9 @@ public:
                 e.bytes=bytes;bytes_+=bytes;uploaded_+=bytes;++created_;++stats_.created;
             }else{reused_+=e.bytes;++hits_;}
             const Entry& ready=*it->second;
-            for(unsigned s=0;s<4;++s){if(vb[s])vb[s]->Release();vb[s]=ready.vertices[s];if(vb[s])vb[s]->AddRef();}
-            if(ib)ib->Release();ib=ready.indices;if(ib)ib->AddRef();return true;
+            // 0.3.176 (U3'): a binding already held keeps its reference (no Release/AddRef pair).
+            for(unsigned s=0;s<4;++s)if(vb[s]!=ready.vertices[s]){if(vb[s])vb[s]->Release();vb[s]=ready.vertices[s];if(vb[s])vb[s]->AddRef();}
+            if(ib!=ready.indices){if(ib)ib->Release();ib=ready.indices;if(ib)ib->AddRef();}return true;
         }catch(...){return false;}
     }
 };

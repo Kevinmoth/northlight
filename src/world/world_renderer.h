@@ -2126,8 +2126,10 @@ public:
             for(size_t i=0;i<replays.size();++i){auto& p=replays[i];if(!p->gpuCached&&replayBulkLayout.unique(i)&&!p->mesh().indices.empty())std::memcpy(static_cast<std::uint32_t*>(memory)+p->start,p->mesh().indices.data(),p->mesh().indices.size()*4);}
             if(!check(replayIndicesGPU->Unlock(),"model snapshot index unlock"))return false;
         }
-        for(auto& p:replays){if(p->gpuCached)continue;for(unsigned s=0;s<4;++s){drop(p->stream[s]);if(!p->mesh().streams[s].bytes.empty()){p->stream[s]=replayVerticesGPU[s];p->stream[s]->AddRef();}}
-            drop(p->index);if(p->indexed){p->index=replayIndicesGPU;p->index->AddRef();}}
+        // 0.3.176 (U3'): a binding already held keeps its reference (no Release/AddRef pair).
+        for(auto& p:replays){if(p->gpuCached)continue;for(unsigned s=0;s<4;++s){IDirect3DVertexBuffer9* const stream=p->mesh().streams[s].bytes.empty()?nullptr:replayVerticesGPU[s];
+                if(p->stream[s]!=stream){drop(p->stream[s]);if(stream){p->stream[s]=stream;stream->AddRef();}}}
+            IDirect3DIndexBuffer9* const index=p->indexed?replayIndicesGPU:nullptr;if(p->index!=index){drop(p->index);if(index){p->index=index;index->AddRef();}}}
         phase.stop(); // Report I/O is not part of cache/bulk timing.
         if(captureSampled){size_t bulk=indexBytes;for(auto total:totals)bulk+=total;
             const auto residency=NorthlightReplayGPU::batchStats(replayGpuCache);
