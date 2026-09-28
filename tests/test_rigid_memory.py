@@ -6,7 +6,9 @@ in-view despawn test, caps, the rebase round trip, the real client one-influence
 sign end to end and the static-doodad flood on real world-cache placements. Wiring audit of the renderer
 side (world_rigid_memory.inl): observed before retainSelected, injected after it and before the bounds
 kick and upload, copies own their constant banks and hold no texture when opaque, cleared on device
-loss/reset/trim/map change/shadows off, never touches the static cache. No game or GPU."""
+loss/reset/trim/map change/shadows off, never touches the static cache. 0.3.176: the flat placement index against the 0.3.175 map index (S1),
+and rigidObserveGroup reusing selection's bone (S2, test_rigid_observe.cpp) against the 0.3.175 path, with
+the audit-gate counterfactual. No game or GPU."""
 import sys; from pathlib import Path; sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root
 import northlight_paths as fp
 import client_fixtures  # the real client programs and placements, from the tester's client and world cache
@@ -57,6 +59,14 @@ checks['placement index stepped while incomplete with tracks (doodad bodies afte
     and observe.index('rigidMemory.frame(')<observe.index('rigidIndexStep();') and 'static constexpr size_t RigidIndexStep=2048;' in m
     and m.count('rigidIndexStep()')==2 and 'if(!rigidIndexCurrent())return false;const auto& x=rigidIndex;' in m
     and re.search(r'bool rigidIndexCurrent\(\)const\{\s*return staticScene&&staticScene->map==lastRequest.map&&rigidIndex.scene==staticScene.get\(\)&&rigidIndex.revision==rigidSceneRevision\(\*staticScene\)&&rigidIndex.complete;\}',m) is not None)
+sel=x[x.index('    NorthlightActorShadowSelection::Result selectStableActors('):]
+checks['S2 (0.3.176): selection stores exactly the draws it tested; reset at capture and without the stable selection; observe uses it only behind the audit gate, else the 0.3.175 call']=(
+    'item.bone=groupRigid&&declared()?rigidBones.bone(program->second,p.mesh(),p.shared,p.decl,elements,count):NAN;item.rigid=!std::isnan(item.bone);\n            {Replay& stored=*replays[index];stored.boneKnown=groupRigid&&declared();stored.bone=item.bone;}' in sel
+    and 'p->shadowSkinned=priority;p->shadowSelected=!smallShadow;p->shadowSmall=smallShadow;p->boneKnown=false;' in capture
+    and 'if(!stableRan)for(auto& p:replays)p->boneKnown=false;' in select and select.index('if(!stableRan)')<select.index('rigidMemoryObserve();')
+    and select.count('stableRan=true;stable=selectStableActors(')==2 and select.count('selectStableActors(')==2
+    and 'const auto* program=p.shared?rigidProgram(p.originalShader):nullptr;' in m
+    and 'if(program&&p.boneKnown)b=p.bone;\n                else if(program&&declarationCache.get(p.decl,elements,count))b=rigidBones.bone(*program,p.mesh(),p.shared,p.decl,elements,count);' in m)
 hdr=fp.src('rigid_memory.h').read_text()
 checks['tracks: new ones sorted and merged into the ordered survivors (no full sort), partial reindex']=('std::inplace_merge(tracks_.begin(),middle,tracks_.end(),trackBefore);' in hdr
     and 'std::sort(middle,tracks_.end(),trackBefore);' in hdr and 'std::sort(tracks_.begin(),tracks_.end()' not in hdr and 'for(std::size_t i=start;i<tracks_.size();++i)trackIndex_[tracks_[i].serial]=i;' in hdr)
@@ -69,4 +79,21 @@ with tempfile.TemporaryDirectory(prefix='northlight-rigid-memory-') as tmp:
   exe=p/('test-'+label)
   subprocess.run(['clang++','-std=c++17','-Wall','-Wextra','-Werror',*flags,'-UNDEBUG','-I',str(p),*fp.test_include_flags(),str(HERE/'test_rigid_memory.cpp'),str(fp.src('world_gi.cpp')),'-o',str(exe)],check=True)
   print(f'[{label}]',flush=True);subprocess.run([str(exe),str(client_fixtures.four_bone_vs3())],check=True)
+ # 0.3.176 (S2): the production rigidProgram()/rigidObserveGroup() in a harness, with and without the audit gate.
+ def method(text,head):
+  start=text.index(head);depth=0;i=text.index('{',start)
+  while True:
+   depth+={'{':1,'}':-1}.get(text[i],0)
+   if depth==0:return text[start:i+1]
+   i+=1
+ gated=method(m,'    const NorthlightActorDeformation::Program* rigidProgram(')+'\n'+method(m,'    void rigidObserveGroup(size_t first,size_t end){')
+ gate='if(program&&p.boneKnown)b=p.bone;'
+ assert gated.count(gate)==1
+ ungated=gated.replace(gate,'if(p.boneKnown)b=p.bone;')
+ harness=(HERE/'test_rigid_observe.cpp').read_text().replace('/*OBSERVE_METHODS*/','struct Gated:Base{using Base::Base;\n'+gated+'\nOBSERVE_LOOP};\nstruct Ungated:Base{using Base::Base;\n'+ungated+'\nOBSERVE_LOOP};')
+ (p/'test_rigid_observe.cpp').write_text(harness)
+ for label,flags in (('O2',['-O2']),('asan',['-O1','-g','-fsanitize=address,undefined','-fno-omit-frame-pointer'])):
+  exe=p/('observe-'+label)
+  subprocess.run(['clang++','-std=c++17','-Wall','-Wextra','-Werror',*flags,'-UNDEBUG','-I',str(p),*fp.test_include_flags(),str(p/'test_rigid_observe.cpp'),str(fp.src('world_gi.cpp')),'-o',str(exe)],check=True)
+  print(f'[observe {label}]',flush=True);subprocess.run([str(exe),str(client_fixtures.four_bone_vs3())],check=True)
 print('PASS rigid memory: model and wiring')

@@ -12,7 +12,7 @@
         size_t actorBytes=0,actors=0,small=0,distanceTests=0,distanceReused=0;
         for(const auto& p:replays){small+=!p->shadowSelected;
             if(p->shadowSelected&&p->shadowSkinned){actorBytes+=p->mesh().byteSize();++actors;}}
-        NorthlightReplayShadowPolicy::Result result;result.kept=actors;result.keptBytes=actorBytes;NorthlightActorShadowSelection::Result stable;bool ranked=false;
+        NorthlightReplayShadowPolicy::Result result;result.kept=actors;result.keptBytes=actorBytes;NorthlightActorShadowSelection::Result stable;bool ranked=false,stableRan=false;
         auto transition=[this](bool over){actorShadowTransitions+=over!=actorShadowOver;actorShadowOver=over;}; /* over<->under budget crossings per log window */
         const bool radius=NorthlightActorShadowSelection::Enabled&&quality.actorShadowRadius;
         if(!radius)transition(budget&&actorBytes>budget);
@@ -23,10 +23,10 @@
             // ActorShadowRadius>0 runs the stable selection on every frame (grouping,
             // attachments, radius identities); the quota then ranks, as before, but on
             // the bytes inside the radius only (choose() decides with shouldRank).
-            if(radius){stable=selectStableActors(budget,distanceTests,distanceReused);ranked=stable.ranked;actorShadowRadiusToggles+=stable.radiusToggles;actorShadowRadiusFlicker+=stable.radiusFlicker;actorShadowRadiusRekeyed+=stable.radiusRekeyed;
+            if(radius){stableRan=true;stable=selectStableActors(budget,distanceTests,distanceReused);ranked=stable.ranked;actorShadowRadiusToggles+=stable.radiusToggles;actorShadowRadiusFlicker+=stable.radiusFlicker;actorShadowRadiusRekeyed+=stable.radiusRekeyed;
                 transition(budget&&stable.radiusInsideBytes>budget);
                 if(ranked){actorShadowToggles+=stable.toggles;++actorShadowFrames;actorShadowCapBinds+=unsigned(stable.exemptCapBinds);}}
-            else if((ranked=NorthlightActorShadowSelection::Enabled&&budget&&actorShadowHistory.shouldRank(actorBytes,budget,selectionTuning()))){stable=selectStableActors(budget,distanceTests,distanceReused);actorShadowToggles+=stable.toggles;++actorShadowFrames;actorShadowCapBinds+=unsigned(stable.exemptCapBinds);}
+            else if((ranked=NorthlightActorShadowSelection::Enabled&&budget&&actorShadowHistory.shouldRank(actorBytes,budget,selectionTuning()))){stableRan=true;stable=selectStableActors(budget,distanceTests,distanceReused);actorShadowToggles+=stable.toggles;++actorShadowFrames;actorShadowCapBinds+=unsigned(stable.exemptCapBinds);}
             else if(budget&&actorBytes>budget){
                 shadowCandidates.clear();shadowCandidates.reserve(actors);
                 unsigned previousGroup=UINT_MAX;IDirect3DVertexShader9* previousShader=nullptr;
@@ -54,6 +54,7 @@
             // Do not destroy excluded constant-bank owners. GI has already
             // copied its packets; shadows alone see this reduced, ordered list.
             if(shadowFate.active())for(const auto& p:replays)shadowFate.record(p->fateSlot,NorthlightShadowFate::Fate(p->fateClass),p->shadowSelected,p->fateDistance);
+            if(!stableRan)for(auto& p:replays)p->boneKnown=false; /* 0.3.176 (S2): no selection bones this frame */
             rigidMemoryObserve(); /* 0.3.172 rigid memory: every captured group, before the unselected leave */
             NorthlightReplayShadowPolicy::retainSelected(replays,heldShadowReplays);
             rigidMemoryInject(); /* remembered groups the game did not draw: after selection, before bounds and upload */
@@ -105,6 +106,7 @@
             // draw supplies the actor identity key.
             const bool first=p.constantGroup!=previousGroup;if(first)groupRigid=true;
             item.bone=groupRigid&&declared()?rigidBones.bone(program->second,p.mesh(),p.shared,p.decl,elements,count):NAN;item.rigid=!std::isnan(item.bone);
+            {Replay& stored=*replays[index];stored.boneKnown=groupRigid&&declared();stored.bone=item.bone;} /* 0.3.176 (S2): rigidObserveGroup reuses it */
             groupRigid=item.rigid;
             if(tuning.stableIdentity){
                 // Stable per-draw identity: the snapshot-cache entry (VB/IB identity,

@@ -562,6 +562,7 @@ private:
         std::shared_ptr<const NorthlightDrawSnapshot::Mesh> shared; // immutable snapshot: tracked generations or legacy static cache
         const NorthlightDrawSnapshot::Mesh& mesh()const{return shared?*shared:snapshot;}
         bool gpuCached=false,shadowSkinned=false,shadowSelected=true,shadowSmall=false;int fateSlot=-1;unsigned char fateClass=0;float fateDistance=0; /* shadow fate diagnostics */
+        bool boneKnown=false;float bone=NAN; /* 0.3.176 (S2): this frame's selection called rigidBones.bone for it (reset at capture) */
         uint32_t staticProofMask=0;uint64_t staticProofRevision=0;std::string staticProofModel;
         V staticProofLow,staticProofHigh;
         D3DPRIMITIVETYPE type;INT base;UINT min,vertices,start,count;bool indexed;
@@ -2355,7 +2356,7 @@ public:
         // A rejected draw returns its record to the pool as well. Exhausted
         // geometry budgets must not allocate/zero a fresh constant bank per draw.
         phase.next(CaptureSnapshot);fate.reason=NorthlightShadowFate::Snapshot;
-        std::unique_ptr<Replay,ReplayRecycle> p(acquireReplay().release(),ReplayRecycle{this});p->shadowSkinned=priority;p->shadowSelected=!smallShadow;p->shadowSmall=smallShadow;p->fateSlot=-1;p->fateClass=smallShadow?NorthlightShadowFate::Small:NorthlightShadowFate::NotRanked;p->fateDistance=0;p->projectionKind=kind;p->shader=metadata.replacement;p->shader->AddRef();p->originalShader=current;p->originalShader->AddRef();p->pointBounds={};
+        std::unique_ptr<Replay,ReplayRecycle> p(acquireReplay().release(),ReplayRecycle{this});p->shadowSkinned=priority;p->shadowSelected=!smallShadow;p->shadowSmall=smallShadow;p->boneKnown=false;p->fateSlot=-1;p->fateClass=smallShadow?NorthlightShadowFate::Small:NorthlightShadowFate::NotRanked;p->fateDistance=0;p->projectionKind=kind;p->shader=metadata.replacement;p->shader->AddRef();p->originalShader=current;p->originalShader->AddRef();p->pointBounds={};
         if(FAILED(d->GetVertexDeclaration(&p->decl))||!p->decl)return;
         NorthlightDrawSnapshot::Draw draw{type,base,minimum,vertexTotal,start,count,indexed};NorthlightDrawSnapshot::Diagnostics why;
         const size_t readBefore=replaySnapshots.bytesRead();

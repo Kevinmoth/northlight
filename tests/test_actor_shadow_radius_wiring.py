@@ -3,7 +3,8 @@
 """ActorShadowRadius wiring audit (static source analysis; nothing is run).
 GI stays exactly as before: its actor packets are copied at capture time and the
 job is published before the shadow selection runs; the selection never touches
-the GI job and only writes the shadow flag (and fate diagnostics) of replays.
+the GI job and only writes the shadow flag (and fate diagnostics, and since 0.3.176 the rigid bone it
+tested, for rigid memory) of replays.
 Radius 0 keeps the 0.3.144 control flow: choose() gets no Radius and the stable
 selection runs only when the quota ranks. The native decision tests are in
 test_actor_shadow_radius.cpp (run by test_actor_shadow_selection.py)."""
@@ -20,8 +21,8 @@ assert w.count('appendActor(current,*p,sample);')==1 and w.index('appendActor(cu
 code=re.sub(r'/\*.*?\*/','',re.sub(r'//[^\n]*','',ex),flags=re.S) # comments may mention GI
 for needle in ('actorJob','appendActor','packets','finishActorScene','NorthlightGI::'):
     assert needle not in code,f'shadow selection must not touch GI ({needle})'
-writes=set(re.findall(r'replays\[[^\]]*\]->(\w+)=',ex))|set(re.findall(r'\bp->(\w+)=(?!=)',ex))|set(re.findall(r'auto& r=\*replays\[[^;]*;r\.(\w+)=',ex))
-assert writes<= {'shadowSelected','fateClass'},writes
+writes=set(re.findall(r'replays\[[^\]]*\]->(\w+)=',ex))|set(re.findall(r'\bp->(\w+)=(?!=)',ex))|set(re.findall(r'auto& r=\*replays\[[^;]*;r\.(\w+)=',ex))|set(re.findall(r'\bstored\.(\w+)=(?!=)',ex))
+assert writes<= {'shadowSelected','fateClass','boneKnown','bone'},writes # 0.3.176 (S2): the stored rigid bone for rigid memory
 assert 'r.fateClass=f;r.fateDistance=' in ex # fate diagnostics only
 # Radius 0: no Radius reaches choose(), and the stable selection runs only when the quota ranks.
 assert 'radius.active()?&radius:nullptr' in ex

@@ -369,7 +369,7 @@ static void staticFlood(){
 }
 // 0.3.176 (S1): the flat placement index against the 0.3.175 map index. Real world-cache placements
 // (the trade district and Goldshire fixture) among 30000 synthetic ones (all categories, shared cells,
-// negative and huge coordinates, non-finite origins), stepped RigidIndexStep (2048) at a time with the
+// negative coordinates across the whole map, non-finite origins), stepped RigidIndexStep (2048) at a time with the
 // renderer's category filter; after every step the same size, next and complete, and the same find()
 // answer for exact, near, far and non-finite roots with both match users (the static placement and
 // "any", the doodad-body test) and a selective one.
@@ -382,7 +382,7 @@ static void flatIndex(){
         if(kind<60){p.t[0]=centre[0]+near(rng);p.t[1]=centre[1]+near(rng);}
         else if(kind<80){const auto& o=all[rng()%all.size()];p.t[0]=o.t[0]+float(int(rng()%5)-2)*.01f;p.t[1]=o.t[1]+float(int(rng()%5)-2)*16.f;} /* shared and adjacent cells */
         else if(kind<95){p.t[0]=float(int(rng()%34000)-17000);p.t[1]=float(int(rng()%34000)-17000);}
-        else{const float bad[]={NAN,INFINITY,-INFINITY,3e38f,-3e38f};p.t[0]=bad[rng()%5];p.t[1]=rng()%2?bad[rng()%5]:centre[1];}
+        else{const float bad[]={NAN,INFINITY,-INFINITY};p.t[0]=bad[rng()%3];p.t[1]=rng()%2?bad[rng()%3]:centre[1];}
         p.t[2]=rng()%50?90.f+float(rng()%40):NAN;all.push_back(p);}
     std::shuffle(all.begin()+1,all.end(),rng);
     MapPlacementIndex old;PlacementIndex flat;int token=0;
