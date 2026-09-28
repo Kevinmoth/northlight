@@ -165,8 +165,9 @@ static void quality(){
     for(auto preset:{NorthlightQuality::Preset::Quality,NorthlightQuality::Preset::Balanced,NorthlightQuality::Preset::Performance}){
         const auto s=NorthlightQuality::preset(preset);assert(s.renderProfile==0&&s.diagReplayProbe==0);}
     auto s=parse("[Quality]\nDiagReplayProbe=1\n",problems);assert(s.diagReplayProbe==1&&!NorthlightQuality::replayProbe(s)&&problems.empty()); /* needs RenderProfile */
-    s=parse("[Quality]\nRenderProfile=1\n",problems);assert(NorthlightQuality::renderProfile(s)&&!NorthlightQuality::replayProbe(s));
-    s=parse("[Quality]\nRenderProfile=1\nDiagReplayProbe=1\n",problems);assert(NorthlightQuality::renderProfile(s)&&NorthlightQuality::replayProbe(s));
+    s=parse("[Quality]\nRenderProfile=1\n",problems);assert(!NorthlightQuality::renderProfile(s)); /* 0.3.169: Diagnostics defaults to 0 */
+    s=parse("[Quality]\nDiagnostics=1\nRenderProfile=1\n",problems);assert(NorthlightQuality::renderProfile(s)&&!NorthlightQuality::replayProbe(s));
+    s=parse("[Quality]\nDiagnostics=1\nRenderProfile=1\nDiagReplayProbe=1\n",problems);assert(NorthlightQuality::renderProfile(s)&&NorthlightQuality::replayProbe(s));
     assert(NorthlightQuality::describe(s).find("RenderProfile=1(file) DiagReplayProbe=1(file)")!=std::string::npos&&NorthlightQuality::describe(s).find("renderProfileEffective=1 replayProbeEffective=1")!=std::string::npos);
     s=parse("[Quality]\nRenderProfile=1\nDiagReplayProbe=1\nDiagnostics=0\n",problems);assert(!NorthlightQuality::renderProfile(s)&&!NorthlightQuality::replayProbe(s)); /* Diagnostics=0 wins */
     s=parse("[Quality]\nRenderProfile=2\n",problems);assert(s.renderProfile==0&&problems.size()==1);

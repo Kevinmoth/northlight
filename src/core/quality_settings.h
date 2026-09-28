@@ -31,7 +31,7 @@ struct Settings {
     // 0.3.141: shadow fate tracker (diagnostic log only; never changes the image).
     // Diagnostics=0: periodic logs, diagnostic counters and pure measurement off
     // (diagnostics_switch.h); it also forces the fate tracker off.
-    unsigned shadowFateDiagnostics=0,diagnostics=1;
+    unsigned shadowFateDiagnostics=0,diagnostics=0;
     // 0.3.149 render-thread instrumentation (render_thread_probe.h), never a rendering decision.
     // RenderProfile=1 (needs Diagnostics=1): profiler sampler, per-frame times, replay loop split,
     // call counts. DiagReplayProbe=1 (needs RenderProfile): the sun near replays issued again into
@@ -68,7 +68,7 @@ inline const Key Keys[]={
     {"CaptureBudgetMiB",&Settings::captureBudgetMiB,1,32,{32,32,32}},
     {"ActorShadowBudgetMiB",&Settings::actorShadowBudgetMiB,0,32,{0,16,8}},
     {"FarShadowInterval",&Settings::farShadowInterval,1,16,{4,5,6}},
-    {"NearShadowInterval",&Settings::nearShadowInterval,1,16,{1,1,2}},
+    {"NearShadowInterval",&Settings::nearShadowInterval,1,16,{1,2,2}},
     {"LocalLightLimit",&Settings::localLightLimit,8,64,{32,24,16}},
     {"PointShadows",&Settings::pointShadows,0,1,{1,1,0}},
     {"PointShadowRefreshMs",&Settings::pointShadowRefreshMs,0,100,{0,33,33}},
@@ -84,7 +84,7 @@ inline const Key Keys[]={
     {"ShadowFateDiagnostics",&Settings::shadowFateDiagnostics,0,1,{0,0,0}},
     {"PersistentCasters",&Settings::persistentCasters,0,1,{0,0,0}},
     {"PersistentRigidProps",&Settings::persistentRigidProps,0,1,{0,0,0}},
-    {"Diagnostics",&Settings::diagnostics,0,1,{1,1,1}},
+    {"Diagnostics",&Settings::diagnostics,0,1,{0,0,0}},
     {"RenderProfile",&Settings::renderProfile,0,1,{0,0,0}},
     {"DiagReplayProbe",&Settings::diagReplayProbe,0,1,{0,0,0}},
     {"ActorShadowRadius",&Settings::actorShadowRadius,0,200,{40,35,20}},

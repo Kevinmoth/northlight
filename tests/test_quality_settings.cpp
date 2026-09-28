@@ -102,11 +102,12 @@ int main(){
     /* Explicit keys beat both. */
     s=parse("[Quality]\nActorShadowBudgetMiB=4\n",legacy);assert(s.actorShadowBudgetMiB==4&&s.minSkinnedTriangles==50&&s.origin[2]=='f'&&s.origin[0]=='l');
     s=parse("[Quality]\nPreset=Performance\nActorShadowBudgetMiB=0\n",legacy);assert(s.actorShadowBudgetMiB==0&&s.minSkinnedTriangles==100&&s.origin[2]=='f');
-    /* 0.3.141 diagnostics keys: default on/off, Diagnostics=0 forces the fate tracker off, invalid values kept. */
-    assert(d.diagnostics==1&&d.shadowFateDiagnostics==0&&!shadowFate(d));
-    s=parse("[Quality]\nShadowFateDiagnostics=1\n");assert(shadowFate(s)&&describe(s).find("shadowFateEffective=1")!=std::string::npos);
+    /* 0.3.141 diagnostics keys (0.3.169: Diagnostics defaults to 0 in every preset): default off/off, Diagnostics=0 forces the fate tracker off, invalid values kept. */
+    assert(d.diagnostics==0&&d.shadowFateDiagnostics==0&&!shadowFate(d));
+    s=parse("[Quality]\nShadowFateDiagnostics=1\n");assert(!shadowFate(s)&&describe(s).find("shadowFateEffective=0")!=std::string::npos);
+    s=parse("[Quality]\nShadowFateDiagnostics=1\nDiagnostics=1\n");assert(shadowFate(s)&&describe(s).find("shadowFateEffective=1")!=std::string::npos);
     s=parse("[Quality]\nShadowFateDiagnostics=1\nDiagnostics=0\n");assert(s.diagnostics==0&&!shadowFate(s)&&describe(s).find("Diagnostics=0(file)")!=std::string::npos&&describe(s).find("shadowFateEffective=0")!=std::string::npos);
-    for(const char* p:{"[Quality]\nPreset=Balanced\n","[Quality]\nPreset=Performance\n"})assert(parse(p).diagnostics==1&&!shadowFate(parse(p)));
+    for(const char* p:{"[Quality]\nPreset=Balanced\n","[Quality]\nPreset=Performance\n"})assert(parse(p).diagnostics==0&&!shadowFate(parse(p)));
     problems.clear();s=parse("[Quality]\nDiagnostics=2\nShadowFateDiagnostics=yes\n",nullptr,problems);assert(s==d&&problems.size()==2);
     /* ActorShadowRadius (yards): 40 / 35 / 20 (0.3.167); 0 = no limit; 0..200; not a legacy key. */
     assert(d.actorShadowRadius==40&&preset(Preset::Balanced).actorShadowRadius==35&&preset(Preset::Performance).actorShadowRadius==20);
@@ -188,8 +189,8 @@ int main(){
         assert(maxRun==interval-1&&renders>=2000/interval&&skips>0);}
       FarShadowReuse r;const float m[16]={7};r.commit(16,5,m);assert(r.canSkip(16,20,true,false)&&!r.canSkip(16,21,true,false));
       }
-    { /* NearShadowInterval: 1 on Quality and Balanced (the old path), 2 on Performance. */
-      assert(d.nearShadowInterval==1&&preset(Preset::Balanced).nearShadowInterval==1&&preset(Preset::Performance).nearShadowInterval==2);
+    { /* NearShadowInterval: 1 on Quality (the old path), 2 on Balanced and Performance (0.3.169). */
+      assert(d.nearShadowInterval==1&&preset(Preset::Balanced).nearShadowInterval==2&&preset(Preset::Performance).nearShadowInterval==2);
       assert(parse("[Quality]\nNearShadowInterval=16\n").nearShadowInterval==16&&parse("[Quality]\nNearShadowInterval=0\n")==d);
       /* Near reuse is the same complete-map contract as far: interval 1 never skips or records. */
       ShadowMapReuse r;const float m[16]={3};
@@ -200,12 +201,13 @@ int main(){
           assert(cascadeAction(x,1,pass,bits&1,bits&2,true)==CascadeAction::Render&&cascadeAction(x,1,pass,bits&1,bits&2,false)==CascadeAction::Render);
           assert(cascadeAction(x,3,pass,bits&1,bits&2,true)!=CascadeAction::Defer);}
     }
-    { /* Capture-skip decision table. Shadows on with any interval 1 (Quality, Balanced: near 1): never skip. */
+    { /* Capture-skip decision table. Shadows on with any interval 1 (Quality: near 1): never skip. */
       ShadowMapReuse nearMaps[2],farMaps[2];const float m[16]={1};
       for(int i=0;i<2;++i){nearMaps[i].commit(16,10,m);farMaps[i].commit(16,10,m);}
       for(unsigned bits=0;bits<512;++bits){CaptureInputs in;in.shadows=true;in.actorDue=bits&1;in.demand=bits&2;in.diagnostic=bits&4;in.pointDue=bits&8;
           in.sourceActive[0]=bits&16;in.sourceActive[1]=bits&32;in.nextPass=11+(bits>>6);
-          for(Preset p:{Preset::Quality,Preset::Balanced})assert(!skipModelCapture(preset(p),in,nearMaps,farMaps)&&!captureSkipPossible(preset(p),true));
+          assert(!skipModelCapture(preset(Preset::Quality),in,nearMaps,farMaps)&&!captureSkipPossible(preset(Preset::Quality),true));
+          for(Preset p:{Preset::Balanced,Preset::Performance})assert(captureSkipPossible(preset(p),true));
           Settings one=d;one.farShadowInterval=16;assert(!skipModelCapture(one,in,nearMaps,farMaps));
           one=d;one.farShadowInterval=1;one.nearShadowInterval=16;assert(!skipModelCapture(one,in,nearMaps,farMaps));
           /* Both 16: every active source must reuse both maps at the next pass; GI, demand, diagnostics and a due lamp refresh capture. */
@@ -258,7 +260,7 @@ int main(){
                     const bool pull=cascade==1&&pullFar(q.nearShadowInterval,interval,passes,map.reuse,nearRendered);
                     if(pull){assert(fresh&&q.nearShadowInterval>1);++st.pulls;}
                     const bool reusable=g()%20!=0;const auto action=cascadeAction(map.reuse,interval,passes,reusable&&!pull,false,fresh);
-                    if(q==Settings{}||q==preset(Preset::Balanced)){ /* old 0.3.140 far logic, near always rendered */
+                    if(q==Settings{}){ /* old 0.3.140 far logic, near always rendered (Quality: near 1) */
                         const bool oldSkip=cascade==1&&interval>1&&reusable&&map.reuse.valid&&passes-map.reuse.pass<interval;
                         assert((action==CascadeAction::Reuse)==oldSkip&&action!=CascadeAction::Defer);}
                     if(action!=CascadeAction::Render){assert(map.reuse.valid&&map.fromFresh);
@@ -316,7 +318,7 @@ int main(){
                     const bool pull=cascade==1&&pullFar(q.nearShadowInterval,interval,passes,map.reuse,nearRendered);
                     if(pull){assert(fresh&&q.nearShadowInterval>1&&actor);++st.pulls;}
                     const bool reusable=g()%20!=0;const auto action=cascadeAction(map.reuse,interval,passes,reusable&&!pull,false,complete);
-                    if(q==Settings{}||q==preset(Preset::Balanced)){
+                    if(q==Settings{}){
                         const bool oldSkip=cascade==1&&interval>1&&reusable&&map.reuse.valid&&passes-map.reuse.pass<interval;
                         assert((action==CascadeAction::Reuse)==oldSkip&&action!=CascadeAction::Defer);}
                     if(action!=CascadeAction::Render){assert(map.reuse.valid&&map.fromFresh);
@@ -342,7 +344,8 @@ int main(){
         Stats q,b,p,big,off;run(d,seed,false,q);run(preset(Preset::Balanced),seed,false,b);run(preset(Preset::Performance),seed,false,p);
         Settings s=preset(Preset::Performance);s.nearShadowInterval=2;s.farShadowInterval=8;run(s,seed,false,big);
         run(preset(Preset::Performance),seed,true,off);
-        assert(q.skipped>0&&q.bare==0&&b.bare==0&&q.pulls==0&&b.pulls==0&&p.pulls>0); /* Quality/Balanced skip only shadows-off frames (asserted per frame above) */
+        assert(q.skipped>0&&q.bare==0&&b.bare==0&&q.pulls==0&&p.pulls>0); /* Quality skips only shadows-off frames (asserted per frame above) */
+        assert(b.skipped>q.skipped&&b.pointBare==0); /* Balanced (0.3.169): near 2 / far 5 skips capture like Performance */
         assert(p.skipped>0&&big.skipped>0&&p.bare==0&&big.bare==0&&p.pointBare==0&&big.pointBare==0);
         /* ActorShadows=1 (every preset, big intervals, in-frame invalidation): exactly the run above. */
         {Settings s=preset(Preset::Performance);s.nearShadowInterval=2;s.farShadowInterval=8;

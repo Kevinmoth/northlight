@@ -93,7 +93,7 @@ Individual settings (Quality / Balanced / Performance):
   ActorShadows          1 / 1 / 1      shadows of characters and moving objects (0 = static shadows only: terrain, buildings, and the trees and objects placed on the map; characters, creatures, mounts and pets lose their shadow, your own character too, and so do objects the server places, such as doors, elevators, ships, zeppelins, mailboxes and event decorations; swaying trees, windmills and flags keep a shadow frozen in their rest pose; the game's own round shadows return under characters; saves about 4–5 ms per frame in crowds and about 1 ms in quiet areas; with GIDynamicProbes=1 characters are still copied about every 200 ms for indirect light, GIDynamicProbes=0 removes that too; 0 also turns off the PersistentCasters, PersistentRigidProps, ShadowFateDiagnostics and DiagReplayProbe settings; no preset changes this)
   MinSkinnedTriangles   0 / 50 / 100   small animated parts cast no shadow
   FarShadowInterval     4 / 5 / 6      distant shadows (beyond ~48 m) are drawn every Nth frame (1..16)
-  NearShadowInterval    1 / 1 / 2      moving parts of the near shadows (characters) every Nth frame (1..16)
+  NearShadowInterval    1 / 2 / 2      moving parts of the near shadows (characters) every Nth frame (1..16)
   LocalLightLimit       32 / 24 / 16   lamps lighting at the same time (8..64; above 32 = more distant lamps too)
   PointShadows          1 / 1 / 0      lamp shadows at night
   PointShadowRefreshMs  0 / 33 / 33    lamp shadow update interval
@@ -118,7 +118,7 @@ Individual settings (Quality / Balanced / Performance):
   ShadowFateDiagnostics 0 / 0 / 0      shadow diagnostics in the log (1 = on; the image does not change)
   PersistentCasters     0 / 0 / 0      experimental: completely still animated objects (tents, fences) as cached shadows
   PersistentRigidProps  0 / 0 / 0      experimental: rigid objects (shop signs, event fences) as cached shadows; no visible effect in game tests yet, costs about 0.4 ms (spikes 3–6 ms)
-  Diagnostics           1 / 1 / 1      periodic statistics and timings in the log (0 = only startup, settings and errors; the image does not change)
+  Diagnostics           0 / 0 / 0      periodic statistics and timings in the log (0 = only startup, settings and errors; the image does not change)
   RenderProfile         0 / 0 / 0      measurement: render thread timings in the log (needs Diagnostics=1; the image does not change)
   DiagReplayProbe       0 / 0 / 0      measurement: the near-shadow character draws a second time, hidden, in 10 s periods, and the timing in the log (needs RenderProfile=1; the image does not change)
 When both NearShadowInterval and FarShadowInterval are at least 2, frames that
@@ -136,6 +136,8 @@ from drawing clearly fewer characters into shadows.
 The file can be saved as UTF-8, ANSI or Notepad's Unicode.
 
 WINDOWS TEST
+Before a test or a problem report, set Diagnostics=1 in northlight-quality.ini
+(the default is 0); the log then contains the periodic statistics and timings.
 1. Check the start of the new run's northlight-renderer.log file:
    Northlight renderer <version>; d3d9.dll proxy ... backend=dxvk ... loaded=1 error=0
    The backend path must point to renderer-backends\dxvk\dxvk_d3d9.dll.
