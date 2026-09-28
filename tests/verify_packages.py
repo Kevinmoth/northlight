@@ -70,7 +70,7 @@ def allowed(rel, platform_name, launchers, payload):
     if rel.startswith('payload/'):
         return rel[8:] in payload or (platform_name == 'mac' and rel == 'payload/d3d9.dll')
     return rel in launchers or rel in {'BUILD-INFO.json', 'payload-manifest.json', 'README.txt'} or \
-        re.fullmatch(r'variants/[a-z0-9-]+\.json|LICENSES/[A-Za-z0-9.-]+\.txt', rel) is not None
+        re.fullmatch(r'variants/[a-z0-9-]+\.json|LICENSES/(python-third-party/)?[A-Za-z0-9.-]+\.txt', rel) is not None
 
 
 def verify_installer(path):
@@ -135,6 +135,9 @@ def verify_installer(path):
                 check(problems, all(files.get('runtime/' + n) == z.read(n) for n in z.namelist() if not n.endswith('/')),
                       'runtime/ differs from the pinned embeddable zip')
     else:
+        licences = {f'LICENSES/python-third-party/{n}.txt': e['sha256'] for n, e in bp.PINS['python_mac_licenses']['files'].items()}
+        check(problems, {r: sha(d) for r, d in files.items() if r.startswith('LICENSES/python-third-party/')} == licences,
+              'LICENSES/python-third-party/ differs from python_mac_licenses')
         check(problems, modes.get('runtime/bin/python3', 0) & 0o111 and 'runtime/lib/python3.13/os.py' in files,
               'macOS runtime lacks an executable bin/python3 or its stdlib')
         check(problems, not [r for r in files if re.match(r'runtime/lib/(tk|tcl|python3\.13/(site-packages|idlelib|tkinter)/)', r)],

@@ -14,7 +14,8 @@ Northlight-<v>-<macOS|Windows>.zip holds one folder of the same name:
   payload/      d3d9.dll (the renderer), the profile .ini files, northlight-quality.ini (kept when the
                 player has one); Windows: DXVK 2.7.1 as renderer-backends/dxvk/dxvk_d3d9.dll
   variants/     the prebuilt cache manifests the installer matches (from --variant-manifest)
-  LICENSES/, BUILD-INFO.json, payload-manifest.json, README.txt and the launchers
+  LICENSES/     third-party licences; macOS also python-third-party/ (the libraries linked into its python3)
+  BUILD-INFO.json, payload-manifest.json, README.txt and the launchers
                 (Install Northlight.command / Uninstall Northlight.command, or Install.cmd / Uninstall.cmd)
 No world cache, MPQ or other game data, no records, logs or machine paths: tests/verify_packages.py
 checks the zips. Third-party downloads come from NORTHLIGHT_DOWNLOADS, then tools/, and must match
@@ -206,6 +207,8 @@ def mac_runtime(tree, pin, stormlib):
             tree.add('runtime/' + rel, data, executable=bool(member.mode & 0o111) and rel.startswith('bin/'))
     tree.add('runtime/lib/libstorm.dylib', stormlib.read_bytes(), executable=True)
     tree.add('LICENSES/Python-LICENSE.txt', tree.data('runtime/lib/python3.13/LICENSE.txt'))
+    for name, licence in PINS['python_mac_licenses']['files'].items():   # statically linked into bin/python3
+        tree.add(f'LICENSES/python-third-party/{name}.txt', download(licence).read_bytes())
 
 
 def windows_runtime(tree, pin, stormlib):

@@ -76,4 +76,6 @@ renderer-backups folder.
 SOURCES AND LICENSES
 LICENSES folder: Python (PSF; python-build-standalone), StormLib (MIT) and the
 zlib, bzip2, LibTomCrypt/LibTomMath and LZMA SDK that come with it.
+LICENSES/python-third-party: the libraries built into Python (OpenSSL, expat,
+libffi, mpdecimal, bzip2, xz, SQLite, libuuid, HACL*, mimalloc).
 BUILD-INFO.json lists the versions and checksums of every part of the package.

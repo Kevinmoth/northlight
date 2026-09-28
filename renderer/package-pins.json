@@ -10,7 +10,88 @@
     "sha256": "064afb7c2fc0bbf511d886288adf98696af5105e36c138cdf2c199c0146fcf68",
     "bytes": 25208410,
     "sha256_source": "the release's SHA256SUMS and the GitHub asset digest (both 064afb7c...)",
-    "license": "PSF-2.0 (python/lib/python3.13/LICENSE.txt, which also lists the bundled libraries); python-build-standalone build scripts: MPL-2.0"
+    "license": "PSF-2.0 (python/lib/python3.13/LICENSE.txt, CPython only); the libraries linked statically into bin/python3 are in python_mac_licenses; python-build-standalone build scripts: MPL-2.0"
+  },
+  "python_mac_licenses": {
+    "note": "Third-party code linked statically into python_mac bin/python3, from build_info in PYTHON.json of the same release's pgo+lto-full archive and the version strings in the binary; HACL* and mimalloc are vendored in CPython. zlib, libedit and ncurses are macOS system libraries, and Tcl/Tk is not packaged. Shipped as LICENSES/python-third-party/<name>.txt.",
+    "files": {
+      "openssl": {
+        "version": "3.5.8",
+        "license": "Apache-2.0",
+        "url": "https://raw.githubusercontent.com/openssl/openssl/openssl-3.5.8/LICENSE.txt",
+        "file": "python-licenses/openssl.txt",
+        "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a"
+      },
+      "expat": {
+        "version": "2.8.5",
+        "license": "MIT",
+        "url": "https://raw.githubusercontent.com/libexpat/libexpat/R_2_8_5/expat/COPYING",
+        "file": "python-licenses/expat.txt",
+        "sha256": "31b15de82aa19a845156169a17a5488bf597e561b2c318d159ed583139b25e87"
+      },
+      "libffi": {
+        "version": "3.4.8",
+        "license": "MIT",
+        "url": "https://raw.githubusercontent.com/libffi/libffi/v3.4.8/LICENSE",
+        "file": "python-licenses/libffi.txt",
+        "sha256": "67894089811f93fca47a76f85e017da6f8582d4ba0905963c6e0f1ad6df7a195"
+      },
+      "mpdecimal": {
+        "version": "4.0.0",
+        "license": "BSD-2-Clause",
+        "url": "https://www.bytereef.org/software/mpdecimal/releases/mpdecimal-4.0.0.tar.gz",
+        "archive_sha256": "942445c3245b22730fd41a67a7c5c231d11cb1b9936b9c0f76334fb7d0b4468c",
+        "member": "mpdecimal-4.0.0/COPYRIGHT.txt",
+        "file": "python-licenses/mpdecimal.txt",
+        "sha256": "2713324211652ce4a60e6e21e54f9dc3004299e591b0933a352f1a89c5fb53c2"
+      },
+      "bzip2": {
+        "version": "1.0.8",
+        "license": "bzip2-1.0.6",
+        "url": "https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz",
+        "archive_sha256": "ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269",
+        "member": "bzip2-1.0.8/LICENSE",
+        "file": "python-licenses/bzip2.txt",
+        "sha256": "c6dbbf828498be844a89eaa3b84adbab3199e342eb5cb2ed2f0d4ba7ec0f38a3"
+      },
+      "xz": {
+        "version": "5.8.4",
+        "license": "0BSD (liblzma)",
+        "url": "https://raw.githubusercontent.com/tukaani-project/xz/v5.8.4/COPYING.0BSD",
+        "file": "python-licenses/xz.txt",
+        "sha256": "0b01625d853911cd0e2e088dcfb743261034a091bb379246cb25a14cc4c74bf1"
+      },
+      "sqlite": {
+        "version": "3.53.1",
+        "license": "public domain",
+        "url": "https://raw.githubusercontent.com/sqlite/sqlite/version-3.53.1/LICENSE.md",
+        "file": "python-licenses/sqlite.txt",
+        "sha256": "ee6af51062b30d532991face5164136ae6f84e265ecf8abe89dc69dac45ca1e7"
+      },
+      "libuuid": {
+        "version": "1.0.3",
+        "license": "BSD-3-Clause",
+        "url": "https://downloads.sourceforge.net/project/libuuid/libuuid-1.0.3.tar.gz",
+        "archive_sha256": "46af3275291091009ad7f1b899de3d0cea0252737550e7919d17237997db5644",
+        "member": "libuuid-1.0.3/COPYING, a blank line, then lines 1-33 of libuuid-1.0.3/uuid.h (the licence header that COPYING refers to)",
+        "file": "python-licenses/libuuid.txt",
+        "sha256": "abeddfff1e1ce051cd455b6d0e6a56d7b253f789881067b14520de5afb98f06c"
+      },
+      "hacl": {
+        "version": "CPython 3.13.15 Modules/_hacl (hacl-star bb3d0dc8)",
+        "license": "MIT",
+        "url": "https://raw.githubusercontent.com/hacl-star/hacl-star/bb3d0dc8d9d15a5cd51094d5b69e70aa09005ff0/dist/LICENSE.txt",
+        "file": "python-licenses/hacl.txt",
+        "sha256": "998ce04fb8ad9dedb0bc1b44938f8c3dcf1089780fa105ce1c8c30fb5554d78c"
+      },
+      "mimalloc": {
+        "version": "2.1.2 (CPython 3.13.15 Objects/mimalloc)",
+        "license": "MIT",
+        "url": "https://raw.githubusercontent.com/microsoft/mimalloc/v2.1.2/LICENSE",
+        "file": "python-licenses/mimalloc.txt",
+        "sha256": "19c99805e7a44a34b297a75d1edea9985e300066dfc024d5c99d4236d4573b5d"
+      }
+    }
   },
   "python_windows": {
     "name": "CPython embeddable package (python.org)",
