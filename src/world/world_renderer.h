@@ -94,6 +94,7 @@
 #include "diagnostics_switch.h"
 #include "gi_solve_pool.h"
 #include "near_reserve.h"
+#include "effects_buckets.h"
 #include "rigid_memory.h"
 
 // Included after SavedState. Worker never accesses D3D or game memory.
@@ -161,6 +162,8 @@ public:
         if(failed||activeMesh<0||batches.empty()||!NorthlightWorldContext::readMapAndCamera(map,camera)||uploadedMap!=map)return 0;
         return meshGeneration+1;
     }
+    // 0.3.175 (S3): the renderer's effects buckets (RenderProfile sample frames; marks are no-ops otherwise).
+    void setEffectsBuckets(NorthlightEffectsBuckets::Frame* frame){effectsBuckets=frame;}
     // 0.3.175 (S1): the mask draws this generation's terrain list (terrainBatchList, rebuilt at the
     // mesh commit, never here) in merged runs (NorthlightCelestialTerrain::forEachRun: exact). A list
     // of another generation falls back to the whole batch list, one run per batch as before.
@@ -203,6 +206,8 @@ private:
     std::shared_ptr<const StaticShadow::OwnerSet> uploadedStaticOwners;
     uint64_t staticOwnerGeneration=UINT64_MAX;
     uint64_t meshGeneration=0; // committed mesh identity; content signatures decide shadow reuse
+    NorthlightEffectsBuckets::Frame* effectsBuckets=nullptr;
+    void bucket(NorthlightEffectsBuckets::Bucket b){if(effectsBuckets)effectsBuckets->mark(b);}
     NorthlightProbeActivation probeActivation;
     bool valid=false,failed=false,reportedContext=false;
     unsigned contextRejects=0,frames=0,slowReports=0;
@@ -2419,6 +2424,7 @@ public:
         replayProbeFrame(); /* DiagReplayProbe window of this frame (nothing unless RenderProfile) */
         finishActorScene();
         if(replayShadows)selectShadowReplays();
+        bucket(NorthlightEffectsBuckets::Selection);
         if(effects.shadows&&replayShadows)replayBoundsKick(); /* 0.3.143: bounds worker; joined by the first pointBounds reader */
         struct BoundsJoin {WorldRenderer& r;~BoundsJoin(){r.replayBoundsJoin();}} boundsJoin{*this};
         // 0.3.152 RenderProfile: the upload window after selection and the bounds kick (locks,
@@ -2447,10 +2453,12 @@ public:
         skipReason="state";SavedState save(d,&stateBlocks);if(!save.ok)return false;
         skipReason="draw";
         if(profile)profile->mark("WorldUpload");
+        bucket(NorthlightEffectsBuckets::Upload);
         {auto phase=streamingPhases.measure(NorthlightStreaming::PhaseProfile::Static);
          updateStaticCasters(effects.shadows,&streamBudget);
          if(effects.shadows&&replayShadows){auto proofs=streamingPhases.measure(NorthlightStreaming::PhaseProfile::Proofs);prepareStaticProofs();}}
         if(profile)profile->mark("StaticCasterUpload");
+        bucket(NorthlightEffectsBuckets::Static);
         streamingCpuPeakMs=std::max(streamingCpuPeakMs,streamBudget.elapsedMs());
         streamingBudgetOverruns+=streamBudget.elapsedMs()>1.0;
         if(captureSampled){logf("WORLD streaming optionalCpuPeakMs=%.3f softBudgetOverruns=%u retiredMaterialMiB=%.2f",streamingCpuPeakMs,streamingBudgetOverruns,double(retiredMaterials.bytes())/1048576);streamingCpuPeakMs=0;streamingBudgetOverruns=0;}
@@ -2524,6 +2532,7 @@ public:
         size_t replayConstantBytes=0,replayConstantCalls=0,replayPosePrepared=0,replayPoseReused=0;
         NorthlightTerrainCandidates::Selection<> terrainCandidates(directionalTerrainScratch);
         std::chrono::steady_clock::time_point terrainPrepareStart;double terrainPrepareMs=0;
+        bucket(NorthlightEffectsBuckets::ShadowSetup);
         if(captureSampled)terrainPrepareStart=std::chrono::steady_clock::now();
         if(effects.shadows&&(sourceActive[0]||sourceActive[1])){
             // 0.3.175 (S2): this generation's terrain-outside-fixed list, when it belongs to these batches and fixed set.
@@ -2531,6 +2540,7 @@ public:
                 terrainCandidates.prepareListed(batches,shadowTerrainList,fixedTerrainChunks(),liveTerrainChunks,captureSampled);
             else terrainCandidates.prepare(batches,fixedTerrainChunks(),liveTerrainChunks,captureSampled);}
         if(captureSampled)terrainPrepareMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-terrainPrepareStart).count();
+        bucket(NorthlightEffectsBuckets::TerrainSelection);
         bool anyShadowCacheRender=false;
         ++shadowPasses;
         if(NorthlightStaticPrebuild::Scheduler::Enabled)for(int source=0;source<2;++source)staticPrebuild.observe(source,effects.shadows&&sourceActive[source],rawSourceDirections[source],GetTickCount());
@@ -2647,7 +2657,7 @@ public:
             if(action!=NorthlightQuality::CascadeAction::Render){
                 if(action==NorthlightQuality::CascadeAction::Defer){captureDemand=true;++captureDeferrals;}else ++(cascade?farReuses:nearReuses);
                 memcpy(matrices[cascade],reuse.matrix,64);
-                if(profile)profile->mark(source==0?(cascade==0?"SunNear":"SunFar"):(cascade==0?"MoonNear":"MoonFar"));continue;}
+                if(profile)profile->mark(source==0?(cascade==0?"SunNear":"SunFar"):(cascade==0?"MoonNear":"MoonFar"));bucket(NorthlightEffectsBuckets::Bucket(NorthlightEffectsBuckets::SunNear+source*2+cascade));continue;}
             reuse.begin(interval); /* nothing written yet; a failure below stays unusable */
             if(cascade==0)nearRendered=captureMode==CaptureFresh&&interval>1&&actorShadows;
             if(NorthlightStaticPrebuild::Scheduler::Enabled&&reason)staticPrebuild.rerender(source,cascade,cachedMatrix,!std::strcmp(reason,"direction"),staticCasters.planReady(cachedMatrix),[&](const float* m){staticCasters.discardPlan(m);});
@@ -2779,6 +2789,7 @@ public:
             d->SetRenderState(D3DRS_ZENABLE,TRUE);d->SetRenderState(D3DRS_ZWRITEENABLE,TRUE);
             d->SetSamplerState(0,D3DSAMP_MINFILTER,D3DTEXF_LINEAR);d->SetSamplerState(0,D3DSAMP_MAGFILTER,D3DTEXF_LINEAR);
             if(profile)profile->mark(source==0?(cascade==0?"SunNear":"SunFar"):(cascade==0?"MoonNear":"MoonFar"));
+            bucket(NorthlightEffectsBuckets::Bucket(NorthlightEffectsBuckets::SunNear+source*2+cascade));
             dynamicMs=phaseNow()-dynamicStart;
             /* Only a frame that ran its capture commits: a skipped frame drew no replays, and a frame
                without any model draw (undecided) must not be reused for N frames either. */
@@ -2810,6 +2821,7 @@ public:
         if(effects.shadows&&debug==0&&sourceWeights[0]<.5f&&quality.pointShadows)renderPointShadow(replaysComplete,actorShadows);else pointReady=false;
         if(pointUpdates!=pointUpdatesBefore&&profileSampled())profilePointUsed(); /* capture waste (RenderProfile) */
         if(profile)profile->mark("PointShadow");
+        bucket(NorthlightEffectsBuckets::Point);
         d->SetDepthStencilSurface(nullptr);d->SetTexture(0,nullptr);
         if(!foldScene&&!check(d->StretchRect(targetSurface,nullptr,colorSurface,nullptr,D3DTEXF_NONE),"world color copy"))return false;
         d->SetVertexShader(nullptr);d->SetFVF(D3DFVF_XYZRHW|D3DFVF_TEX1);d->SetStreamSourceFreq(0,1);d->SetRenderState(D3DRS_ZENABLE,FALSE);d->SetRenderState(D3DRS_ZWRITEENABLE,FALSE);
@@ -2965,6 +2977,7 @@ public:
         d->SetRenderTarget(1,nullptr);
         d->SetRenderState(D3DRS_COLORWRITEENABLE,15);
         if(profile)profile->mark("WorldLighting");
+        bucket(NorthlightEffectsBuckets::Lighting);
         d->SetRenderState(D3DRS_ALPHABLENDENABLE,TRUE);d->SetRenderState(D3DRS_COLORWRITEENABLE,7);d->SetPixelShader(giPS);
         if(effects.gi&&!check(quad(w/2,h/2),"world GI pass"))return false;
         if(localDirectCount&&debug==0){
@@ -2980,7 +2993,7 @@ public:
             }
             d->SetRenderState(D3DRS_SCISSORTESTENABLE,FALSE);
         }
-        if(profile)profile->mark("GI");d->SetRenderState(D3DRS_COLORWRITEENABLE,15);
+        if(profile)profile->mark("GI");bucket(NorthlightEffectsBuckets::GI);d->SetRenderState(D3DRS_COLORWRITEENABLE,15);
         if(debug==0&&pointReady){
             renderPointLighting(depth,waterMask,w,h,nearZ,farZ,minZ,maxZ);
             // Optional pass temporarily owns PS c0..9 and s0..2. Restore the
@@ -3010,6 +3023,7 @@ public:
             temporalIndex=prev;temporalValid=true;memcpy(previousView,context.view,64);previousCamera=vec(context.camera);temporalMap=active->map;
         }
         if(profile)profile->mark("PointLighting");
+        bucket(NorthlightEffectsBuckets::PointLighting);
         // Source visibility (1x1 per source, temporally smoothed): drives the
         // fog aureole when the body is behind geometry; broad scattering uses
         // world shadow visibility independently of the body's screen position.
@@ -3053,7 +3067,7 @@ public:
             if(!check(d->SetRenderTarget(0,fogSurface),"neutral fog target")||
                !check(d->Clear(0,nullptr,D3DCLEAR_TARGET,0xff000000,1,0),"neutral fog clear"))return false;
         }
-        if(profile)profile->mark("Fog");d->SetRenderState(D3DRS_ALPHABLENDENABLE,FALSE);d->SetRenderState(D3DRS_COLORWRITEENABLE,15);
+        if(profile)profile->mark("Fog");bucket(NorthlightEffectsBuckets::Fog);d->SetRenderState(D3DRS_ALPHABLENDENABLE,FALSE);d->SetRenderState(D3DRS_COLORWRITEENABLE,15);
         // Separable depth-aware blur: fog -> fogBlurred (horizontal) -> fog (vertical).
         if(effects.fog){float blur[4]={2,0,0,0};d->SetPixelShader(fogBlurPS);
          d->SetRenderTarget(0,fogBlurredSurface);d->SetTexture(9,fog);d->SetPixelShaderConstantF(34,blur,1);if(!check(quad(w/2,h/2),"volume blur horizontal"))return false;
@@ -3131,6 +3145,7 @@ public:
         DWORD elapsed=GetTickCount()-submissionStart;
         if(elapsed>40&&slowReports++<12)logf("WORLD slow submission: %lu ms; replay=%zu liveTerrainChunks=%zu",(unsigned long)elapsed,replays.size(),liveTerrainChunks.size());
         shadowsComposited=effects.shadows&&(sourceActive[0]||sourceActive[1])&&debug==0;
+        bucket(NorthlightEffectsBuckets::Composite); /* the world composite, temporal and the frame's logs */
         return true;
     }
 };

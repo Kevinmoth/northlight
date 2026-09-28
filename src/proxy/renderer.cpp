@@ -30,6 +30,7 @@
 #include "effect_switches.h"
 #include "diagnostics_switch.h"
 #include "render_thread_probe.h"
+#include "effects_buckets.h"
 #include "log_rotation.h"
 #include "memory_guard.h"
 
@@ -126,6 +127,8 @@ static void reportLogCost(){
     }
 }
 // CPU wall-time samples include driver calls but never wait on the GPU.
+// 0.3.175 (S3): the clock of the effects buckets (effects_buckets.h), RenderProfile sample frames only.
+static std::int64_t qpcNow(){LARGE_INTEGER t;QueryPerformanceCounter(&t);return t.QuadPart;}
 struct CpuScope {
     LONGLONG* elapsed;LARGE_INTEGER start={};
     static inline unsigned long long reads=0; /* clock reads of active scopes (RenderProfile: timer overhead) */
@@ -182,6 +185,8 @@ template<class T> static uint64_t shaderHash(T* shader, std::vector<DWORD>& word
 #include "world_renderer.h"
 #include "celestial_disc_renderer.h"
 #include "shadow_blob_filter.h"
+// The counter index of a raw extension method (the D3D calls line), ~0u if unknown.
+static unsigned rawMethodIndex(const char* name){for(unsigned i=0;i<ExtensionDevice::RawMethods;++i)if(!std::strcmp(ExtensionDevice::rawMethodName(i),name))return i;return ~0u;}
 
 // 0.3.154: D3DPERF_* export calls of a RenderProfile sample frame (flag set per frame by the Device).
 static std::atomic<bool> perfCounting{false};static std::atomic<unsigned> perfCalls{0};
@@ -270,6 +275,7 @@ class Device final : public GuardedMirrorDevice {
     unsigned viewportReports=0;
     unsigned postEffectWorldDraws=0,postEffectSkinnedDraws=0;
     LONGLONG cpuPrep=0,cpuCapture=0,cpuWaterCapture=0,cpuEffects=0,cpuMirrorAudit=0;
+    NorthlightEffectsBuckets::Frame effectsBuckets;bool effectsBucketed=false; /* 0.3.175 (S3): this sample frame's effects split */
     unsigned long long cpuCaptureReads=0; /* 0.3.150: timer clock reads inside cpuCapture, sample frames (an outer pair adds one) */
     LARGE_INTEGER cpuFrequency={};
     // 0.3.149 (RenderProfile=1): per-frame wall times at Present by frame kind, in windows that
@@ -469,6 +475,13 @@ class Device final : public GuardedMirrorDevice {
     }
     void renderEffects() {
         CpuScope cpu(sampled()?&cpuEffects:nullptr);
+        // 0.3.175 (S3): RenderProfile sample frames split the same span into buckets (effects_buckets.h).
+        effectsBucketed=sampled()&&NorthlightRenderThreadProbe::profiling();
+        {static const unsigned drawMethods[4]={rawMethodIndex("DrawIndexedPrimitive"),rawMethodIndex("DrawPrimitive"),rawMethodIndex("DrawIndexedPrimitiveUP"),rawMethodIndex("DrawPrimitiveUP")};
+         const std::uint32_t* counters[4];for(unsigned i=0;i<4;++i)counters[i]=drawMethods[i]<ExtensionDevice::RawMethods?&mirrorState.rawMethodCalls[drawMethods[i]]:nullptr;
+         effectsBuckets.begin(effectsBucketed,&qpcNow,counters,4);}
+        struct BucketsEnd {NorthlightEffectsBuckets::Frame& f;~BucketsEnd(){f.end();}} bucketsEnd{effectsBuckets};
+        using NorthlightEffectsBuckets::Bucket;
         // 0.3.154: sceneMs end = the last entry before effects apply; the read is billed to cpuEffects.
         if(gateFrame&&!applied){QueryPerformanceCounter(&gateSceneEnd);gateSceneDraws=drawCalls;gateSceneReads=CpuScope::reads;}
         if (applied || !enabled || failed || !projectionValid) return;
@@ -482,6 +495,7 @@ class Device final : public GuardedMirrorDevice {
         SavedState saved(ext,&stateBlocks);
         if (!saved.ok) return;
         if(diagnostics())gpuProfile->beginFrame(frame,NorthlightRenderThreadProbe::sampleFrame(frame)); // otherwise no queries; mark/endFrame are no-ops
+        effectsBuckets.mark(Bucket::Setup);
         struct ProfileEnd { NorthlightGpuProfile* p; ~ProfileEnd(){p->endFrame();} } profileEnd{gpuProfile.get()};
         IDirect3DTexture9* waterMask=water?water->maskTextureForDepth(worldMinDepth,worldMaxDepth):nullptr;
         // discs and glare, then the wrap-ring visibility in the same group of
@@ -494,6 +508,7 @@ class Device final : public GuardedMirrorDevice {
         }
         gpuProfile->mark("CelestialDiscs");
         if(celestial){celestialDiscs->renderRing();gpuProfile->mark("CelestialRing");}
+        effectsBuckets.mark(Bucket::Celestial); /* discs, glare, the terrain mask prepare, the ring */
         if (error(ext->StretchRect(saved.targets[0], nullptr, sceneSurface, nullptr, D3DTEXF_NONE), "copy scene")) return;
         effectState();
         float constants[]={1.f/width,1.f/height,nearZ,farZ,scaleX,scaleY,.60f,(world&&world->ready()?0.f:.12f),.08f,2.f,float(debugMode),0,worldMinDepth,1.f/(worldMaxDepth-worldMinDepth),worldMaxDepth,0};
@@ -508,7 +523,7 @@ class Device final : public GuardedMirrorDevice {
         if (error(ext->SetRenderTarget(0,aoSurface),"AO render target")) return;
         ext->SetPixelShader(constants[7]==0.f?aoContactBloomPS:aoPS);
         if (error(quad(width/2,height/2),"AO pass")) return;
-        gpuProfile->mark("AO");
+        gpuProfile->mark("AO");effectsBuckets.mark(Bucket::AO);
         // 0.3.174 FOLD: with a ready world and no effect debug view, WorldComposite applies the
         // AO and bloom (AOContactBloom: bloom rgb, AO alpha) to the scene copy itself, so the
         // full-resolution composite and the world's colour copy are skipped. LEGACY (any other
@@ -518,7 +533,7 @@ class Device final : public GuardedMirrorDevice {
             if (error(ext->SetRenderTarget(0,saved.targets[0]),"composition render target")) return false;
             ext->SetTexture(2,ao); ext->SetPixelShader(compositePS);
             if (error(quad(width,height),"composition pass")) return false;
-            gpuProfile->mark("AOComposite");return true;
+            gpuProfile->mark("AOComposite");effectsBuckets.mark(Bucket::Composite);return true;
         };
         if(!fold&&!legacyComposite())return;
         if(world&&debugMode==0){
@@ -536,12 +551,12 @@ class Device final : public GuardedMirrorDevice {
         }
         if(kWaterEffectsEnabled&&world&&water&&debugMode==0&&worldDebug==0){NorthlightWaterContext waterContext;
             if(world->waterContext(waterContext,nearZ,farZ,worldMinDepth,worldMaxDepth))water->render(saved.targets[0],depthTex,width,height,sceneFormat,waterContext);
-            gpuProfile->mark("Water");
+            gpuProfile->mark("Water");effectsBuckets.mark(Bucket::Water);
         }
         if(celestial){
             const auto& haze=world->horizonHazeConstants();
             celestialDiscs->renderVeil(saved.targets[0],NorthlightCelestialGlow::hazeAtSun(haze.haze[3],haze.shape[2],sunElevation),world->skyTransmittance());
-            gpuProfile->mark("CelestialVeil");
+            gpuProfile->mark("CelestialVeil");effectsBuckets.mark(Bucket::Veil);
         }
         applied = true; ++appliedFrames;
         if (appliedFrames==1) logf("FIRST EFFECT FRAME: near=%.5f far=%.2f scale=%.4f,%.4f depthRange=%.9g..%.9g (before UI)",nearZ,farZ,scaleX,scaleY,worldMinDepth,worldMaxDepth);
@@ -708,7 +723,7 @@ public:
     HRESULT STDMETHODCALLTYPE GetPixelShader(IDirect3DPixelShader9** ppShader) override{Guard mirrorLock(mirrorState.gate);HRESULT hr=ext->GetPixelShader(ppShader);if(SUCCEEDED(hr)){mirrorResources.wrap(ppShader);}return hr;}
     HRESULT STDMETHODCALLTYPE CreateQuery(D3DQUERYTYPE Type, IDirect3DQuery9** ppQuery) override{Guard mirrorLock(mirrorState.gate);HRESULT hr=ext->CreateQuery(Type, ppQuery);if(SUCCEEDED(hr)){mirrorResources.wrap(ppQuery);}return hr;}
     Device(IDirect3DDevice9* d,IDirect3D9* p):GuardedMirrorDevice(d,&mirrorState),parent(p),mirrorResources(this,mirrorState.gate,&mirrorEscape,&mirrorState,d),ext(new ExtensionDevice(d,&mirrorState)),stateBlocks(ext) {
-        parent->AddRef(); QueryPerformanceFrequency(&cpuFrequency); gpuProfile=std::make_unique<NorthlightGpuProfile>(ext); world=std::make_unique<WorldRenderer>(ext);
+        parent->AddRef(); QueryPerformanceFrequency(&cpuFrequency); gpuProfile=std::make_unique<NorthlightGpuProfile>(ext); world=std::make_unique<WorldRenderer>(ext);world->setEffectsBuckets(&effectsBuckets);
         world->setConstantEpochSource(ext,[](void* context,NorthlightConstantEpoch::Stamp& out){return static_cast<ExtensionDevice*>(context)->constantStamp(out);});
         char skyRoot[MAX_PATH*3];WideCharToMultiByte(CP_UTF8,0,rootPath,-1,skyRoot,sizeof skyRoot,nullptr,nullptr);celestialDiscs=std::make_unique<NorthlightCelestialDiscRenderer>(ext,std::string(skyRoot)+"world-cache/celestial");celestialDiscs->setTerrainSource([this]{return world->celestialTerrainGeneration();},[this](unsigned body,const float* matrix){return world->drawCelestialTerrain(body,matrix);},[this](unsigned body){world->noteCelestialTerrainReuse(body);});celestialDiscs->setIdentityMap([this](std::uintptr_t exposed){return mirrorResources.rawOf(exposed,!mirrorState.enabled);});shadowBlobs=std::make_unique<NorthlightShadowBlobFilter>(ext);water=std::make_unique<NorthlightWaterRenderer>(ext); logf("D3D9 device wrapped. Ctrl+Shift+F7 fog; F8 GI; F9 shadows; F10 all effects; F12 world debug (all with Ctrl+Shift). F11 unassigned. Components start ON; GI cache stays warm.");
         // The async sweep feeds the memory guard (always) and the periodic MEMORY line
@@ -900,6 +915,12 @@ public:
                 for(unsigned i=0;i<ExtensionDevice::RawMethods;++i){const unsigned n=mirrorState.rawMethodCalls[i];if(!n)continue;rawTotal+=n;
                     const int wrote=std::snprintf(calls+used,sizeof calls-used," %s=%u",ExtensionDevice::rawMethodName(i),n);
                     if(wrote>0)used=std::min(sizeof calls-1,used+size_t(wrote));}
+                // 0.3.175 (S3): this frame's effects buckets (ms and the mod's draw calls each); sum == the effects span.
+                if(effectsBucketed){const double tick=1000.0/double(cpuFrequency.QuadPart);char buckets[1400];size_t at=0;buckets[0]=0;double sum=0;unsigned draws=0;
+                    for(unsigned b=0;b<NorthlightEffectsBuckets::Count;++b){const double bucketMs=double(effectsBuckets.ticks(b))*tick;sum+=bucketMs;draws+=effectsBuckets.drawCalls(b);
+                        const int wrote=std::snprintf(buckets+at,sizeof buckets-at," %s=%.3f/%u",NorthlightEffectsBuckets::name(b),bucketMs,effectsBuckets.drawCalls(b));if(wrote>0)at=std::min(sizeof buckets-1,at+size_t(wrote));}
+                    logf("EFFECTS buckets frame=%u applied=%d effectsMs=%.3f sumMs=%.3f spanMs=%.3f reads=%u draws=%u (ms/draw calls)%s",sampleFrame,int(frameApplied),double(cpuEffects)*tick,sum,
+                        double(effectsBuckets.total())*tick,effectsBuckets.reads(),draws,buckets);}
                 logf("D3D calls frame=%u mirrorAudit=%u counted=%d total=%u gameDraws=%u mirrorAnswered=%llu mirrorForwarded=%llu captureSkipped=%u probeRan=%u probeMode=%s%s",sampleFrame,unsigned(sampleFrame%120==60),int(mirrorState.rawCounting),rawTotal,drawCalls-frameStartDrawCalls,
                     (unsigned long long)(mirrorState.answered-frameStartAnswered),(unsigned long long)(mirrorState.forwarded-frameStartForwarded),unsigned(world&&world->captureSkippedLastFrame()),
                     unsigned(world&&world->replayProbeRanThisFrame),NorthlightRenderThreadProbe::probeModeName(world?world->probeMode():NorthlightRenderThreadProbe::ProbeOff),calls);
