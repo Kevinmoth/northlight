@@ -2944,8 +2944,10 @@ public:
             d->SetRenderState(D3DRS_ALPHABLENDENABLE,FALSE);d->SetRenderState(D3DRS_COLORWRITEENABLE,15);
             if(!check(d->SetRenderTarget(0,temporalLightSurface[cur]),"temporal light target")||!check(d->SetRenderTarget(1,temporalDepthSurface[cur]),"temporal depth target"))return false;
             d->SetRenderState(D3DRS_COLORWRITEENABLE1,15);
+            // 0.3.171: LightHistory (s14) is read bilinearly at the unrounded reprojection; the depth history
+            // (s15, R32F) stays POINT. The normals setup rebinds s14 POINT every frame.
             d->SetTexture(8,light);d->SetTexture(12,baselineLight);d->SetTexture(14,temporalLight[prev]);d->SetTexture(15,temporalDepth[prev]); /* s12 stays bound for the composite (0.3.159: smoothRemoval reads it here) */
-            for(unsigned sampler=14;sampler<16;++sampler){d->SetSamplerState(sampler,D3DSAMP_ADDRESSU,D3DTADDRESS_CLAMP);d->SetSamplerState(sampler,D3DSAMP_ADDRESSV,D3DTADDRESS_CLAMP);d->SetSamplerState(sampler,D3DSAMP_MINFILTER,D3DTEXF_POINT);d->SetSamplerState(sampler,D3DSAMP_MAGFILTER,D3DTEXF_POINT);d->SetSamplerState(sampler,D3DSAMP_MIPFILTER,D3DTEXF_NONE);d->SetSamplerState(sampler,D3DSAMP_SRGBTEXTURE,FALSE);}
+            for(unsigned sampler=14;sampler<16;++sampler){d->SetSamplerState(sampler,D3DSAMP_ADDRESSU,D3DTADDRESS_CLAMP);d->SetSamplerState(sampler,D3DSAMP_ADDRESSV,D3DTADDRESS_CLAMP);d->SetSamplerState(sampler,D3DSAMP_MINFILTER,sampler==14?D3DTEXF_LINEAR:D3DTEXF_POINT);d->SetSamplerState(sampler,D3DSAMP_MAGFILTER,sampler==14?D3DTEXF_LINEAR:D3DTEXF_POINT);d->SetSamplerState(sampler,D3DSAMP_MIPFILTER,D3DTEXF_NONE);d->SetSamplerState(sampler,D3DSAMP_SRGBTEXTURE,FALSE);}
             d->SetPixelShader(temporalPS);if(!check(quad(w/2,h/2),"temporal light pass"))return false;
             d->SetRenderTarget(1,nullptr);d->SetTexture(14,nullptr);d->SetTexture(15,nullptr);
             temporalIndex=prev;temporalValid=true;memcpy(previousView,context.view,64);previousCamera=vec(context.camera);temporalMap=active->map;

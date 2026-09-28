@@ -494,7 +494,11 @@ TemporalOutput TemporalLight(float2 uv:TEXCOORD0) {
     float2 pq=(clamp(floor(puv*half),0,half-1)+.5)/half;
     float hz=tex2Dlod(DepthHistory,float4(pq,0,0)).r;
     if(abs(hz-w)>max(.25,w*.03))return o;
-    float4 history=tex2Dlod(LightHistory,float4(pq,0,0));
+    // 0.3.171: bilinear history (s14 LINEAR in this pass). The nearest history texel drifted
+    // up to .75 half-res px while moving (sign flipping with the flow's fraction: waves on
+    // static edges). A per-tap depth test does not fit the slot budget (515): the depth test
+    // stays at the nearest texel, and a half-texel mix at a moving silhouette is bounded by the box.
+    float4 history=tex2Dlod(LightHistory,float4(puv,0,0));
     float4 lo=current,hi=current;
     [unroll]for(int i=0;i<4;++i){
         float2 offset=float2(i==0?-1:(i==1?1:0),i==2?-1:(i==3?1:0));
@@ -504,13 +508,13 @@ TemporalOutput TemporalLight(float2 uv:TEXCOORD0) {
     // 0.3.170: shadow texel flips of an animated caster (idle pose) change visibility
     // by up to 15% (near 5x5 tent) every frame, in step with the whole neighbourhood,
     // so the tight clamp kept none of the history and each flip popped. With a still
-    // camera (reprojection within 1 half-res pixel, none from 2) let the visibility
+    // camera (reprojection within .25 half-res pixel, none from .5; 0.3.171) let the visibility
     // (alpha) history stray up to .15 of full visibility outside the neighbourhood, and
     // the rgb by the direct light that change can carry (TemporalReach.w: the largest
     // drawn source channel per unit of normalised visibility). History visibility
     // inside the neighbourhood: exactly the tight clamp.
     float4 tight=clamp(history,lo,hi);
-    float still=saturate(2-length(puv*half-(base+.5)));
+    float still=saturate(2-4*length(puv*half-(base+.5)));
     float margin=.15/max(RemovalInfo.z,1e-4)*RemovalInfo.y*still;
     float loose=clamp(history.a,lo.a-margin,hi.a+margin);
     float3 reach=abs(loose-tight.a)*RemovalInfo.z*TemporalReach.w;

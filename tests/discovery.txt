@@ -90,6 +90,7 @@ test_static_plan_job.py
 test_stormlib_build.py
 test_sun_hue.py
 test_sun_rim.py
+test_temporal_history.py
 test_terrain_cache_capacity.py
 test_terrain_capture_bounds.py
 test_terrain_capture_optimization.py

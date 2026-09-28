@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # northlight-test:
 """0.3.170 shadow shimmer (A): a Python emulation of TemporalLight's final lines and a source
-audit of their wiring. With a still camera the visibility (alpha) history may stay up to .15 of
+audit of their wiring. With a still camera (0.3.171: within .25 half-res px) the visibility (alpha) history may stay up to .15 of
 full visibility outside the 5-tap box, and the rgb by the direct light that change can carry
 (TemporalReach.w = c15.w, from the CPU). History visibility inside the box, a moving camera or no
 drawn source: exactly the 0.3.169 clamp. Reads files only; no Wine, GPU or game.
@@ -27,7 +27,7 @@ def code(text):
 # ---- 1. source pins ----
 temporal = hlsl[hlsl.index('TemporalOutput TemporalLight('):hlsl.index('// 1x1 pass: fraction of the source disc')]
 LINES = ['    float4 tight=clamp(history,lo,hi);',
-         '    float still=saturate(2-length(puv*half-(base+.5)));',
+         '    float still=saturate(2-4*length(puv*half-(base+.5)));',  # 0.3.171 gate: full to .25 px, none from .5
          '    float margin=.15/max(RemovalInfo.z,1e-4)*RemovalInfo.y*still;',
          '    float loose=clamp(history.a,lo.a-margin,hi.a+margin);',
          '    float3 reach=abs(loose-tight.a)*RemovalInfo.z*TemporalReach.w;',
@@ -70,7 +70,7 @@ def shimmer(current, history, lo, hi, z, y, reach_w, motion, weight=.75):
     """TemporalLight 0.3.170 after the box: z = RemovalInfo.z, y = RemovalInfo.y, reach_w = c15.w,
     motion = reprojection distance in half-res pixels."""
     tight = [clamp(h, l, u) for h, l, u in zip(history, lo, hi)]
-    still = clamp(2 - motion, 0, 1)
+    still = clamp(2 - 4 * motion, 0, 1)
     margin = .15 / max(z, 1e-4) * y * still
     loose = clamp(history[3], lo[3] - margin, hi[3] + margin)
     reach = abs(loose - tight[3]) * z * reach_w
@@ -95,17 +95,17 @@ for _ in range(20000):
     same += shimmer(current, history, lo, hi, 1 / W, 1, rng.uniform(0, 5), rng.uniform(0, 3)) == today(current, history, lo, hi)
 checks[f'history alpha inside the box: identical to 0.3.169 ({same}/20000)'] = same == 20000
 
-# 4.2 moving camera (>= 2 px) or no drawn source: today's value
+# 4.2 moving camera (>= .5 px, 0.3.171) or no drawn source: today's value
 same = 0
 for _ in range(20000):
     W = rng.uniform(.2, 2)
     current = [rng.uniform(-1, 1) for _ in range(3)] + [rng.uniform(.15, 1) * W]
     lo, hi = box(current, .05)
     history = [c + rng.uniform(-1, 1) for c in current]
-    moving = shimmer(current, history, lo, hi, 1 / W, 1, 3, rng.uniform(2, 50))
+    moving = shimmer(current, history, lo, hi, 1 / W, 1, 3, rng.uniform(.5, 50))
     unlit = shimmer(current, history, lo, hi, 0, 0, rng.uniform(0, 5), 0)
     same += moving == today(current, history, lo, hi) and unlit == today(current, history, lo, hi)
-checks[f'camera moving >= 2 px, or RemovalInfo.y=0 (z=0): identical to 0.3.169 ({same}/20000)'] = same == 20000
+checks[f'camera moving >= .5 px, or RemovalInfo.y=0 (z=0): identical to 0.3.169 ({same}/20000)'] = same == 20000
 
 # 4.3 still camera: a near 5x5 flip (.85*14.8% = .126 normalised) is held fully and fades by .75^n;
 # a far 4x4 flip (.85*25% = .21) is capped at .15.
@@ -121,8 +121,8 @@ for n in range(1, 12):
 far = shimmer(current, [c for c in current[:3]] + [current[3] + .21 * W], current, current, 1 / W, 1, K, 0)
 checks['still camera: a .126 flip held fully, fading .75^n in alpha and rgb; a .21 flip capped at .15'] = (
     held_ok and abs(far[3] - current[3] - .75 * .15 * W) < 1e-9)
-half = shimmer(current, [c for c in current[:3]] + [current[3] + .126 * W], current, current, 1 / W, 1, K, 1.5)
-checks['still gate: half at 1.5 px'] = abs(half[3] - current[3] - .75 * .075 * W) < 1e-9
+half = shimmer(current, [c for c in current[:3]] + [current[3] + .126 * W], current, current, 1 / W, 1, K, .375)
+checks['still gate: half at .375 px'] = abs(half[3] - current[3] - .75 * .075 * W) < 1e-9
 
 # 4.5 the rgb reach bounds the true sun/moon rgb change of the accepted visibility change
 worst = 0.
