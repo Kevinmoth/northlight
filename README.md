@@ -31,7 +31,9 @@ Every effect below is on by default and is drawn on top of the game's own frame.
   the far landscape and the lowest sky in the game's own fog colour; regional ground fog in forests,
   wetlands and basins, denser at night, derived from the map.
 - **Lamps.** Up to 32 nearby lamps, lanterns, braziers and fires light the ground and walls around
-  them and glow in the fog; at night the brightest nearby lamp casts shadows. In direct sun lamps dim.
+  them and glow in the fog. In direct sun lamps dim. Lamp shadows are off by default (`PointShadows=1`
+  turns them on): only lights inside buildings cast faint shadows, at dusk and night; street lamps,
+  lanterns and torches never do.
 - **Lighting art layer.** An MPQ patch (`patch-z`) built from your client's own `Light*.dbc`: retuned
   outdoor clear-weather light and fog colours, warmer Mulgore, denser Stormwind day fog. Sky models
   that paint their own sun or moon into the clear-weather sky lose it.

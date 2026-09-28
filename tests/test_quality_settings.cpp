@@ -59,10 +59,11 @@ template<class S> static void sameAsOld(const S& n,const OldSelection& o){
 }
 static bool oldDue(const NorthlightPointShadow::RefreshSchedule& s,uint32_t now,size_t replays){return replays<256||uint32_t(now-s.updatedAt)>=33;}
 int main(){
-    /* Defaults: absent files, empty file and Preset=Quality are the 0.3.136 constants, except the 0.3.167 FarShadowInterval 4. */
+    /* Defaults: absent files, empty file and Preset=Quality are the 0.3.136 constants, except the 0.3.167 FarShadowInterval 4
+       and the 0.3.176 PointShadows 0 (off in every preset). */
     const Settings d{};
     assert(d.minSkinnedTriangles==0&&d.captureBudgetMiB==32&&d.actorShadowBudgetMiB==0&&d.farShadowInterval==4);
-    assert(d.localLightLimit==NorthlightLocalLightSelection::Limit&&d.pointShadows==1&&d.pointShadowRefreshMs==0&&d.shadowDirectionSteps==2048);
+    assert(d.localLightLimit==NorthlightLocalLightSelection::Limit&&d.pointShadows==0&&d.pointShadowRefreshMs==0&&d.shadowDirectionSteps==2048);
     assert(parse(nullptr)==d&&parse("")==d&&parse("[Quality]\nPreset=Quality\n")==d&&preset(Preset::Quality)==d);
     for(const auto& k:Keys){assert(k.preset[0]==d.*k.field);for(unsigned p=0;p<3;++p)assert(k.preset[p]>=k.low&&k.preset[p]<=k.high);}
     { /* The shipped default file must be exactly Quality, with no warnings. */
@@ -72,6 +73,7 @@ int main(){
     assert(parse("[Quality]\nPreset=Balanced\n")==preset(Preset::Balanced));
     auto perf=parse("\xEF\xBB\xBF; c\r\n[ quality ]\r\npreset = PERFORMANCE ; low end\r\n");
     assert(perf==preset(Preset::Performance)&&perf.preset==Preset::Performance&&perf.farShadowInterval==6&&perf.pointShadows==0);
+    assert(preset(Preset::Balanced).pointShadows==0&&parse("[Quality]\nPointShadows=1\n").pointShadows==1); /* 0.3.176: off in every preset, the key still turns them on */
     assert(parse("[Quality]\nPreset=Performance\nfarshadowinterval=1 # keep\n").farShadowInterval==1);
     /* Explicit keys override the preset regardless of order; other sections ignored. */
     auto s=parse("[Other]\nLocalLightLimit=8\n[Quality]\nLocalLightLimit=20\nPreset=Balanced\n");
