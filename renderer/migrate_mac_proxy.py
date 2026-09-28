@@ -16,7 +16,7 @@ a DXVK build (not one of our renderer builds); its hash is shown, not required. 
 this order (each step recorded; any failure undoes the steps done):
   1 renderer-backends/dxvk/dxvk_d3d9.dll  copy of <game>/d3d9.dll (WoWSilicon DXVK)
   2 northlight-renderer.ini                  Backend=legacy + BackendPath=<1>: today's
-                                          runtime rules (no vendor 1002, DXVK_ASYNC=0)
+                                          runtime rules (no vendor 1002)
   3 mods/d3d9.dll                         this renderer build
   4 dlls.txt                              + "mods/d3d9.dll" (libDllLdr preloads it,
                                           so wow's LoadLibraryA("d3d9.dll") gets it)

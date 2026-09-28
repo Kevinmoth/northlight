@@ -69,8 +69,8 @@ def audit():
     loader=src[start:end]
     for forbidden in ['GENERIC_WRITE','WriteFile','MoveFile','DeleteFile','CopyFile','VirtualProtect','WriteProcessMemory','CREATE_ALWAYS','OPEN_ALWAYS']:
         assert forbidden not in loader,forbidden   # the executable and candidates are only read
-    # Runtime rules as in 0.3.147: DXVK_ASYNC=0 unless native; vendor/buffer defaults only for Backend=dxvk.
-    assert 'if(kind!=NorthlightBackend::Kind::Native)SetEnvironmentVariableA("DXVK_ASYNC","0");' in loader
+    # 0.3.175: DXVK_ASYNC is never set (the runtime's own setting applies); vendor/buffer defaults only for Backend=dxvk.
+    assert 'DXVK_ASYNC' not in src.replace('DXVK_ASYNC is left to the runtime','')
     assert 'if(kind==NorthlightBackend::Kind::Dxvk)configureDxvkCompatibility(info);' in loader and src.count('configureDxvkCompatibility(')==2
     assert 'static bool applied=false;if(applied)return;applied=true;' in src   # one prefix, even after a refusal
     assert 'NorthlightBackendLoader::ExportScope::reentered()?recursionBackend():backend()' in src

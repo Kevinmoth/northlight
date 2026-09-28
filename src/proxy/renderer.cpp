@@ -1130,8 +1130,8 @@ struct Win32BackendSys {
         CloseHandle(h);return ok;
     }
     void beforeLoad(const std::wstring&,const NorthlightBackendLoader::Inspection& info){
-        // Existing async forks can skip shadow draws while compiling pipelines.
-        if(kind!=NorthlightBackend::Kind::Native)SetEnvironmentVariableA("DXVK_ASYNC","0");
+        // 0.3.175: DXVK_ASYNC is left to the runtime (WoWSilicon enables it). Async forks may skip a
+        // draw while a pipeline compiles; the user test showed far fewer hitches, so it is not forced off.
         // Only Backend=dxvk (Windows DXVK 2.7.1) gets the vendor/buffer defaults;
         // legacy (the macOS WoWSilicon DXVK) keeps today's runtime unchanged.
         if(kind==NorthlightBackend::Kind::Dxvk)configureDxvkCompatibility(info);
@@ -1202,7 +1202,7 @@ static HMODULE backend() {
     // Only DXVK keeps the legacy (unchecked, no RESZ dummy draw) rules; every
     // other runtime, including the system fallback, gets the native rules.
     if(module&&(result.fallback||(configured==NorthlightBackend::Kind::Legacy&&!last.info.dxvk)))selectedBackend=NorthlightBackend::Kind::Native;
-    logf("Northlight renderer 0.3.175; reference sun look (sun glow hue from native/sunHalo band, soft-shoulder glare, veil, sun-tinted haze), native sun/moon suppressed (F1b), lamps dimmed to 30 pct in direct sun, native moon02 skipped by texture identity, no game bytes in the DLL, MEMREAD self-read profile (RenderProfile), soft sun removal in shadow, jump-stable shadow anchor, geometry coverage hold with travel lead, steadier animated shadow edges (near 5x5 tent, still-camera shadow history), native blob shadows identified in 16-bit A1R5G5B5 uploads, bilinear lighting history, near capture reserve for the player and companions, remembered rigid prop shadows (drawn-by-game states, windowed held), AO and bloom folded into the world composite, ground normals reject object tops, both wide samples, batched celestial terrain mask; backend=%s path=%ls loaded=%d error=%lu",
+    logf("Northlight renderer 0.3.175; reference sun look (sun glow hue from native/sunHalo band, soft-shoulder glare, veil, sun-tinted haze), native sun/moon suppressed (F1b), lamps dimmed to 30 pct in direct sun, native moon02 skipped by texture identity, no game bytes in the DLL, MEMREAD self-read profile (RenderProfile), soft sun removal in shadow, jump-stable shadow anchor, geometry coverage hold with travel lead, steadier animated shadow edges (near 5x5 tent, still-camera shadow history), native blob shadows identified in 16-bit A1R5G5B5 uploads, bilinear lighting history, near capture reserve for the player and companions, remembered rigid prop shadows (drawn-by-game states, windowed held), AO and bloom folded into the world composite, ground normals reject object tops, both wide samples, batched celestial terrain mask, DXVK async left to the runtime; backend=%s path=%ls loaded=%d error=%lu",
          NorthlightBackend::name(configured),last.path.c_str(),module!=nullptr,module?0ul:(last.error?last.error:(unsigned long)ERROR_INVALID_PARAMETER));
     logAttempts(result.attempts);
     logHostExecutable(sys.selfPath);
