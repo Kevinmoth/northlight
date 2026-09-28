@@ -2,7 +2,8 @@
 # northlight-test: requires=cxx
 """0.3.161 analytic shadow-blob reference (src/shadows/shadow_blob_model.h): 32x32 with 648
 opaque pixels, accepted by the filter comparison after a BGRA8 decode round trip; shifted,
-rescaled, recoloured, inverted and noise textures rejected. Native clang++ (plain and
+rescaled, recoloured, inverted and noise textures rejected. 0.3.171: A1R5G5B5/X1R5G5B5/A4R4G4B4
+decodes, the model accepted as a 16-bit upload and every variant's verdict unchanged by one. Native clang++ (plain and
 ASan/UBSan); no client, game or Wine. The client comparison is test_shadow_blob_client.py."""
 import sys; from pathlib import Path; sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root
 import northlight_paths as fp

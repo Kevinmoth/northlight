@@ -3,7 +3,8 @@
 """0.3.161: the analytic blob reference against the tester's own textures\\shadowblob.blp
 (decoded from the client MPQ chain, never stored in the repository): mean alpha error 0,
 mean colour error < 4, accepted, and the same accept/reject verdict as the real texture
-for every test variant. No game, graphics device or Wine."""
+for every test variant. 0.3.171: also as the game uploads it (1-bit alpha, A1R5G5B5) through the
+filter's 16-bit decode, accepted. No game, graphics device or Wine."""
 import sys; from pathlib import Path; sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root
 import northlight_paths as fp; fp.use_source_modules()
 from world_scene_builder import Assets,decode_blp

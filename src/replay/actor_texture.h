@@ -7,15 +7,23 @@
 #include <vector>
 
 namespace NorthlightActorTexture {
-enum class Format { BGRA8,BGRX8,RGB565,BC1,BC2,BC3 };
+// ARGB1555/XRGB1555/ARGB4444 (0.3.171): 16-bit uploads such as the game's 1-bit
+// alpha shadowblob.blp. Appended so earlier values keep their numbers.
+enum class Format { BGRA8,BGRX8,RGB565,BC1,BC2,BC3,ARGB1555,XRGB1555,ARGB4444 };
+inline bool compressed(Format format){return format==Format::BC1||format==Format::BC2||format==Format::BC3;}
+inline std::size_t rowBytes(unsigned width,Format format){
+    if(compressed(format))return std::size_t((width+3)/4)*(format==Format::BC1?8:16);
+    return std::size_t(width)*(format==Format::BGRA8||format==Format::BGRX8?4:2);
+}
+inline unsigned rowCount(unsigned height,Format format){return compressed(format)?(height+3)/4:height;}
 inline std::array<std::uint8_t,4> rgb565(std::uint16_t value){unsigned r=value>>11,g=(value>>5)&63,b=value&31;return {std::uint8_t((r<<3)|(r>>2)),std::uint8_t((g<<2)|(g>>4)),std::uint8_t((b<<3)|(b>>2)),255};}
+inline std::array<std::uint8_t,4> argb1555(std::uint16_t value,bool alpha){unsigned r=(value>>10)&31,g=(value>>5)&31,b=value&31;return {std::uint8_t((r<<3)|(r>>2)),std::uint8_t((g<<3)|(g>>2)),std::uint8_t((b<<3)|(b>>2)),std::uint8_t(!alpha||(value&0x8000)?255:0)};}
+inline std::array<std::uint8_t,4> argb4444(std::uint16_t value){return {std::uint8_t(((value>>8)&15)*17),std::uint8_t(((value>>4)&15)*17),std::uint8_t((value&15)*17),std::uint8_t((value>>12)*17)};}
 // Identical preflight for capture and decode: rejecting malformed alpha data
 // before queueing preserves the render thread's packet and vertex budgets.
 inline bool readable(const void* source,std::size_t sourceBytes,unsigned width,unsigned height,std::size_t pitch,Format format){
     if(!source||!width||!height||width>128||height>128)return false;
-    bool compressed=format==Format::BC1||format==Format::BC2||format==Format::BC3;
-    std::size_t rows=compressed?(height+3)/4:height,rowBytes=compressed?((width+3)/4)*(format==Format::BC1?8:16):width*(format==Format::RGB565?2:4);
-    return pitch>=rowBytes&&rows<=sourceBytes/pitch;
+    return pitch>=rowBytes(width,format)&&rowCount(height,format)<=sourceBytes/pitch;
 }
 struct Snapshot {
     // Owns copied mip bytes only. No texture, locked pointer or D3D interface
@@ -28,11 +36,11 @@ struct Snapshot {
 };
 inline bool decode(const void* source,std::size_t sourceBytes,unsigned width,unsigned height,std::size_t pitch,Format format,std::vector<std::uint8_t>& output){
     output.clear();if(!readable(source,sourceBytes,width,height,pitch,format))return false;
-    bool compressed=format==Format::BC1||format==Format::BC2||format==Format::BC3;
     std::vector<std::uint8_t> rgba(std::size_t(width)*height*4);
     auto* bytes=static_cast<const std::uint8_t*>(source);
-    if(!compressed){for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x){auto* dst=rgba.data()+(y*width+x)*4;
-        if(format==Format::RGB565){std::uint16_t v;std::memcpy(&v,bytes+y*pitch+x*2,2);auto c=rgb565(v);std::memcpy(dst,c.data(),4);}
+    if(!compressed(format)){for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x){auto* dst=rgba.data()+(y*width+x)*4;
+        if(format!=Format::BGRA8&&format!=Format::BGRX8){std::uint16_t v;std::memcpy(&v,bytes+y*pitch+x*2,2);
+            auto c=format==Format::RGB565?rgb565(v):format==Format::ARGB4444?argb4444(v):argb1555(v,format==Format::ARGB1555);std::memcpy(dst,c.data(),4);}
         else{auto* src=bytes+y*pitch+x*4;dst[0]=src[2];dst[1]=src[1];dst[2]=src[0];dst[3]=format==Format::BGRA8?src[3]:255;}}
     }else for(unsigned by=0;by<(height+3)/4;++by)for(unsigned bx=0;bx<(width+3)/4;++bx){
         auto* block=bytes+by*pitch+bx*(format==Format::BC1?8:16);auto* color=block+(format==Format::BC1?0:8);

@@ -2094,11 +2094,11 @@ public:
         if(level==levels||!desc.Width||!desc.Height)return false;
         using Format=NorthlightActorTexture::Format;Format format;
         switch(desc.Format){case D3DFMT_A8R8G8B8:format=Format::BGRA8;break;case D3DFMT_X8R8G8B8:format=Format::BGRX8;break;case D3DFMT_R5G6B5:format=Format::RGB565;break;
-        case D3DFMT_DXT1:format=Format::BC1;break;case D3DFMT_DXT3:format=Format::BC2;break;case D3DFMT_DXT5:format=Format::BC3;break;default:return false;}
-        bool compressed=desc.Format==D3DFMT_DXT1||desc.Format==D3DFMT_DXT3||desc.Format==D3DFMT_DXT5;
+        case D3DFMT_DXT1:format=Format::BC1;break;case D3DFMT_DXT3:format=Format::BC2;break;case D3DFMT_DXT5:format=Format::BC3;break;
+        case D3DFMT_A1R5G5B5:format=Format::ARGB1555;break;case D3DFMT_X1R5G5B5:format=Format::XRGB1555;break;case D3DFMT_A4R4G4B4:format=Format::ARGB4444;break;default:return false;}
         if(desc.Usage&(D3DUSAGE_RENDERTARGET|D3DUSAGE_DEPTHSTENCIL))return false;
-        UINT rows=compressed?(desc.Height+3)/4:desc.Height;
-        UINT rowBytes=compressed?((desc.Width+3)/4)*(desc.Format==D3DFMT_DXT1?8:16):desc.Width*(desc.Format==D3DFMT_R5G6B5?2:4);
+        UINT rows=NorthlightActorTexture::rowCount(desc.Height,format);
+        UINT rowBytes=UINT(NorthlightActorTexture::rowBytes(desc.Width,format));
         std::vector<std::uint8_t> raw(std::size_t(rows)*rowBytes); // Allocate before taking a game texture lock.
         D3DLOCKED_RECT locked={};if(FAILED(texture->LockRect(level,&locked,nullptr,D3DLOCK_READONLY)))return false;
         bool readable=locked.pBits&&locked.Pitch>=INT(rowBytes);
