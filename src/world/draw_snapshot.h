@@ -42,7 +42,7 @@ inline unsigned declarationBytes(unsigned type) {
 }
 template<class T> struct Ref {T* p=nullptr;~Ref(){if(p)p->Release();} T** out(){return &p;} T* operator->()const{return p;}};
 class Frame {
-    std::size_t used_=0,regularUsed_=0,limit_,reserved_;unsigned draws_=0,regularDraws_=0;bool priority_=false;
+    std::size_t used_=0,regularUsed_=0,limit_,reserved_,nearReserve_=0;unsigned draws_=0,regularDraws_=0;bool priority_=false,near_=false;
     std::vector<std::uint8_t> rawIndexScratch_;
     std::vector<std::uint64_t> indexMaskScratch_;
     std::vector<UINT> remapScratch_,uniqueSourceScratch_;
@@ -283,7 +283,11 @@ private:
         }catch(...){return;} // Optional cache allocation cannot invalidate output.
     }
     bool fail(Diagnostics* why,Error e,HRESULT hr=D3DERR_INVALIDCALL) {if(why){why->error=e;why->hr=hr;}return false;}
-    bool canReserve(std::size_t n,Diagnostics* why) {return n<=limit_-used_&&(priority_||n<=limit_-reserved_-regularUsed_)?true:fail(why,Error::Budget);}
+    // 0.3.172 near reserve: a priority draw flagged nearby may read up to limit_+nearReserve_;
+    // every other draw still stops at limit_ (used_ can exceed it only through near draws).
+    std::size_t limitFor(bool priority,bool nearby)const{return limit_+(priority&&nearby?nearReserve_:0);}
+    bool canReserve(std::size_t n,Diagnostics* why) {const std::size_t limit=limitFor(priority_,near_);
+        return used_<=limit&&n<=limit-used_&&(priority_||n<=limit_-reserved_-regularUsed_)?true:fail(why,Error::Budget);}
     bool reserve(std::size_t n,Diagnostics* why) {if(!canReserve(n,why))return false;used_+=n;if(!priority_)regularUsed_+=n;return true;}
     bool admit(Diagnostics* why){return draws_<4096&&(priority_||regularDraws_<3072)?true:fail(why,Error::Budget);}
     void accepted(){++draws_;if(!priority_)++regularDraws_;}
@@ -369,13 +373,18 @@ public:
     // Proof-only preflight for the NEXT draw's priority, never the last draw's.
     // Every accepted layout has at least one >=4-byte attribute. Failed large
     // draws do not imply exhaustion: a later small draw must still be tried.
-    bool captureExhausted(bool priority)const noexcept{
-        if(draws_>=4096||(!priority&&regularDraws_>=3072))return true;
-        const std::size_t total=used_>=limit_?0:limit_-used_;
+    bool captureExhausted(bool priority,bool nearby=false)const noexcept{
+        if(countExhausted(priority))return true;
+        const std::size_t limit=limitFor(priority,nearby),total=used_>=limit?0:limit-used_;
         if(total<4)return true;
         const std::size_t regularLimit=limit_-reserved_;
         return !priority&&(regularUsed_>=regularLimit||regularLimit-regularUsed_<4);
     }
+    // Draw-count exhaustion alone: the near reserve never bypasses it.
+    bool countExhausted(bool priority)const noexcept{return draws_>=4096||(!priority&&regularDraws_>=3072);}
+    // Extra bytes for near priority draws once the main budget is spent (0: off, the 0.3.171 budget).
+    void setNearReserve(std::size_t bytes){nearReserve_=bytes;}
+    std::size_t nearReserve()const{return nearReserve_;}
     void clearFrame(){maintenance_={};sampleMaintenance_=false;used_=regularUsed_=0;draws_=regularDraws_=0;sourceSpanVertices_=uniqueVertices_=savedVertexBytes_=0;compactedDraws_=0;indexHits_=indexMisses_=0;cacheHits_=cacheMisses_=revalidated_=revalidationMismatches_=trackedHits_=0;avoidedReadBytes_=0;metadataBatches_=metadataHits_=metadataFallbacks_=fastCacheHits_=0;++frame_;}
     // Cache lifetime never establishes validity: reads still lock/compare current
     // IB contents and copy current VB data. Reset/destruction may drop plans.
@@ -393,14 +402,14 @@ public:
     // (also DYNAMIC) may be served from / stored into the persistent
     // cache as an immutable shared mesh and output is left empty. Hits charge
     // admission and the read budget exactly like the equivalent miss.
-    bool read(IDirect3DDevice9* device,IDirect3DVertexDeclaration9* declaration,const Draw& draw,Mesh& output,Diagnostics* why=nullptr,bool priority=false,std::shared_ptr<const Mesh>* shared=nullptr) {
+    bool read(IDirect3DDevice9* device,IDirect3DVertexDeclaration9* declaration,const Draw& draw,Mesh& output,Diagnostics* why=nullptr,bool priority=false,std::shared_ptr<const Mesh>* shared=nullptr,bool nearby=false) {
         if(shared)shared->reset();
         Mesh mesh=std::move(output);mesh.prepare();output=Mesh{};if(why)*why={};if(!device)return fail(why,Error::Arguments);
         UINT extent[4]={},n=0;if(!layout(declaration,extent,why)||!indexCount(draw,n,why))return false;
         mesh.topology=draw.topology;mesh.primitiveCount=draw.primitives;mesh.indexed=draw.indexed;
         if(!draw.indexed)mesh.indices.clear();for(unsigned i=0;i<4;++i)if(!extent[i])mesh.streams[i].bytes.clear();
         Ref<IDirect3DVertexBuffer9> vertices[4];D3DVERTEXBUFFER_DESC descriptions[4]={};UINT offsets[4]={},strides[4]={};
-        priority_=priority;compacted_=false;
+        priority_=priority;near_=nearby;compacted_=false;
         bool cacheable=shared&&identity_;CacheKey key;std::uint64_t cacheIbBegin=0,cacheIbBytes=0;
         // Hold the actual bound resources alive while one registry lookup reads
         // immutable descriptions/identities and CURRENT write generations. An
@@ -483,8 +492,8 @@ public:
         if(cacheable){++cacheMisses_;if(store(key,std::move(mesh),cacheIbBegin,cacheIbBytes,low,begins,lockBytes,readBytes,shared))return true;}
         output=std::move(mesh);return true;
     }
-    bool readUP(IDirect3DVertexDeclaration9* declaration,const Draw& draw,const void* indices,D3DFORMAT format,const void* vertices,UINT stride,Mesh& output,Diagnostics* why=nullptr,bool priority=false){
-        Mesh mesh=std::move(output);mesh.prepare();output=Mesh{};if(why)*why={};priority_=priority;compacted_=false;UINT extent[4]={},n=0;
+    bool readUP(IDirect3DVertexDeclaration9* declaration,const Draw& draw,const void* indices,D3DFORMAT format,const void* vertices,UINT stride,Mesh& output,Diagnostics* why=nullptr,bool priority=false,bool nearby=false){
+        Mesh mesh=std::move(output);mesh.prepare();output=Mesh{};if(why)*why={};priority_=priority;near_=nearby;compacted_=false;UINT extent[4]={},n=0;
         if(!vertices)return fail(why,Error::Arguments);
         if(!layout(declaration,extent,why)||!indexCount(draw,n,why))return false;
         if(extent[1]||extent[2]||extent[3]||!extent[0]||stride<extent[0]||stride>4096||draw.base||draw.start)return fail(why,Error::Declaration);

@@ -94,6 +94,7 @@
 #include "diagnostics_switch.h"
 #include "gi_solve_pool.h"
 #include "persistent_casters.h"
+#include "near_reserve.h"
 
 // Included after SavedState. Worker never accesses D3D or game memory.
 class WorldRenderer {
@@ -1581,7 +1582,7 @@ public:
         loadQuality();effects.gi=NorthlightQuality::giPass(quality,effects.gi);
         staticPrebuild.steps=float(quality.shadowDirectionSteps); /* prebuild targets the same direction lattice */
         minSkinnedShadowTriangles=quality.minSkinnedTriangles;captureBudgetMiB=quality.captureBudgetMiB;actorShadowBudgetMiB=quality.actorShadowBudgetMiB;shadowFateDiagnostics=NorthlightQuality::shadowFate(quality);
-        replaySnapshots.configureBudget(size_t(captureBudgetMiB)*1048576,size_t(captureBudgetMiB)*524288);
+        replaySnapshots.configureBudget(size_t(captureBudgetMiB)*1048576,size_t(captureBudgetMiB)*524288);setNearReserve();
         logf("SHADOW experiment minSkinnedTriangles=%u captureBudgetMiB=%u actorShadowBudgetMiB=%u actorShadowRadius=%u distance=sampled-current-vertex unknown=first GI=preserved-at-capture-budget",minSkinnedShadowTriangles,captureBudgetMiB,actorShadowBudgetMiB,quality.actorShadowRadius);
         (void)NorthlightStreaming::cpuRetirement();
         bool paletteLoaded=NorthlightCelestialProfiles::load(root+"celestial-profiles.ini",celestialProfiles,paletteError);
@@ -1636,7 +1637,7 @@ public:
                 m.snapshotEvictions,m.snapshotEvictedBytes,m.snapshotMs,m.indexEvictions,m.indexEvictedBytes,m.indexMs,
                 m.missEvicted,m.missRevision,m.missUnknown,m.missCollision,replaySnapshots.snapshotRevalidationMismatches());}
         if(captureSampled)logf("MODEL capture metadata batches=%u knownBuffers=%u fallbackBuffers=%u fastSnapshotHits=%u",replaySnapshots.metadataBatches(),replaySnapshots.metadataHits(),replaySnapshots.metadataFallbacks(),replaySnapshots.fastCacheHits());
-        if(captureSampled)logf("MODEL frame capture skinnedCandidates=%u accepted=%u blendRejected=%u projectionRejected=%u budgetRejected=%u snapshotRejected=%u acceptedSkinnedBytes=%zu acceptedOtherBytes=%zu rejectedReadBytes=%zu totalReadBytes=%zu compactedDraws=%u spanVertices=%zu uniqueVertices=%zu savedVertexBytes=%zu",skinnedCandidates,skinnedAccepted,skinnedBlendRejected,skinnedProjectionRejected,skinnedBudgetRejected,skinnedSnapshotRejected,acceptedSkinnedBytes,acceptedOtherBytes,captureRejectedBytes,replaySnapshots.bytesRead(),replaySnapshots.compactedDraws(),replaySnapshots.sourceSpanVertices(),replaySnapshots.uniqueVertices(),replaySnapshots.savedVertexBytes());
+        if(captureSampled)logf("MODEL frame capture skinnedCandidates=%u accepted=%u blendRejected=%u projectionRejected=%u budgetRejected=%u snapshotRejected=%u acceptedSkinnedBytes=%zu acceptedOtherBytes=%zu rejectedReadBytes=%zu totalReadBytes=%zu compactedDraws=%u spanVertices=%zu uniqueVertices=%zu savedVertexBytes=%zu nearAdmitted=%u nearBytes=%zu nearRefused=%u nearSelf=%d nearReserve=%zu",skinnedCandidates,skinnedAccepted,skinnedBlendRejected,skinnedProjectionRejected,skinnedBudgetRejected,skinnedSnapshotRejected,acceptedSkinnedBytes,acceptedOtherBytes,captureRejectedBytes,replaySnapshots.bytesRead(),replaySnapshots.compactedDraws(),replaySnapshots.sourceSpanVertices(),replaySnapshots.uniqueVertices(),replaySnapshots.savedVertexBytes(),nearAdmitted,nearBytes,nearRefused,int(nearAnchorReady&&nearAnchor.self),replaySnapshots.nearReserve());
         if(captureSampled)logf("MODEL frame capture other blendRejected=%u projectionRejected=%u budgetRejected=%u",otherBlendRejected,otherProjectionRejected,otherBudgetRejected);
         if(captureSampled&&captureFrequency.QuadPart>0){
             const double ms=1000.0/double(captureFrequency.QuadPart);
@@ -1668,7 +1669,7 @@ public:
         smallShadowEarly=smallShadowGI=0;shadowSelectionDone=false;captureShortfall=false;
         lastCapturePhaseReads=capturePhases.clockReads+actorPhases.clockReads;clearCaptureDiagnostics();if(captureSampled)++capturePhaseSerial;
         skinnedCandidates=skinnedBlendRejected=skinnedProjectionRejected=skinnedBudgetRejected=skinnedSnapshotRejected=skinnedAccepted=0;otherBlendRejected=otherBudgetRejected=otherProjectionRejected=0;
-        captureRejectedBytes=acceptedSkinnedBytes=acceptedOtherBytes=0;
+        captureRejectedBytes=acceptedSkinnedBytes=acceptedOtherBytes=0;nearAdmitted=nearRefused=0;nearBytes=0;nearAnchorReady=false;
         previousCacheHits=terrainBoundsCache.persistentHits();capturedConstantBytes=capturedConstantCalls=0;capturedSM1Draws=capturedRelativeDraws=0;
         terrainCaptureTicks=replayCaptureTicks=0;terrainCaptureCalls=terrainUPCalls=replayCaptureCalls=unknownCaptureCalls=0;captureSampled=false;
         valid=false;shadowFrameReady=false;legacyFog=NorthlightLegacyFog::Constants{};
@@ -2208,6 +2209,27 @@ public:
             captureMode=skip?CaptureSkipped:CaptureFresh;if(skip)++captureSkippedFrames;else captureDemand=false;}
         return captureMode==CaptureSkipped;
     }
+    // Palette root (bone 0 origin, world) of the draw about to be issued: its 3 palette rows
+    // (answered by the device mirror) through the capture's inverse view. False: not a palette
+    // program, or the rows cannot be read.
+    bool drawRoot(IDirect3DVertexShader9* shader,float* root){
+        auto program=actorPrograms.find(shader);float rows[12];
+        if(program==actorPrograms.end()||program->second.paletteBase<0||program->second.paletteBase+2>=256||FAILED(d->GetVertexShaderConstantF(UINT(program->second.paletteBase),rows,3)))return false;
+        float bank[4*256];std::memcpy(bank+4*program->second.paletteBase,rows,sizeof rows);
+        return NorthlightActorDeformation::rootWorld(program->second,bank,context.inverseView,root);
+    }
+    // 0.3.172 near capture reserve (near_reserve.h): asked only for a skinned draw the budget is
+    // about to turn away for bytes. The anchor is taken once per capture frame, at the first ask
+    // (the previous selection's self and this frame's camera; shadowPivot() is not called).
+    NorthlightNearReserve::Anchor nearAnchor;bool nearAnchorReady=false;
+    unsigned nearAdmitted=0,nearRefused=0;size_t nearBytes=0;
+    bool nearDraw(IDirect3DVertexShader9* shader){
+        if(!nearAnchorReady){nearAnchorReady=true;const float forward[3]={context.inverseView[8]*projection[2],context.inverseView[9]*projection[2],context.inverseView[10]*projection[2]};
+            nearAnchor=NorthlightNearReserve::anchor(actorShadowHistory.selfHold()>0?actorShadowHistory.selfAt():nullptr,context.camera,forward,pivotDistance);}
+        float root[3];return drawRoot(shader,root)&&NorthlightNearReserve::test(nearAnchor,root)!=NorthlightNearReserve::None;
+    }
+    bool nearCandidate(bool priority,IDirect3DVertexShader9* shader){
+        return priority&&replaySnapshots.nearReserve()&&!replaySnapshots.countExhausted(priority)&&nearDraw(shader);}
     void captureModel(D3DPRIMITIVETYPE type,INT base,UINT minimum,UINT vertexTotal,UINT start,UINT count,bool indexed,IDirect3DVertexShader9* current,bool sample,const void* userIndices,D3DFORMAT userFormat,const void* userVertices,UINT userStride){
         if(modelCaptureSkipped())return; /* previous replays/actor packets are not needed this frame */
         auto it=captureShaders.find(current);if(it==captureShaders.end()){if(sample)++unknownCaptureCalls;return;}
@@ -2221,10 +2243,7 @@ public:
             if(indexed&&!userIndices&&SUCCEEDED(d->GetIndices(&ib))&&ib){key.ib=reinterpret_cast<std::uintptr_t>(ib);ib->Release();}
             key.shader=current;key.base=base;key.start=start;key.count=count;key.minimum=minimum;
             // Per instance: the palette root (identical models share buffers and ranges).
-            auto program=actorPrograms.find(current);float rows[12],root[3];
-            if(program!=actorPrograms.end()&&program->second.paletteBase>=0&&program->second.paletteBase+2<256&&SUCCEEDED(d->GetVertexShaderConstantF(UINT(program->second.paletteBase),rows,3))){
-                float bank[4*256];std::memcpy(bank+4*program->second.paletteBase,rows,sizeof rows);
-                if(NorthlightActorDeformation::rootWorld(program->second,bank,context.inverseView,root))for(unsigned a=0;a<3;++a)key.cell[a]=std::int32_t(std::floor(root[a]));}
+            float root[3];if(drawRoot(current,root))for(unsigned a=0;a<3;++a)key.cell[a]=std::int32_t(std::floor(root[a]));
             fate.slot=shadowFate.slot(key,metadata.skinned,count);fate.reason=NorthlightShadowFate::Cap4096;}
         if(replays.size()>=4096){captureShortfall=true;return;}
         if(sample)++replayCaptureCalls;CpuScope cpu(sample?&replayCaptureTicks:nullptr);
@@ -2247,10 +2266,14 @@ public:
         fate.reason=NorthlightShadowFate::CaptureBudget;
         // Only reject when no legal snapshot can fit, including cache hits
         // and UP draws. A previous oversized failure is not an exhaustion proof.
-        if(replaySnapshots.captureExhausted(priority)){captureShortfall=true;
-            if(sample&&priority){++skinnedSnapshotRejected;++skinnedBudgetRejected;}
-            if(sample&&!priority)++otherBudgetRejected;
-            return;
+        // A near skinned draw may read from the near reserve once the main budget is spent.
+        bool nearby=false;
+        if(replaySnapshots.captureExhausted(priority)){const bool candidate=nearCandidate(priority,current);
+            if(candidate&&!replaySnapshots.captureExhausted(priority,true))nearby=true;
+            else{nearRefused+=candidate;captureShortfall=true;
+                if(sample&&priority){++skinnedSnapshotRejected;++skinnedBudgetRejected;}
+                if(sample&&!priority)++otherBudgetRejected;
+                return;}
         }
         fate.reason=NorthlightShadowFate::Blend;
         DWORD blend=0,alpha=0,ref=0,alphaFunc=D3DCMP_ALWAYS;if(FAILED(d->GetRenderState(D3DRS_ALPHABLENDENABLE,&blend))||blend){if(sample&&priority)++skinnedBlendRejected;if(sample&&!priority)++otherBlendRejected;return;}
@@ -2274,7 +2297,12 @@ public:
         NorthlightDrawSnapshot::Draw draw{type,base,minimum,vertexTotal,start,count,indexed};NorthlightDrawSnapshot::Diagnostics why;
         const size_t readBefore=replaySnapshots.bytesRead();
         replaySnapshots.sampleMaintenance(sample);
-        bool captured=userVertices?replaySnapshots.readUP(p->decl,draw,userIndices,userFormat,userVertices,userStride,p->snapshot,&why,priority):replaySnapshots.read(d,p->decl,draw,p->snapshot,&why,priority,&p->shared);
+        auto read=[&]{return userVertices?replaySnapshots.readUP(p->decl,draw,userIndices,userFormat,userVertices,userStride,p->snapshot,&why,priority,nearby):replaySnapshots.read(d,p->decl,draw,p->snapshot,&why,priority,&p->shared,nearby);};
+        bool captured=read();size_t nearFrom=readBefore;
+        // Turned away for bytes: a near draw is read once more, from the near reserve.
+        if(!captured&&why.error==NorthlightDrawSnapshot::Error::Budget&&!nearby&&nearCandidate(priority,current)){
+            nearby=true;nearFrom=replaySnapshots.bytesRead();captured=read();if(!captured)nearRefused+=why.error==NorthlightDrawSnapshot::Error::Budget;}
+        if(captured&&nearby){++nearAdmitted;nearBytes+=replaySnapshots.bytesRead()-nearFrom;}
         if(!captured){if(why.error==NorthlightDrawSnapshot::Error::Budget){fate.reason=NorthlightShadowFate::CaptureBudget;captureShortfall=true;}
             if(sample){captureRejectedBytes+=replaySnapshots.bytesRead()-readBefore;if(priority){++skinnedSnapshotRejected;skinnedBudgetRejected+=why.error==NorthlightDrawSnapshot::Error::Budget;}else otherBudgetRejected+=why.error==NorthlightDrawSnapshot::Error::Budget;}if(snapshotRejects++<12)logf("MODEL snapshot rejected: %s hr=%08lx stream=%u",NorthlightDrawSnapshot::errorName(why.error),(unsigned long)why.hr,why.stream);return;}
         phase.next(CaptureConstants);fate.reason=NorthlightShadowFate::Constants;

@@ -58,6 +58,46 @@ int main(){Device d;Frame frame;Mesh a,b;Diagnostics why;Draw draw{D3DPT_TRIANGL
   for(unsigned i=0;i<1024;++i)assert(budget.read(&forest,&forest.decl,draw,copy,nullptr,true));
   assert(!budget.read(&forest,&forest.decl,draw,copy,&why,true)&&why.error==Error::Budget);
  }
+ // 0.3.172 near reserve (one draw reads 6 index + 84 vertex bytes = 90).
+ {Device st;for(auto& vb:st.vb)vb.desc.Usage=0;st.ib.desc.Usage=0;Mesh copy;
+  // Reserve 0: a nearby read is byte-identical to a plain one, step by step.
+  {Frame plain(300,0),zero(300,0);zero.setNearReserve(0);
+   for(unsigned i=0;i<6;++i){Diagnostics x,y;const bool a=plain.read(&st,&st.decl,draw,copy,&x,true),b=zero.read(&st,&st.decl,draw,copy,&y,true,nullptr,true);
+    assert(a==b&&x.error==y.error&&plain.bytesRead()==zero.bytesRead()&&plain.captureExhausted(true)==zero.captureExhausted(true,true));}
+   assert(plain.bytesRead()==288);} /* 3 draws, then 3 refused reads charge their index bytes, as today */
+  // Main budget spent: a non-near draw is refused; near draws use limit+reserve, then are refused too.
+  {Frame f(200,0);f.setNearReserve(200);assert(f.nearReserve()==200);
+   assert(f.read(&st,&st.decl,draw,copy,nullptr,true)&&f.read(&st,&st.decl,draw,copy,nullptr,true)&&f.bytesRead()==180);
+   assert(!f.read(&st,&st.decl,draw,copy,&why,true)&&why.error==Error::Budget&&f.bytesRead()==186); /* index bytes charged, as today */
+   assert(f.captureExhausted(true)==false&&!f.captureExhausted(true,true));
+   assert(f.read(&st,&st.decl,draw,copy,&why,true,nullptr,true)&&f.bytesRead()==276&&f.captureExhausted(true)&&!f.captureExhausted(true,true));
+   assert(!f.read(&st,&st.decl,draw,copy,&why,true)&&why.error==Error::Budget&&f.bytesRead()==276); /* past the main limit: nothing charged */
+   assert(f.read(&st,&st.decl,draw,copy,&why,true,nullptr,true)&&f.bytesRead()==366);
+   assert(!f.read(&st,&st.decl,draw,copy,&why,true,nullptr,true)&&why.error==Error::Budget&&f.bytesRead()==372&&f.captureExhausted(true,true)==false);
+   // Regular (non-priority) draws never use the reserve, flagged or not.
+   assert(!f.read(&st,&st.decl,draw,copy,&why,false,nullptr,true)&&why.error==Error::Budget&&f.captureExhausted(false,true));
+   f.clearFrame();assert(f.bytesRead()==0&&f.nearReserve()==200);}
+  // UP draws: the same contract.
+  {Frame f(90,0);f.setNearReserve(90);std::vector<std::uint8_t> up(11*24,1);std::uint16_t ii[]={7,8,9};Draw upDraw{D3DPT_TRIANGLELIST,0,7,3,0,1,true};
+   Declaration one;one.e={{0,4,2,0,0,0},{0xff,0,17,0,0,0}};
+   assert(f.readUP(&one,upDraw,ii,D3DFMT_INDEX16,up.data(),24,copy,nullptr,true));const size_t each=f.bytesRead();
+   assert(!f.readUP(&one,upDraw,ii,D3DFMT_INDEX16,up.data(),24,copy,&why,true)&&why.error==Error::Budget);
+   assert(f.readUP(&one,upDraw,ii,D3DFMT_INDEX16,up.data(),24,copy,&why,true,true)&&f.bytesRead()>each);}
+  // The draw-count cap is unchanged: 4096 in total (3072 regular) whatever the reserve.
+  {Frame f;f.setNearReserve(4u<<20);
+   for(unsigned i=0;i<3072;++i)assert(f.read(&st,&st.decl,draw,copy));
+   for(unsigned i=0;i<1024;++i)assert(f.read(&st,&st.decl,draw,copy,nullptr,true,nullptr,i%2==0));
+   assert(f.countExhausted(true)&&f.captureExhausted(true,true)&&!f.read(&st,&st.decl,draw,copy,&why,true,nullptr,true)&&why.error==Error::Budget);}
+  // A cache hit through the reserve is charged exactly like the miss it replays.
+  {Frame f(200,0);f.setNearReserve(200);f.setIdentityProvider([](void* b,bool){return std::uint64_t(reinterpret_cast<std::uintptr_t>(b));});
+   std::shared_ptr<const Mesh> shared;size_t charged[2]={};
+   for(unsigned pass=0;pass<2;++pass){f.clearFrame();
+    assert(f.read(&st,&st.decl,draw,copy,nullptr,true)&&f.read(&st,&st.decl,draw,copy,nullptr,true)&&f.captureExhausted(true)==false);
+    Draw other=draw;other.start=0;other.minimum=0;other.vertices=11;other.base=0;st.indices({7,8,9,999},false);st.ib.desc.Usage=0; /* indices() marks the IB DYNAMIC */
+    const size_t before=f.bytesRead();assert(f.read(&st,&st.decl,other,copy,&why,true,&shared,true)&&shared);charged[pass]=f.bytesRead()-before;st.indices({999,7,9,8});st.ib.desc.Usage=0;
+    assert(f.snapshotCacheHits()==pass);}
+   assert(charged[0]==charged[1]&&charged[0]>0&&f.bytesRead()>200);}
+ }
  // Sparse indices compact every declared stream with stable ascending source
  // vertices, preserving repeated indices, winding and blend/color attributes.
  {Device sparse;sparse.indices({999,7,10,7});Frame compact;Mesh copy;Draw sparseDraw{D3DPT_TRIANGLELIST,-3,7,4,1,1,true};

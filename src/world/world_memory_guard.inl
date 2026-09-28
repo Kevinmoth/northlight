@@ -19,9 +19,11 @@
         workerMemoryTrim.store(true,std::memory_order_relaxed);
         return t;
     }
+    // 0.3.172 near capture reserve (near_reserve.h): off under pressure and with ActorShadows=0.
+    void setNearReserve(){replaySnapshots.setNearReserve(memoryPressure||!quality.actorShadows?0:NorthlightNearReserve::ReserveBytes);}
     // Halved caps while the guard reports pressure; restored on recovery.
     void setMemoryPressure(bool on){
-        memoryPressure=on;
+        memoryPressure=on;setNearReserve();
         replaySnapshots.setSnapshotCacheLimit(on?NorthlightDrawSnapshot::Frame::SnapshotCacheLimit/2:NorthlightDrawSnapshot::Frame::SnapshotCacheLimit);
         terrainBoundsCache.setPersistentByteLimit(on?16u*1024u*1024u:32u*1024u*1024u);
         replayGpuCache.setLimit(on?32u*1024u*1024u:64u*1024u*1024u);

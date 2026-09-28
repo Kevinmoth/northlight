@@ -91,6 +91,8 @@ checks={
    and all(t.index('void persistentDiagnostics(')<m.start()<t.index('// Cache-slot drawing') for m in re.finditer(r'logf\("PERSISTENT near',t))
    and 'persistentCasters.diagnostics(persistentDiag()?PersistentDiagRadius*1.6f:0.f,pivot);' in t and 'if(hold!=NorthlightPersistentCasters::Registry::Free&&persistentDiag())persistentDiagHold(c,hold);' in t)(fp.src('world_persistent_casters.inl').read_text()),
  'RenderProfile needs Diagnostics (its log gates count as diagnostics gates)':'inline bool renderProfile(const Settings& s){return s.diagnostics&&s.renderProfile;}' in fp.src('quality_settings.h').read_text(),
+ 'near capture reserve counters only on the sampled MODEL frame capture line':(lambda t:t.count('nearAdmitted=%u nearBytes=%zu nearRefused=%u nearSelf=%d nearReserve=%zu')==1
+   and 'if(captureSampled)logf("MODEL frame capture skinnedCandidates=' in t[t.rindex('\n',0,t.index('nearAdmitted=%u')):t.index('nearAdmitted=%u')])(w),
  'point/envelope diagnostics gated':'const bool diagnostics=NorthlightDiagnostics::enabled()&&(frames==0||frames%120==0);' in fp.src('world_point_rendering.inl').read_text(),
 }
 for name,ok in checks.items():print(('PASS ' if ok else 'FAIL ')+name)
