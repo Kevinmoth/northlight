@@ -8,7 +8,7 @@ side (world_rigid_memory.inl): observed before retainSelected, injected after it
 kick and upload, copies own their constant banks and hold no texture when opaque, cleared on device
 loss/reset/trim/map change/shadows off, never touches the static cache. 0.3.176: the flat placement index against the 0.3.175 map index (S1),
 and rigidObserveGroup reusing selection's bone (S2, test_rigid_observe.cpp) against the 0.3.175 path, with
-the audit-gate counterfactual. No game or GPU."""
+the audit-gate counterfactual, and the in-place refresh (S3', test_rigid_refresh.cpp). No game or GPU."""
 import sys; from pathlib import Path; sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root
 import northlight_paths as fp
 import client_fixtures  # the real client programs and placements, from the tester's client and world cache
@@ -28,7 +28,7 @@ inject=m[m.index('    void rigidMemoryInject(){'):]
 checks['copies own their constant bank (constants==constantStorage), rebased bone rows, unique groups']=('NorthlightReplayCaptureConstants::reset(*p);' in inject
     and 'std::memcpy(p->constantStorage,c.constants.data(),sizeof p->constantStorage);' in inject and 'std::memcpy(p->constantStorage+4*(31+3*e.payload.bone),rows,sizeof rows);' in inject
     and 'NorthlightRigidMemory::rebase(e.world,context.inverseView,rows)' in inject and 'p->constantGroup=++group;' in inject and 'p->constantStamp' not in inject.replace('reset(*p)',''))
-checks['opaque copies hold no texture; no game VB/IB is held']=('c.texture=RigidRef<IDirect3DBaseTexture9>(p.cutoff>=0?p.texture:nullptr);' in m and re.search(r'(p|c)(\.|->)(stream|index)\b',m) is None)
+checks['opaque copies hold no texture; no game VB/IB is held']=('c.texture.reset(p.cutoff>=0?p.texture:nullptr);' in m and re.search(r'(p|c)(\.|->)(stream|index)\b',m) is None)
 checks['at most 4096 replays, outside quota/radius/fate']=('if(replays.size()+e.payload.draws.size()>=4096' in inject and 'p->fateSlot=-1;' in inject
     and 'p->shadowSkinned=p->shadowSelected=true;' in inject)
 checks['cleared in releaseGPU (reset() calls it), trimMemory, on a map change and with shadows off']=('staticCasters.settle();rigidMemoryClear();' in w
@@ -47,7 +47,7 @@ checks['0.3.173 drawn test: only with entries, right after the shader lookup, be
 checks['drawn test reuses the mirror-answered palette rows of drawRoot (one read site), bone 0 at c31']=(w.count('GetVertexShaderConstantF(UINT(program->second.paletteBase),rows,3)')==1
     and 'float rows[12];const auto* program=paletteRows(shader,rows);if(!program)return false;' in w and 'const auto* program=paletteRows(shader,rows);' in m and 'program->paletteBase!=31' in m)
 observe=m[m.index('    void rigidMemoryObserve(){'):m.index('    void rigidMemoryInject(){')]
-checks['key set rebuilt after store every capture frame, cleared with the memory; drawn marks per frame']=(observe.index('rigidMemory.store(rigidObservations[n],rigidCopy(n),now);')<observe.index('rigidDrawKeysRebuild();')
+checks['key set rebuilt after store every capture frame, cleared with the memory; drawn marks per frame']=(observe.index('rigidMemory.store(o,rigidCopy(n),now);')<observe.index('rigidDrawKeysRebuild();')
     and 'rigidDrawKeys.clear();}' in m and 'rigidMemory.clearDrawn(); /* 0.3.173' in w[w.index('    void endFrame('):])
 checks['LiveUnselected: captured non-small draws only (small at capture never observed), no copy']=('if(!p.shadowSelected){if(p.shadowSmall)continue;' in m and 'u.selected=false;' in m
     and 'p->shadowSmall=smallShadow;' in w)
@@ -67,6 +67,10 @@ checks['S2 (0.3.176): selection stores exactly the draws it tested; reset at cap
     and select.count('stableRan=true;stable=selectStableActors(')==2 and select.count('selectStableActors(')==2
     and 'const auto* program=p.shared?rigidProgram(p.originalShader):nullptr;' in m
     and 'if(program&&p.boneKnown)b=p.bone;\n                else if(program&&declarationCache.get(p.decl,elements,count))b=rigidBones.bone(*program,p.mesh(),p.shared,p.decl,elements,count);' in m)
+checks["S3' (0.3.176): Refresh rewrites the entry's copy in place (Registry::refresh), Remember stores a fresh copy; store's Refresh goes through refresh"]=(
+    "if(o.action==NorthlightRigidMemory::Observation::Refresh)rigidMemory.refresh(o,[&](RigidPayload& payload){rigidRefresh(n,payload);});\n            else if(o.action!=NorthlightRigidMemory::Observation::None)rigidMemory.store(o,rigidCopy(n),now);}" in observe
+    and 'if(o.action==Observation::Refresh)return refresh(o,[&](Payload& p){p=std::move(payload);});' in fp.src('rigid_memory.h').read_text()
+    and 'auto& e=entries_[std::size_t(t->entry)];fill(e.payload);stats_.bytes=' in fp.src('rigid_memory.h').read_text())
 hdr=fp.src('rigid_memory.h').read_text()
 checks['tracks: new ones sorted and merged into the ordered survivors (no full sort), partial reindex']=('std::inplace_merge(tracks_.begin(),middle,tracks_.end(),trackBefore);' in hdr
     and 'std::sort(middle,tracks_.end(),trackBefore);' in hdr and 'std::sort(tracks_.begin(),tracks_.end()' not in hdr and 'for(std::size_t i=start;i<tracks_.size();++i)trackIndex_[tracks_[i].serial]=i;' in hdr)
@@ -96,4 +100,18 @@ with tempfile.TemporaryDirectory(prefix='northlight-rigid-memory-') as tmp:
   exe=p/('observe-'+label)
   subprocess.run(['clang++','-std=c++17','-Wall','-Wextra','-Werror',*flags,'-UNDEBUG','-I',str(p),*fp.test_include_flags(),str(p/'test_rigid_observe.cpp'),str(fp.src('world_gi.cpp')),'-o',str(exe)],check=True)
   print(f'[observe {label}]',flush=True);subprocess.run([str(exe),str(client_fixtures.four_bone_vs3())],check=True)
+ # 0.3.176 (S3'): the production copy types and rigidFill/rigidCopy/rigidRefresh in a harness.
+ def block(text,head):
+  start=text.index(head);depth=0;i=text.index('{',start)
+  while True:
+   depth+={'{':1,'}':-1}.get(text[i],0)
+   if depth==0:return text[start:text.index(';',i)+1] if head.lstrip().startswith(('template<class T> struct','struct')) else text[start:i+1]
+   i+=1
+ copies='\n'.join(block(m,h) for h in ('    template<class T> struct RigidRef {','    struct RigidDraw {','    struct RigidPayload {',
+  '    static void rigidFill(const Replay& p,RigidDraw& c){','    size_t rigidGroupEnd(size_t n)const{','    RigidPayload rigidCopy(size_t n){','    void rigidRefresh(size_t n,RigidPayload& out){'))
+ (p/'test_rigid_refresh.cpp').write_text((HERE/'test_rigid_refresh.cpp').read_text().replace('/*REFRESH_METHODS*/',copies))
+ for label,flags in (('O2',['-O2']),('asan',['-O1','-g','-fsanitize=address,undefined','-fno-omit-frame-pointer'])):
+  exe=p/('refresh-'+label)
+  subprocess.run(['clang++','-std=c++17','-Wall','-Wextra','-Werror',*flags,'-UNDEBUG','-I',str(p),*fp.test_include_flags(),str(p/'test_rigid_refresh.cpp'),'-o',str(exe)],check=True)
+  print(f'[refresh {label}]',flush=True);subprocess.run([str(exe)],check=True)
 print('PASS rigid memory: model and wiring')

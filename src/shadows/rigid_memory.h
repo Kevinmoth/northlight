@@ -286,11 +286,18 @@ public:
         for(const auto& t:tracks_){stats_.held+=t.held;stats_.statics+=t.statics;stats_.mobile+=t.mobile;}
         stats_.seen=stats_.liveSelected+stats_.liveUnselected;stats_.entries=entries_.size();
     }
+    // 0.3.176 (S3'): an observation frame() marked Refresh updates its entry's payload in place:
+    // fill(payload) first (a throw leaves the entry as it was), then the byte accounting. False: no
+    // entry (refreshSkipped), fill not called.
+    template<class Fill> bool refresh(const Observation& o,Fill fill){
+        if(o.action!=Observation::Refresh)return false;
+        Track* t=track(o.track);if(!t||t->entry<0){++stats_.refreshSkipped;note(Event::RefreshSkip,o.shape,o.world+9);return false;}
+        auto& e=entries_[std::size_t(t->entry)];fill(e.payload);stats_.bytes=stats_.bytes-std::min(stats_.bytes,e.bytes)+o.bytes;e.bytes=o.bytes;return true;
+    }
     // A fresh copy for an observation frame() marked Refresh (replaces the entry's) or Remember
     // (a new entry; the farthest entries beyond the caps go). False: nothing stored.
     bool store(const Observation& o,Payload&& payload,unsigned now){
-        if(o.action==Observation::Refresh){Track* t=track(o.track);if(!t||t->entry<0){++stats_.refreshSkipped;note(Event::RefreshSkip,o.shape,o.world+9);return false;}
-            auto& e=entries_[std::size_t(t->entry)];stats_.bytes=stats_.bytes-std::min(stats_.bytes,e.bytes)+o.bytes;e.bytes=o.bytes;e.payload=std::move(payload);return true;}
+        if(o.action==Observation::Refresh)return refresh(o,[&](Payload& p){p=std::move(payload);});
         if(o.action!=Observation::Remember)return false;Track* t=track(o.track);if(!t||t->entry>=0||!room(o))return false;
         while(entries_.size()+1>t_.maxEntries||stats_.bytes+o.bytes>t_.maxBytes){const std::size_t f=farthest();if(f==SIZE_MAX)return false;drop(f,stats_.evicted,Reason::Evicted);}
         Entry e;e.track=o.track;e.shape=o.shape;std::memcpy(e.world,o.world,48);std::memcpy(e.world0,o.world0,48);e.hasWorld0=o.hasWorld0;e.payload=std::move(payload);e.bytes=o.bytes;

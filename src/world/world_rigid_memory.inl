@@ -9,6 +9,7 @@
         RigidRef(RigidRef&& o)noexcept:p(o.p){o.p=nullptr;}
         RigidRef& operator=(RigidRef&& o)noexcept{if(this!=&o){if(p)p->Release();p=o.p;o.p=nullptr;}return *this;}
         RigidRef(const RigidRef&)=delete;RigidRef& operator=(const RigidRef&)=delete;~RigidRef(){if(p)p->Release();}
+        void reset(T* x){if(x==p)return;if(x)x->AddRef();if(p)p->Release();p=x;} /* 0.3.176 (S3'): a held pointer keeps its reference */
     };
     struct RigidDraw {
         RigidRef<IDirect3DVertexShader9> shader,originalShader;RigidRef<IDirect3DVertexDeclaration9> decl;RigidRef<IDirect3DBaseTexture9> texture;
@@ -103,15 +104,26 @@
         else if(unselectedHead&&rigidMemory.small(u)&&NorthlightRigidGeometry::worldBone(unselectedHead->constants+4*(31+3*unsigned(bone)),context.inverseView,u.world)){
             u.shape=unselectedShape;u.selected=false;rigidObservations.push_back(u);rigidGroups.push_back({copies,unsigned(bone)});}
     }
+    static void rigidFill(const Replay& p,RigidDraw& c){
+        c.shader.reset(p.shader);c.originalShader.reset(p.originalShader);c.decl.reset(p.decl);
+        c.texture.reset(p.cutoff>=0?p.texture:nullptr); /* opaque: stage 0 is irrelevant (replay_draw_state.h) */
+        c.shared=p.shared;c.constants.assign(p.constants,p.constants+1024);std::memcpy(c.bools,p.bools,sizeof c.bools);std::memcpy(c.ints,p.ints,sizeof c.ints);
+        c.usage=p.constantUsage;c.projectionKind=p.projectionKind;c.cutoff=p.cutoff;c.addressU=p.addressU;c.addressV=p.addressV;c.type=p.type;c.count=p.count;c.indexed=p.indexed;
+    }
+    size_t rigidGroupEnd(size_t n)const{return n+1<rigidGroups.size()?rigidGroups[n+1].first:rigidGroupDraws.size();}
     RigidPayload rigidCopy(size_t n){
-        RigidPayload out;out.bone=rigidGroups[n].second;const size_t end=n+1<rigidGroups.size()?rigidGroups[n+1].first:rigidGroupDraws.size();
+        RigidPayload out;out.bone=rigidGroups[n].second;const size_t end=rigidGroupEnd(n);
         out.draws.reserve(end-rigidGroups[n].first);
-        for(size_t k=rigidGroups[n].first;k<end;++k){const Replay& p=*rigidGroupDraws[k];out.draws.emplace_back();auto& c=out.draws.back();
-            c.shader=RigidRef<IDirect3DVertexShader9>(p.shader);c.originalShader=RigidRef<IDirect3DVertexShader9>(p.originalShader);c.decl=RigidRef<IDirect3DVertexDeclaration9>(p.decl);
-            c.texture=RigidRef<IDirect3DBaseTexture9>(p.cutoff>=0?p.texture:nullptr); /* opaque: stage 0 is irrelevant (replay_draw_state.h) */
-            c.shared=p.shared;c.constants.assign(p.constants,p.constants+1024);std::memcpy(c.bools,p.bools,sizeof c.bools);std::memcpy(c.ints,p.ints,sizeof c.ints);
-            c.usage=p.constantUsage;c.projectionKind=p.projectionKind;c.cutoff=p.cutoff;c.addressU=p.addressU;c.addressV=p.addressV;c.type=p.type;c.count=p.count;c.indexed=p.indexed;}
+        for(size_t k=rigidGroups[n].first;k<end;++k){out.draws.emplace_back();rigidFill(*rigidGroupDraws[k],out.draws.back());}
         return out;
+    }
+    // 0.3.176 (S3'): a Refresh rewrites the entry's copy in place when it has as many draws (the
+    // constant banks into their capacity, references taken only for changed pointers: no allocation);
+    // otherwise a fresh copy replaces it. Either way the payload equals rigidCopy(n).
+    void rigidRefresh(size_t n,RigidPayload& out){
+        const size_t first=rigidGroups[n].first,end=rigidGroupEnd(n);
+        if(out.draws.size()!=end-first){RigidPayload fresh=rigidCopy(n);out=std::move(fresh);return;}
+        out.bone=rigidGroups[n].second;for(size_t k=first;k<end;++k)rigidFill(*rigidGroupDraws[k],out.draws[k-first]);
     }
     // A body root on a static-cache placement origin is a doodad (a lantern, a banner): it holds
     // nothing. Unknown (no scene for this map, index incomplete): it counts as a body.
@@ -133,7 +145,9 @@
         const float* pivot=actorShadowOriginValid?actorShadowOrigin:context.camera;
         rigidMemory.frame(rigidObservations,rigidBodies.data(),rigidBodies.size()/3,now,pivot,context.inverseView,projection,!captureShortfall,
             [&](size_t n){return rigidStaticCovered(rigidObservations[n],now);},[&](const float* root){return rigidStaticBody(root);});
-        for(size_t n=0;n<rigidObservations.size();++n)if(rigidObservations[n].action!=NorthlightRigidMemory::Observation::None)rigidMemory.store(rigidObservations[n],rigidCopy(n),now);
+        for(size_t n=0;n<rigidObservations.size();++n){const auto& o=rigidObservations[n];
+            if(o.action==NorthlightRigidMemory::Observation::Refresh)rigidMemory.refresh(o,[&](RigidPayload& payload){rigidRefresh(n,payload);});
+            else if(o.action!=NorthlightRigidMemory::Observation::None)rigidMemory.store(o,rigidCopy(n),now);}
         rigidDrawKeysRebuild(); /* after store: the drawn test of the next capture frame */
         // The index is stepped while a settled track waits for the screen, and (0.3.173) while it is
         // not complete for this scene and tracks exist (all within range): the doodad-body test of
