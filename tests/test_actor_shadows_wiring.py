@@ -18,9 +18,9 @@ def code(text):return re.sub(r'/\*.*?\*/','',re.sub(r'//[^\n]*','',text),flags=r
 checks={}
 # Settings: key appended last (origin indices of the older keys unchanged), default 1 in every preset.
 keys=q[q.index('inline const Key Keys[]={'):q.index('};',q.index('inline const Key Keys[]={'))]
-checks['key last, 0..1, presets 1/1/1']=keys.rstrip().endswith('{"ActorShadows",&Settings::actorShadows,0,1,{1,1,1}},') and 'unsigned actorShadows=1;' in q and 'char origin[32]=' in q
-checks['effective() forces exactly the three replay keys']=('inline Settings effective(Settings s){if(!s.actorShadows)for(const auto& k:ActorShadowForced)s.*k.field=0;return s;}' in q
-    and '{"PersistentCasters",&Settings::persistentCasters},\n' in q and 'persistentRigidProps' not in q
+checks['key last, 0..1, presets 1/1/1']=keys.rstrip().endswith('{"ActorShadows",&Settings::actorShadows,0,1,{1,1,1}},') and 'unsigned actorShadows=1;' in q and 'char origin[31]=' in q
+checks['effective() forces exactly the two replay keys']=('inline Settings effective(Settings s){if(!s.actorShadows)for(const auto& k:ActorShadowForced)s.*k.field=0;return s;}' in q
+    and 'inline const ForcedKey ActorShadowForced[]={\n    {"ShadowFateDiagnostics",' in q and 'persistentRigidProps' not in q and 'persistentCasters' not in q
     and '{"ShadowFateDiagnostics",&Settings::shadowFateDiagnostics},{"DiagReplayProbe",&Settings::diagReplayProbe}};' in q)
 checks['actorShadowWork']='inline bool actorShadowWork(const Settings& s,bool shadows){return shadows&&s.actorShadows;}' in q
 # loadQuality: effective() right after the QUALITY/warning lines, before anything reads the settings.

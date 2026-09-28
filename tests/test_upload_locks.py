@@ -32,8 +32,6 @@ expected={
  ('replay_gpu_batches.h','batch->indices'):(F,Fresh,'D3DUSAGE_WRITEONLY,D3DFMT_INDEX32,D3DPOOL_DEFAULT,&batch->indices'),
  ('replay_gpu_cache.h','built->vertices[s]'):(F,Fresh,'D3DUSAGE_WRITEONLY,0,D3DPOOL_DEFAULT,&built->vertices[s]'),
  ('replay_gpu_cache.h','built->indices'):(F,Fresh,'D3DUSAGE_WRITEONLY,D3DFMT_INDEX32,D3DPOOL_DEFAULT,&built->indices'),
- ('world_persistent_casters.inl','g.vb'):(F,Fresh,'D3DUSAGE_WRITEONLY,0,D3DPOOL_DEFAULT,&gpu->vb'),
- ('world_persistent_casters.inl','g.ib'):(F,Fresh,'D3DFMT_INDEX16:D3DFMT_INDEX32,D3DPOOL_DEFAULT,&gpu->ib'),
  ('static_shadow_gpu.h','r.vb'):('0',Managed,'D3DUSAGE_WRITEONLY,0,D3DPOOL_MANAGED,&r->vb'),
  ('static_shadow_gpu.h','r.ib'):('0',Managed,'D3DFMT_INDEX16:D3DFMT_INDEX32,D3DPOOL_MANAGED,&r->ib'),
  ('world_renderer.h','page.vb'):('0',Managed,'D3DUSAGE_WRITEONLY,0,D3DPOOL_MANAGED,&slot.vb'),
@@ -59,7 +57,7 @@ for name,text in sources.items():
         assert created is None or created in text,f'{name}:{line}: {key[1]} is no longer created as {kind}: {created}'
         fresh+=flags==F;calls+=1
 assert seen==set(expected),f'stale entries: {sorted(set(expected)-seen)}'
-assert fresh==7
+assert fresh==5
 print(f'PASS lock audit: {calls} buffer Lock calls in {len(expected)} classified sites, {fresh} fresh DEFAULT locks use {F}')
 # Every DEFAULT buffer without DYNAMIC is one of the fresh write-once sites above.
 creates=[]
@@ -71,26 +69,20 @@ for name,text in sources.items():
         if 'D3DPOOL_DEFAULT' in pool and 'D3DUSAGE_DYNAMIC' not in usage:creates.append((name,a[4]))
         else:assert 'D3DPOOL_MANAGED' in pool or 'D3DUSAGE_DYNAMIC' in usage,(name,a)
 assert sorted(creates)==sorted([('replay_gpu_batches.h','&built->vertices[s]'),('replay_gpu_batches.h','&built->indices'),('replay_gpu_batches.h','&batch->vertices'),
-    ('replay_gpu_batches.h','&batch->indices'),('replay_gpu_cache.h','&built->vertices[s]'),('replay_gpu_cache.h','&built->indices'),
-    ('world_persistent_casters.inl','&gpu->vb'),('world_persistent_casters.inl','&gpu->ib')]),creates
+    ('replay_gpu_batches.h','&batch->indices'),('replay_gpu_cache.h','&built->vertices[s]'),('replay_gpu_cache.h','&built->indices')]),creates
 print(f'PASS DEFAULT|WRITEONLY creations: {len(creates)}, all fresh write-once sites')
 # The constant and its kill switch; FreshBufferLock appears nowhere else.
 upload=fp.src('upload_lock.h').read_text()
 assert 'inline constexpr bool NoOverwriteFreshBuffers=true;' in upload
 assert 'inline constexpr DWORD FreshBufferLock=NoOverwriteFreshBuffers?DWORD(D3DLOCK_NOOVERWRITE):DWORD(0);' in upload
-assert {n for n,t in sources.items() if 'FreshBufferLock' in t}=={'upload_lock.h','replay_gpu_batches.h','replay_gpu_cache.h','world_persistent_casters.inl'}
+assert {n for n,t in sources.items() if 'FreshBufferLock' in t}=={'upload_lock.h','replay_gpu_batches.h','replay_gpu_cache.h'}
 assert '#include "upload_lock.h"' in sources['replay_gpu_cache.h'] # world_renderer.h (and its .inl) include replay_gpu_cache.h
-world=sources['world_renderer.h'];assert world.index('#include "replay_gpu_cache.h"')<world.index('#include "world_persistent_casters.inl"')
 # Publication strictly after the last Unlock of each fresh buffer; nothing else reaches an unpublished one.
 def body(text,start,end):i=text.index(start);return text[i:text.index(end,i)]
-persist=body(sources['world_persistent_casters.inl'],'    void persistentUploadStep(){','    void persistentFrame(){')
-assert persist.count(F)==2 and persist.count('->Lock(')==2 and persist.rindex('->Unlock()')<persist.index('persistentGpu[u.id]=std::move(u.gpu);')
-assert persist.count('persistentGpu[u.id]=')==1 and len(re.findall(r'\bpersistentUpload\b',sources['world_persistent_casters.inl']))==3 # declaration, device release, this step
-assert 'size_t n=std::min(budget,vb-u.vertexDone)' in persist and 'u.vertexDone+=n;' in persist and 'u.indexDone+=n;' in persist # monotonic, disjoint chunks
 commit=body(sources['replay_gpu_batches.h'],'    void commit(){','    void compact(){')
 assert commit.count('->Lock(')==2 and commit.rindex('->Unlock()')<commit.index('batches_.push_back(std::move(batch));')<commit.index('e.batch=b;')
 separate=body(sources['replay_gpu_batches.h'],'    bool storeSeparate(','    // The reserved admissions')
 assert separate.rindex('write(')<separate.index('std::swap(e.vertices[s],built->vertices[s]);')
 cache=body(sources['replay_gpu_cache.h'],'auto built=std::make_unique<Entry>();','}else{reused_+=e.bytes;++hits_;}')
 assert cache.count('->Lock(')==2 and cache.rindex('->Unlock()')<cache.index('std::swap(e.vertices[s],built->vertices[s]);')
-print('PASS fresh buffers: persistent chunks and replay batches/meshes are published only after their last Unlock and never re-locked')
+print('PASS fresh buffers: replay batches/meshes are published only after their last Unlock and never re-locked')

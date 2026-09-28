@@ -36,7 +36,7 @@ inline void bands(const std::vector<TexelRect>& rects,unsigned n,std::vector<Ban
 // covers each texel that can differ from the newest content.
 struct Cycle {
     bool active=false;const char* reason=nullptr;
-    uint64_t staticSignature=0,persistentSignature=0; /* content the bands draw */
+    uint64_t staticSignature=0; /* content the bands draw */
     std::vector<Band> pending;size_t next=0;
     std::vector<TexelRect> drawn; /* every band drawn since the cycle began */
     unsigned restarts=0;
@@ -46,20 +46,20 @@ struct Cycle {
     // New (or restarted) cycle over `dirty`; a restart adds the drawn bands and
     // the tile rounding of dirtyRects (a superset is still an exact redraw).
     // After MaxRestarts the whole set is one band: finished this frame.
-    void start(const std::vector<TexelRect>& dirty,unsigned slices,const char* why,uint64_t staticNow,uint64_t persistentNow,long size,long tile,size_t maxRects){
+    void start(const std::vector<TexelRect>& dirty,unsigned slices,const char* why,uint64_t staticNow,long size,long tile,size_t maxRects){
         std::vector<TexelRect> all=dirty;
         if(active){all.insert(all.end(),drawn.begin(),drawn.end());std::vector<TexelRect> merged;NorthlightShadowBounds::dirtyRects(all,size,tile,maxRects,merged);all.swap(merged);++restarts;}
         else{restarts=0;drawn.clear();}
         bands(all,restarts>MaxRestarts?1:slices,pending);next=0;if(pending.empty())pending.emplace_back(); /* nothing visible: one empty band */
-        active=true;reason=why;staticSignature=staticNow;persistentSignature=persistentNow;
+        active=true;reason=why;staticSignature=staticNow;
     }
-    bool current(uint64_t staticNow,uint64_t persistentNow)const{return active&&staticSignature==staticNow&&persistentSignature==persistentNow;}
+    bool current(uint64_t staticNow)const{return active&&staticSignature==staticNow;}
     void drew(){drawn.insert(drawn.end(),pending[next].begin(),pending[next].end());++next;}
 };
 // A dirty set may be spread over frames only when every exit of the single-frame
-// path is covered: removed persistent casters (their replay draws again at once),
-// GPU diagnostics, the rect self-check and the 1-slice default finish this frame.
-inline bool sliceable(unsigned slices,bool partial,bool persistentRemoved,bool diagnostic,bool verify){
-    return slices>1&&partial&&!persistentRemoved&&!diagnostic&&!verify;
+// path is covered: GPU diagnostics, the rect self-check and the 1-slice default
+// finish this frame.
+inline bool sliceable(unsigned slices,bool partial,bool diagnostic,bool verify){
+    return slices>1&&partial&&!diagnostic&&!verify;
 }
 } // namespace NorthlightStaticSlices

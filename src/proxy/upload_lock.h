@@ -3,7 +3,7 @@
 
 namespace NorthlightUpload {
 /* 0.3.151: the Lock flags of our fresh DEFAULT|WRITEONLY buffers (replay_gpu_cache.h,
-   replay_gpu_batches.h, world_persistent_casters.inl). Each buffer is created by its
+   replay_gpu_batches.h). Each buffer is created by its
    upload, written once in disjoint ranges, published only after its last Unlock and
    never locked again, so no draw can read a locked range.
    DXVK maps DEFAULT|WRITEONLY buffers directly (1.10.3 d3d9_common_buffer.h:92-95,

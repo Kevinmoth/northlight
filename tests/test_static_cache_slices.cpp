@@ -39,28 +39,27 @@ int main(){
     {std::vector<Band> out;bands({{0,5,64,6}},4,out);assert(out.size()==1);bands({},4,out);assert(out.empty());bands({{3,3,3,9}},2,out);assert(out.empty());}
     // Cycle: start, bands in order, completion only at the last band; drawn accumulates.
     {Cycle c;const std::vector<TexelRect> dirty={{0,0,64,256}};
-     assert(!c.active&&!c.current(1,2));
-     c.start(dirty,4,"static-models-partial",1,2,1280,64,8);assert(c.active&&c.restarts==0&&c.pending.size()==4&&c.current(1,2)&&!c.current(1,3)&&!c.current(9,2));
+     assert(!c.active&&!c.current(1));
+     c.start(dirty,4,"static-models-partial",1,1280,64,8);assert(c.active&&c.restarts==0&&c.pending.size()==4&&c.current(1)&&!c.current(9));
      for(unsigned i=0;i<3;++i){assert(!c.last());c.drew();}
      assert(c.last()&&area(c.drawn)==64*192);
      // Restart after two bands: the new diff elsewhere plus every drawn band.
-     Cycle r;r.start(dirty,4,"static-models-partial",1,2,1280,64,8);r.drew();r.drew();const auto drawn=r.drawn;
-     r.start({{640,640,704,704}},4,"static-models-partial",5,2,1280,64,8);assert(r.restarts==1&&r.next==0&&r.current(5,2)&&area(r.drawn)==area(drawn));
+     Cycle r;r.start(dirty,4,"static-models-partial",1,1280,64,8);r.drew();r.drew();const auto drawn=r.drawn;
+     r.start({{640,640,704,704}},4,"static-models-partial",5,1280,64,8);assert(r.restarts==1&&r.next==0&&r.current(5)&&area(r.drawn)==area(drawn));
      std::vector<TexelRect> pending;for(const auto& b:r.pending)pending.insert(pending.end(),b.begin(),b.end());
      for(const auto& d:drawn)for(long y=d.top;y<d.bottom;y+=7)for(long x=d.left;x<d.right;x+=7)assert(covered(pending,x,y));
      assert(covered(pending,650,650));
      // Restart cap: beyond MaxRestarts the whole set is one band, finished this frame.
-     for(unsigned i=0;i<MaxRestarts;++i){r.drew();r.start({{0,900,64,964}},4,"static-models-partial",6+i,2,1280,64,8);}
+     for(unsigned i=0;i<MaxRestarts;++i){r.drew();r.start({{0,900,64,964}},4,"static-models-partial",6+i,1280,64,8);}
      assert(r.restarts==MaxRestarts+1&&r.pending.size()==1&&r.last());
-     r.reset();assert(!r.active&&r.drawn.empty()&&r.restarts==0&&!r.current(6,2));
+     r.reset();assert(!r.active&&r.drawn.empty()&&r.restarts==0&&!r.current(6));
      // Nothing visible: one empty band, finished at once.
-     Cycle e;e.start({},4,"persistent-casters-partial",1,1,1280,64,8);assert(e.pending.size()==1&&e.band().empty()&&e.last());}
+     Cycle e;e.start({},4,"static-models-partial",1,1280,64,8);assert(e.pending.size()==1&&e.band().empty()&&e.last());}
     // Forced single-frame finishes.
-    assert(!sliceable(1,true,false,false,false)); /* the default: 0.3.150 path */
-    assert(sliceable(2,true,false,false,false)&&sliceable(4,true,false,false,false));
-    assert(!sliceable(4,false,false,false,false)); /* full redraws (any non-partial reason) */
-    assert(!sliceable(4,true,true,false,false));  /* removed persistent casters */
-    assert(!sliceable(4,true,false,true,false));  /* GPU diagnostic capture */
-    assert(!sliceable(4,true,false,false,true));  /* rect self-check */
+    assert(!sliceable(1,true,false,false)); /* the default: 0.3.150 path */
+    assert(sliceable(2,true,false,false)&&sliceable(4,true,false,false));
+    assert(!sliceable(4,false,false,false)); /* full redraws (any non-partial reason) */
+    assert(!sliceable(4,true,true,false));  /* GPU diagnostic capture */
+    assert(!sliceable(4,true,false,true));  /* rect self-check */
     std::printf("static cache slices: %u band splits disjoint, exact union, ordered, area-balanced; cycle/restart/cap/finish table passed\n",checked);
 }

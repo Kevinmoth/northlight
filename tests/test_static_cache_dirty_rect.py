@@ -11,10 +11,10 @@ gpu=fp.src('static_shadow_gpu.h').read_text()
 # One switch; false restores the 0.3.135 full clear+redraw for every static change.
 assert re.search(r'static constexpr bool StaticCacheDirtyRects=(true|false);',src)
 # Rects only for static-model-only changes of a valid, anchor-retained cache.
-# 0.3.141: persistent casters added/removed use the same rect path (their boxes join the static ones).
-assert 'partialStatic=StaticCacheDirtyRects&&key.valid&&staticDirtyRects(key,cachedMatrix,staticChanged,persistentChanged);' in src
-assert src.index('reason=staticChanged?"static-models":"persistent-casters"')>src.index('reason="local-content"')
-assert 'drawPersistentCasters(cachedMatrix,partial?&staticDirty:nullptr)' in src and 'persistentCasters.record(cachedMatrix,key.persistentContent)' in src and 'k.persistentContent.valid=false' in src
+# 0.3.172: the persistent casters (0.3.141) are retired: static models alone take the rect path.
+assert 'partialStatic=StaticCacheDirtyRects&&key.valid&&staticDirtyRects(key,cachedMatrix);' in src
+assert src.index('}else if(staticChanged){reason="static-models";')>src.index('reason="local-content"')
+assert re.search(r'persistent(Casters|Signature|Content|Changed|Id|Now)\b|PersistentCasters',src) is None
 # Same scissor for clear, local batches and static casters; disabled afterwards.
 assert 'd->Clear(DWORD(staticDirtyClears.size()),staticDirtyClears.data(),D3DCLEAR_TARGET|D3DCLEAR_ZBUFFER,0xffffffff,1,0)' in src
 # Explicit clear rects with the scissor off; the scissor is enabled only after the clear.
@@ -39,10 +39,9 @@ assert 'staticCasters.record(cachedMatrix,key.staticContent)' in src and 'k.stat
 # Record refuses a different epoch, instancing mode or matrix.
 assert 'old.epoch!=epoch_||old.instancing!=canInstance_||std::memcmp(old.matrix,matrix,sizeof(old.matrix))!=0' in gpu
 assert 'staticFull=%u staticPartial=%u partialRects=%u partialBounding=%u costFull=%u' in src
-# 0.3.151 StaticCacheSlices (static_cache_slices.h). The default 1 never starts a cycle: the
-# removal walk and sliceable() are gated on the key, so no slice state is touched.
-assert 'const bool removal=quality.staticCacheSlices>1&&partialStatic&&persistentChanged&&' in src
-assert 'if(NorthlightStaticSlices::sliceable(quality.staticCacheSlices,partialStatic,removal,diagnosticCapture!=0,StaticCacheDirtyRectVerify)){' in src
+# 0.3.151 StaticCacheSlices (static_cache_slices.h). The default 1 never starts a cycle:
+# sliceable() is gated on the key, so no slice state is touched.
+assert 'if(NorthlightStaticSlices::sliceable(quality.staticCacheSlices,partialStatic,diagnosticCapture!=0,StaticCacheDirtyRectVerify)){' in src
 assert src.count('slices.start(')==1 and 'staticSlices[4]' in src and 'for(auto& c:staticSlices)c.reset();' in src
 # Any placement/local-content reason drops a cycle before the change detection (full redraw).
 assert src.index('auto& slices=staticSlices[slot];if(reason)slices.reset();')>src.index('reason="local-content"')
@@ -53,7 +52,7 @@ band=src[src.index('            if(sliceBand){'):src.index('const auto action=No
 assert 'renderCache(shadowCacheSurface[slot],true,true,true)' in band and 'slices.drew()' in band
 assert 'cascadeAction(reuse,interval,shadowPasses,!reason&&key.valid&&!pull' in src
 # The key (signatures, recorded content) is written only by the reason path: at completion.
-assert not any(k in band for k in ('key.staticSignature=','key.persistentSignature=','.record(','key.serial='))
+assert not any(k in band for k in ('key.staticSignature=','.record(','key.serial='))
 assert src.index('if(slices.active){staticSliceBands+=partialStatic;slices.reset();}')<src.index('staticCasters.record(cachedMatrix,key.staticContent)')
 # Restarts and finishing redraws include every band already drawn (the add-then-remove ghost).
 assert 'staticDirtyFootprints.insert(staticDirtyFootprints.end(),slices.drawn.begin(),slices.drawn.end());' in src

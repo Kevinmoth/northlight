@@ -13,7 +13,7 @@ from pathlib import Path
 import re,sys
 HERE=Path(__file__).resolve().parent
 FILES=['renderer.cpp','world_renderer.h','world_shadow_experiment.inl','world_point_rendering.inl','celestial_disc_renderer.h',
-       'shadow_blob_filter.h','water_renderer.h','gpu_profile.h','world_diagnostics.h','world_persistent_casters.inl','world_replay_probe.inl','world_rigid_memory.inl']
+       'shadow_blob_filter.h','water_renderer.h','gpu_profile.h','world_diagnostics.h','world_replay_probe.inl','world_rigid_memory.inl']
 # 0.3.149: profiling()/profileSampled() = RenderProfile, which requires Diagnostics=1 (NorthlightQuality::renderProfile).
 GATES=('NorthlightDiagnostics::enabled()','diagnostics()','sampled()','captureSampled','if(diagnostics)','shadowFate.active()','sampledFrame','profiling()','profileSampled()')
 # Ungated lines that stay with Diagnostics=0: format prefix -> label.
@@ -43,7 +43,6 @@ KEEP={
  'TERRAIN SHADOW patched':'capped: first 4','TERRAIN UP snapshot rejected':'capped: first 12','TERRAIN snapshot rejected':'capped: first 12',
  'TERRAIN projection':'capped: first 12','STATIC SHADOW draw retry':'capped: first 8','MODEL snapshot rejected':'capped: first 12',
  'WORLD GPU diagnostic':'user-triggered GPU capture (F12 debug)','WORLD slow submission':'capped: first 12','POINT pass skipped':'capped: first 12',
- 'PERSISTENT casters disabled':'error: allocation failure','PERSISTENT caster draw failed':'error',
  'CELESTIAL disabled':'error','CELESTIAL native texture identity':'error','CELESTIAL early draw skipped':'capped: first 4',
  'SHADOWBLOB candidate':'capped: first 4','SHADOWBLOB identified':'capped: first 8','WATER disabled':'error','WATER explicit recovery':'user-triggered',
  'WATER registered':'one-off: shader registration','WATER mask patch skipped':'capped: first 8 (patch rejected or patched hash mismatch; that shader only)','GPU profile':'gated: no sample opens when off (beginFrame/poll gated)','%s':'gpu_profile report: gated as above',
@@ -85,7 +84,7 @@ checks={
  'Diagnostics read once at quality load':'NorthlightDiagnostics::configure(quality.diagnostics!=0);' in w,
  'fate tracker: Diagnostics=0 wins':'shadowFateDiagnostics=NorthlightQuality::shadowFate(quality);' in w,
  'streaming phase clocks gated':'const bool on=NorthlightDiagnostics::enabled();' in fp.src('streaming_phase_profile.h').read_text(),
- 'no PERSISTENT near diagnostics left (PersistentRigidProps retired in 0.3.172)':'PERSISTENT near' not in fp.src('world_persistent_casters.inl').read_text(),
+ 'no PERSISTENT lines left (the persistent casters retired in 0.3.172)':all('PERSISTENT' not in fp.src(f).read_text() for f in FILES),
  'RenderProfile needs Diagnostics (its log gates count as diagnostics gates)':'inline bool renderProfile(const Settings& s){return s.diagnostics&&s.renderProfile;}' in fp.src('quality_settings.h').read_text(),
  'near capture reserve counters only on the sampled MODEL frame capture line':(lambda t:t.count('nearAdmitted=%u nearBytes=%zu nearRefused=%u nearSelf=%d nearReserve=%zu')==1
    and 'if(captureSampled)logf("MODEL frame capture skinnedCandidates=' in t[t.rindex('\n',0,t.index('nearAdmitted=%u')):t.index('nearAdmitted=%u')])(w),

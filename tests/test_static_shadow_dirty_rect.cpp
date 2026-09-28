@@ -118,11 +118,11 @@ int main(){
    warm.record(identity,record);assert(record.valid);keySignature=warm.signature(identity);cycle.reset();++sliceCycles;};
   // One renderer frame for this slot: continue, (re)start, or redraw the drawn bands.
   auto frame=[&](){const uint64_t now=warm.signature(identity);
-   if(cycle.current(now,0)&&now!=keySignature){drawRects(cycle.band());++sliceBands;if(cycle.last())complete();else cycle.drew();return;}
+   if(cycle.current(now)&&now!=keySignature){drawRects(cycle.band());++sliceBands;if(cycle.last())complete();else cycle.drew();return;}
    if(now!=keySignature){std::vector<CasterBounds> boxes;size_t models=0;assert(warm.changedBounds(identity,record,boxes,models));
     std::vector<NorthlightShadowBounds::TexelRect> fp,rects;for(const auto& b:boxes){NorthlightShadowBounds::TexelRect f;assert(NorthlightShadowBounds::texelFootprint(b.low,b.high,identity,Size,Margin,f));fp.push_back(f);}
     NorthlightShadowBounds::dirtyRects(fp,Size,Tile,MaxRects,rects);
-    sliceRestarts+=cycle.active;cycle.start(rects,slices,"static-models-partial",now,0,Size,Tile,MaxRects);
+    sliceRestarts+=cycle.active;cycle.start(rects,slices,"static-models-partial",now,Size,Tile,MaxRects);
     drawRects(cycle.band());++sliceBands;if(cycle.last())complete();else cycle.drew();return;}
    if(cycle.active){std::vector<NorthlightShadowBounds::TexelRect> rects;NorthlightShadowBounds::dirtyRects(cycle.drawn,Size,Tile,MaxRects,rects);++sliceReverts;if(!rects.empty())drawRects(rects);complete();}};
   for(unsigned iteration=0;iteration<24;++iteration){

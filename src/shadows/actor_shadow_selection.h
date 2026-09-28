@@ -92,7 +92,7 @@ inline Tuning atCadence(Tuning t,unsigned cadence){if(cadence<=1)return t;t.cade
 // casts no shadow: it is dropped BEFORE the quota (never ranked, charged or
 // reserved; with decide the quota ranks only on the bytes inside the radius)
 // and its attachments follow it. Free-standing rigid actors (fences, lanterns)
-// are unaffected, as are persistent casters (never passed in) and GI (its actor
+// are unaffected, as is GI (its actor
 // packets are copied at capture, before selection). Every uncertainty fails
 // toward extra shadows, never toward losing the player's own.
 // No player position is read from the game: the player ("self") is found in

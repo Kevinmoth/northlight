@@ -6,7 +6,7 @@ in-view despawn test, caps, the rebase round trip, the real client one-influence
 sign end to end and the static-doodad flood on real world-cache placements. Wiring audit of the renderer
 side (world_rigid_memory.inl): observed before retainSelected, injected after it and before the bounds
 kick and upload, copies own their constant banks and hold no texture when opaque, cleared on device
-loss/reset/trim/map change/shadows off, never touches the static or persistent cache. No game or GPU."""
+loss/reset/trim/map change/shadows off, never touches the static cache. No game or GPU."""
 import sys; from pathlib import Path; sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root
 import northlight_paths as fp
 import client_fixtures  # the real client programs and placements, from the tester's client and world cache
@@ -27,13 +27,13 @@ checks['copies own their constant bank (constants==constantStorage), rebased bon
     and 'std::memcpy(p->constantStorage,c.constants.data(),sizeof p->constantStorage);' in inject and 'std::memcpy(p->constantStorage+4*(31+3*e.payload.bone),rows,sizeof rows);' in inject
     and 'NorthlightRigidMemory::rebase(e.world,context.inverseView,rows)' in inject and 'p->constantGroup=++group;' in inject and 'p->constantStamp' not in inject.replace('reset(*p)',''))
 checks['opaque copies hold no texture; no game VB/IB is held']=('c.texture=RigidRef<IDirect3DBaseTexture9>(p.cutoff>=0?p.texture:nullptr);' in m and re.search(r'(p|c)(\.|->)(stream|index)\b',m) is None)
-checks['at most 4096 replays, outside quota/radius/fate/persistent']=('if(replays.size()+e.payload.draws.size()>=4096' in inject and 'p->persistentId=0;' in inject and 'p->fateSlot=-1;' in inject
+checks['at most 4096 replays, outside quota/radius/fate']=('if(replays.size()+e.payload.draws.size()>=4096' in inject and 'p->fateSlot=-1;' in inject
     and 'p->shadowSkinned=p->shadowSelected=true;' in inject)
-checks['cleared in releaseGPU (reset() calls it), trimMemory, on a map change and with shadows off']=('releasePersistentGPU();rigidMemoryClear();' in w
+checks['cleared in releaseGPU (reset() calls it), trimMemory, on a map change and with shadows off']=('staticCasters.settle();rigidMemoryClear();' in w
     and re.search(r'void reset\(\)\{[^\n]*releaseGPU\(\);\}',w) is not None and 'rigidMemoryClear(); /* 0.3.172' in g[g.index('MemoryTrim trimMemory(){'):g.index('void setMemoryPressure')]
     and 'if(lastRequest.map!=rigidMap){rigidMemoryClear();' in m and 'if(!effects.shadows){rigidMemoryClear();return;}' in m)
-checks['never the static or persistent cache']=all(n not in m for n in ('persistentSignature','persistentCasters','staticCasters','shadowCacheKey','invalidateShadowCache','staticSignature'))
-checks['observes every captured skinned group; bodies are the non-rigid ones; identity by mixShape']=('if(!p.shadowSkinned||p.persistentId)continue;' in m and 'rigidBodies.insert(' in m
+checks['never the static cache']=all(n not in m for n in ('staticCasters','shadowCacheKey','invalidateShadowCache','staticSignature'))
+checks['observes every captured skinned group; bodies are the non-rigid ones; identity by mixShape']=('if(!p.shadowSkinned)continue;' in m and 'rigidBodies.insert(' in m
     and 'NorthlightRigidMemory::mixShape(shape,p.originalShader,p.decl,p.mesh().vertexCount,p.mesh().primitiveCount,p.mesh().byteSize());' in m and 'shared.get()' not in m)
 checks['shortfall frames record and draw; only the despawn test needs a complete frame']='!captureShortfall,' in m and m.count('captureShortfall')==1
 checks['logged on sampled frames']='if(captureSampled){const auto& s=rigidMemory.stats();' in inject and 'logf("RIGID memory tracks=%zu entries=%zu injected=%u seen=%zu held=%zu static=%zu mobile=%zu droppedInView=' in inject

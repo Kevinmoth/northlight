@@ -1,7 +1,7 @@
 // 0.3.172 rigid memory (rigid_memory.h): settling (time AND capture frames), sticky mobile/held/static,
 // identity without the snapshot pointer, absence (off screen and shortfall frames draw, the in-view
 // despawn test, range, teleport, clear), seen-again changes, caps with farthest eviction, the rebase
-// round trip; the real client one-influence program (moved from test_persistent_casters: the exact
+// round trip; the real client one-influence program (from the retired test_persistent_casters: the exact
 // template, a Stormwind sign end to end, the static-doodad flood with real world-cache placements).
 // Built by test_rigid_memory.py.
 #include "rigid_memory.h"
@@ -145,7 +145,7 @@ static void rebaseRoundTrip(){
     float singular[16]={};assert(!rebase(singular+0,singular,singular+4));
     std::printf("PASS rebase round trip: worldBone(rebase(W, view), view) == W for 1000 random views and placements up to 9000 yd (worst %.2f of 1e-5 relative)\n",worst);
 }
-// ---- real client one-influence program (moved from test_persistent_casters) -----------------
+// ---- real client one-influence program (from the retired test_persistent_casters) ----------
 static Program compiled(const std::uint32_t* words,std::size_t n){Program p;assert(NorthlightActorDeformation::compile(words,n,p));return p;}
 #define CLIENT_PROGRAM(name) compiled(ClientShaders::name,sizeof ClientShaders::name/4)
 static void oneBoneProgram(const char* fourBone){

@@ -1,8 +1,8 @@
 #pragma once
-// Rigid-model geometry shared by the persistent casters (persistent_casters.h) and the
-// rigid memory (rigid_memory.h), moved from persistent_casters.h in 0.3.172: the client's
-// one-influence palette program, a palette bone's world matrix, the static-cache placement
-// match and its index, and the centre-in-view test. Portable (no D3D calls).
+// Rigid-model geometry of the rigid memory (rigid_memory.h), kept from the retired persistent
+// casters (0.3.141-0.3.171): the client's one-influence palette program, a palette bone's world
+// matrix, the static-cache placement match and its index, and the centre-in-view test.
+// Portable (no D3D calls).
 #include "actor_deformation.h"
 #include "world_gi.h"
 #include <algorithm>

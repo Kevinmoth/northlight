@@ -22,8 +22,6 @@ struct Settings {
     unsigned gi=1,giRays=64,giBounces=3,giProbeMoveStep=8,giDynamicProbes=1,giThreads=1,giFastBVH=1;
     // 0.3.142: bounce-light strength in percent; 60 = the 0.3.141 constant 0.5, 100 = maximum (0.5*100/60).
     unsigned giStrength=60;
-    // 0.3.141: still replay actors become cached world-space shadow casters (persistent_casters.h).
-    unsigned persistentCasters=0; /* 0 = the 0.3.140 path */
     // 0.3.141: shadow fate tracker (diagnostic log only; never changes the image).
     // Diagnostics=0: periodic logs, diagnostic counters and pure measurement off
     // (diagnostics_switch.h); it also forces the fate tracker off.
@@ -55,7 +53,7 @@ struct Settings {
     // (character, creature, server object) shadows, the game's blob shadows return, and model
     // capture runs only for GI actor packets. Forces the replay-derived keys off (effective()).
     unsigned actorShadows=1;
-    char origin[32]={'d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d'};
+    char origin[31]={'d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d'};
 };
 struct Key { const char* name; unsigned Settings::*field; unsigned low,high; unsigned preset[3]; };
 // preset[] = Quality, Balanced, Performance. Quality must equal Settings{}.
@@ -78,7 +76,6 @@ inline const Key Keys[]={
     {"GIFastBVH",&Settings::giFastBVH,0,1,{1,1,1}},
     {"GIStrength",&Settings::giStrength,0,100,{60,60,60}},
     {"ShadowFateDiagnostics",&Settings::shadowFateDiagnostics,0,1,{0,0,0}},
-    {"PersistentCasters",&Settings::persistentCasters,0,1,{0,0,0}},
     {"Diagnostics",&Settings::diagnostics,0,1,{0,0,0}},
     {"RenderProfile",&Settings::renderProfile,0,1,{0,0,0}},
     {"DiagReplayProbe",&Settings::diagReplayProbe,0,1,{0,0,0}},
@@ -117,12 +114,12 @@ inline float giIntensity(const Settings& s){return .5f*float(s.giStrength)/60.f;
 // 0.3.158 ActorShadows=0: keys that only act on replay (actor) shadows are forced to 0.
 struct ForcedKey { const char* name; unsigned Settings::*field; };
 inline const ForcedKey ActorShadowForced[]={
-    {"PersistentCasters",&Settings::persistentCasters},
     {"ShadowFateDiagnostics",&Settings::shadowFateDiagnostics},{"DiagReplayProbe",&Settings::diagReplayProbe}};
 // Keys of earlier versions that no longer exist: a line setting one is ignored with a
-// "retired" note instead of "unknown key". PersistentRigidProps: rigid_memory.h replaces it.
+// "retired" note instead of "unknown key". The persistent casters (PersistentCasters,
+// PersistentRigidProps): rigid_memory.h replaces the rigid-prop part.
 struct RetiredKey { const char* name; const char* version; };
-inline const RetiredKey Retired[]={{"PersistentRigidProps","0.3.172"}};
+inline const RetiredKey Retired[]={{"PersistentCasters","0.3.172"},{"PersistentRigidProps","0.3.172"}};
 inline Settings effective(Settings s){if(!s.actorShadows)for(const auto& k:ActorShadowForced)s.*k.field=0;return s;}
 // Names of the keys effective() turned off (requested non-zero), space separated; "none" if nothing.
 inline std::string forcedOff(const Settings& requested){

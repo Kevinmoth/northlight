@@ -112,7 +112,7 @@ int main(){
     /* ActorShadowRadius (yards): 40 / 35 / 20 (0.3.167); 0 = no limit; 0..200; not a legacy key. */
     assert(d.actorShadowRadius==40&&preset(Preset::Balanced).actorShadowRadius==35&&preset(Preset::Performance).actorShadowRadius==20);
     assert(parse("[Quality]\nActorShadowRadius=0\n").actorShadowRadius==0);
-    s=parse("[Quality]\nPreset=Performance\nActorShadowRadius=40\n");assert(s.actorShadowRadius==40&&s.origin[22]=='f'&&std::string(Keys[22].name)=="ActorShadowRadius"&&describe(s).find("ActorShadowRadius=40(file)")!=std::string::npos);
+    s=parse("[Quality]\nPreset=Performance\nActorShadowRadius=40\n");assert(s.actorShadowRadius==40&&s.origin[21]=='f'&&std::string(Keys[21].name)=="ActorShadowRadius"&&describe(s).find("ActorShadowRadius=40(file)")!=std::string::npos);
     assert(describe(d).find("ActorShadowRadius=40(default)")!=std::string::npos&&parse("[Quality]\nActorShadowRadius=1\n").actorShadowRadius==1);
     problems.clear();s=parse("[Quality]\nActorShadowRadius=201\n",nullptr,problems);assert(s==d&&problems.size()==1);
     problems.clear();s=parse(nullptr,"[ShadowExperiment]\nActorShadowRadius=30\n",problems);assert(s==d&&problems.size()==1);
@@ -363,20 +363,20 @@ int main(){
             q.skipped,q.frames,p.skipped,p.reuses,p.defers,p.pointDefers,p.pointBare,p.pulls,big.skipped,big.defers,big.pulls,off.bare);}
     }
     assert(bigEndianUtf16("\xFE\xFF")&&!bigEndianUtf16("\xFF\xFE")&&!bigEndianUtf16("["));
-    // 0.3.141 PersistentCasters: off in every preset (0 = the 0.3.140 path), 1 opt-in, range 0..1.
-    assert(d.persistentCasters==0&&preset(Preset::Balanced).persistentCasters==0&&preset(Preset::Performance).persistentCasters==0&&parse("[Quality]\nPersistentCasters=1\n").persistentCasters==1);
-    {std::vector<std::string> p;assert(parse("[Quality]\nPersistentCasters=2\n",nullptr,p).persistentCasters==0&&p.size()==1);}
-    // 0.3.172: PersistentRigidProps is retired (rigid_memory.h replaces it). Any value, any case: the line is
-    // ignored with exactly one "retired" note (not "unknown"), the settings equal the defaults, no key or slot is left.
-    for(const char* line:{"PersistentRigidProps=1","PersistentRigidProps=0","persistentrigidprops=7","PersistentRigidProps=abc"}){std::vector<std::string> p;
-        const auto s=parse(("[Quality]\n"+std::string(line)+"\n").c_str(),nullptr,p);
-        assert(s==d&&!std::memcmp(s.origin,d.origin,sizeof d.origin)&&p.size()==1&&p[0]=="northlight-quality.ini line 2: PersistentRigidProps retired in 0.3.172 (ignored)");}
-    {std::vector<std::string> p;assert(parse("[Quality]\nPreset=Performance\nPersistentRigidProps=1\n",nullptr,p)==preset(Preset::Performance)&&p.size()==1);
-        for(const auto& k:Keys)assert(std::string(k.name)!="PersistentRigidProps");for(const auto& k:ActorShadowForced)assert(std::string(k.name)!="PersistentRigidProps");
-        assert(describe(d).find("PersistentRigidProps")==std::string::npos);
+    // 0.3.172: PersistentCasters and PersistentRigidProps are retired (0 was the default in every preset; rigid_memory.h
+    // replaces the rigid props). Any value, any case: the line is ignored with exactly one "retired" note (not "unknown"),
+    // the settings equal the defaults, no key or slot is left.
+    for(const char* key:{"PersistentCasters","PersistentRigidProps"}){const std::string k=key;
+        for(const std::string& line:{k+"=1",k+"=0",lower(k)+"=7",k+"=abc"}){std::vector<std::string> p;
+            const auto s=parse(("[Quality]\n"+line+"\n").c_str(),nullptr,p);
+            assert(s==d&&!std::memcmp(s.origin,d.origin,sizeof d.origin)&&p.size()==1&&p[0]=="northlight-quality.ini line 2: "+k+" retired in 0.3.172 (ignored)");}
+        std::vector<std::string> p;assert(parse(("[Quality]\nPreset=Performance\n"+k+"=1\n").c_str(),nullptr,p)==preset(Preset::Performance)&&p.size()==1);
+        for(const auto& x:Keys)assert(std::string(x.name)!=k);for(const auto& x:ActorShadowForced)assert(std::string(x.name)!=k);
+        assert(describe(d).find(k)==std::string::npos);}
+    {std::vector<std::string> p;
         p.clear();parse("[Quality]\nNoSuchKey=1\n",nullptr,p);assert(p.size()==1&&p[0].find("unknown key NoSuchKey ignored")!=std::string::npos);}
     // 0.3.151 spike spreading: 6 faces / 1 slice (the 0.3.150 paths) in the code default and every preset, own origin slots.
-    assert(sizeof(Settings::origin)==32&&d.pointShadowFacesPerFrame==6&&d.staticCacheSlices==1);
+    assert(sizeof(Settings::origin)==31&&d.pointShadowFacesPerFrame==6&&d.staticCacheSlices==1);
     for(auto p:{Preset::Balanced,Preset::Performance})assert(preset(p).pointShadowFacesPerFrame==6&&preset(p).staticCacheSlices==1);
     {auto on=parse("[Quality]\nPointShadowFacesPerFrame=2\nStaticCacheSlices=4\n");assert(on.pointShadowFacesPerFrame==2&&on.staticCacheSlices==4&&on!=d);
         unsigned i=0;for(const auto& k:Keys){const std::string n=k.name;assert(on.origin[i]==(n=="PointShadowFacesPerFrame"||n=="StaticCacheSlices"?'f':'d'));++i;}
@@ -417,29 +417,29 @@ int main(){
     // 0.3.158 ActorShadows: 1 (actor and static shadows, the 0.3.157 paths) in the code default and every
     // preset, 0..1, own last origin slot; 0 forces the replay-derived keys off (effective()).
     assert(d.actorShadows==1&&preset(Preset::Balanced).actorShadows==1&&preset(Preset::Performance).actorShadows==1);
-    assert(std::string(Keys[31].name)=="ActorShadows"&&Keys[31].field==&Settings::actorShadows&&Keys[31].low==0&&Keys[31].high==1);
+    assert(std::string(Keys[30].name)=="ActorShadows"&&Keys[30].field==&Settings::actorShadows&&Keys[30].low==0&&Keys[30].high==1);
     {auto off=parse("[Quality]\nActorShadows=0\n");assert(off.actorShadows==0&&off!=d&&parse("[Quality]\nActorShadows=1\n")==d);
         unsigned i=0;for(const auto& k:Keys){assert(off.origin[i]==(std::string(k.name)=="ActorShadows"?'f':'d'));++i;}
-        assert(parse("[Quality]\nPreset=Performance\nActorShadows=0\n").actorShadows==0&&parse("[Quality]\nPreset=Performance\nActorShadows=0\n").origin[31]=='f');
+        assert(parse("[Quality]\nPreset=Performance\nActorShadows=0\n").actorShadows==0&&parse("[Quality]\nPreset=Performance\nActorShadows=0\n").origin[30]=='f');
         std::vector<std::string> p;assert(parse("[Quality]\nActorShadows=2\n",nullptr,p)==d&&p.size()==1);
         p.clear();assert(parse(nullptr,"[ShadowExperiment]\nActorShadows=0\n",p)==d&&p.size()==1);
         assert(describe(d).find(" HorizonHazeTerrain=1(default) ActorShadows=1(default)")!=std::string::npos&&describe(off).find(" ActorShadows=0(file)")!=std::string::npos);}
-    { /* effective(): the identity with ActorShadows=1 (any value of every key), with 0 only the three replay keys drop. */
+    { /* effective(): the identity with ActorShadows=1 (any value of every key), with 0 only the two replay keys drop. */
       std::mt19937 er(158);
       for(int round=0;round<4000;++round){Settings s;s.preset=Preset(er()%3);unsigned i=0;
           for(const auto& k:Keys){s.*k.field=k.low+unsigned(er()%(k.high-k.low+1));s.origin[i++]="dplf"[er()%4];}
           const Settings e=effective(s);
           if(s.actorShadows){assert(e==s&&!std::memcmp(e.origin,s.origin,sizeof s.origin)&&e.preset==s.preset&&forcedOff(s)=="none");continue;}
-          assert(e.persistentCasters==0&&e.shadowFateDiagnostics==0&&e.diagReplayProbe==0&&!shadowFate(e)&&!replayProbe(e));
+          assert(e.shadowFateDiagnostics==0&&e.diagReplayProbe==0&&!shadowFate(e)&&!replayProbe(e));
           for(const auto& k:Keys){const std::string n=k.name;
-              if(n!="PersistentCasters"&&n!="ShadowFateDiagnostics"&&n!="DiagReplayProbe")assert(e.*k.field==s.*k.field);}
+              if(n!="ShadowFateDiagnostics"&&n!="DiagReplayProbe")assert(e.*k.field==s.*k.field);}
           assert(!std::memcmp(e.origin,s.origin,sizeof s.origin)&&e.preset==s.preset&&effective(e)==e);}
       assert(effective(d)==d&&forcedOff(d)=="none");
       auto off=parse("[Quality]\nActorShadows=0\nPersistentRigidProps=1\nDiagReplayProbe=1\n");
       assert(forcedOff(off)=="DiagReplayProbe"&&forcedOff(effective(off))=="none");
       off=parse("[Quality]\nActorShadows=0\nPersistentCasters=1\nPersistentRigidProps=1\nShadowFateDiagnostics=1\nDiagReplayProbe=1\n");
-      assert(forcedOff(off)=="PersistentCasters ShadowFateDiagnostics DiagReplayProbe");
-      off=parse("[Quality]\nActorShadows=1\nPersistentCasters=1\n");assert(effective(off)==off&&forcedOff(off)=="none");
+      assert(forcedOff(off)=="ShadowFateDiagnostics DiagReplayProbe");
+      off=parse("[Quality]\nActorShadows=1\nShadowFateDiagnostics=1\n");assert(effective(off)==off&&forcedOff(off)=="none");
       /* actorShadowWork: the replay work request, for capture decisions. */
       Settings zero=d;zero.actorShadows=0;
       assert(actorShadowWork(d,true)&&!actorShadowWork(d,false)&&!actorShadowWork(zero,true)&&!actorShadowWork(zero,false));

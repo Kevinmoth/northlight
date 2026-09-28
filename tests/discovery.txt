@@ -54,7 +54,6 @@ test_near_reserve.py
 test_northlight_install.py
 test_outdoor_light_profiles.py
 test_pending_release_wiring.py
-test_persistent_casters.py
 test_point_light_shadow.py
 test_point_shadow_schedule.py
 test_progressive_gi_worker.py

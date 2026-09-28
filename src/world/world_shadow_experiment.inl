@@ -8,11 +8,10 @@
         auto finishFate=[this]{finishShadowFate();};struct FateGuard {decltype(finishFate)& finish;~FateGuard(){finish();}} fateGuard{finishFate};
         const auto start=captureSampled?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
         sampledVertices.beginFrame();
-        persistentFrame(); /* 0.3.141: marks draws of ready persistent casters (persistentId) */
         const size_t captured=replays.size(),budget=size_t(actorShadowBudgetMiB)*1048576;
         size_t actorBytes=0,actors=0,small=0,distanceTests=0,distanceReused=0;
         for(const auto& p:replays){small+=!p->shadowSelected;
-            if(p->shadowSelected&&p->shadowSkinned&&!p->persistentId){actorBytes+=p->mesh().byteSize();++actors;}}
+            if(p->shadowSelected&&p->shadowSkinned){actorBytes+=p->mesh().byteSize();++actors;}}
         NorthlightReplayShadowPolicy::Result result;result.kept=actors;result.keptBytes=actorBytes;NorthlightActorShadowSelection::Result stable;bool ranked=false;
         auto transition=[this](bool over){actorShadowTransitions+=over!=actorShadowOver;actorShadowOver=over;}; /* over<->under budget crossings per log window */
         const bool radius=NorthlightActorShadowSelection::Enabled&&quality.actorShadowRadius;
@@ -33,7 +32,7 @@
                 unsigned previousGroup=UINT_MAX;IDirect3DVertexShader9* previousShader=nullptr;
                 IDirect3DVertexDeclaration9* previousDecl=nullptr;float previousDistance=0;bool previousKnown=false;
                 for(size_t index=0;index<replays.size();++index){const auto& p=*replays[index];
-                    if(!p.shadowSelected||!p.shadowSkinned||p.persistentId)continue;
+                    if(!p.shadowSelected||!p.shadowSkinned)continue;
                     NorthlightReplayShadowPolicy::Candidate item;item.index=index;item.bytes=p.mesh().byteSize();
                     if(p.constantGroup==previousGroup&&p.originalShader==previousShader&&p.decl==previousDecl){
                         item.known=previousKnown;item.distanceSquared=previousDistance;++distanceReused;
@@ -88,7 +87,7 @@
         IDirect3DVertexDeclaration9* previousDecl=nullptr;float previousDistance=0,previousAt[3]={};bool previousKnown=false,groupRigid=true,groupStationary=false;unsigned groupDraw=0;
         const auto tuning=selectionTuning();
         for(size_t index=0;index<replays.size();++index){const auto& p=*replays[index];
-            if(!p.shadowSelected||!p.shadowSkinned||p.persistentId)continue; /* persistent casters: outside the quota */
+            if(!p.shadowSelected||!p.shadowSkinned)continue;
             NorthlightActorShadowSelection::Draw item;item.index=index;item.bytes=p.mesh().byteSize();item.group=p.constantGroup;
             // Program and declaration lookups only for draws that test a distance
             // or a palette (reused-distance draws of multi-bone groups need none).

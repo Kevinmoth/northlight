@@ -93,7 +93,6 @@
 #include "quality_settings.h"
 #include "diagnostics_switch.h"
 #include "gi_solve_pool.h"
-#include "persistent_casters.h"
 #include "near_reserve.h"
 #include "rigid_memory.h"
 
@@ -261,7 +260,6 @@ private:
         NorthlightLocalShadowSignature::Digest localContent;
         NorthlightLocalShadowSignature::Memo localMemo;
         StaticShadow::GpuCache::ContentRecord staticContent;
-        uint64_t persistentSignature=0;NorthlightPersistentCasters::Content persistentContent; /* 0.3.141 persistent casters drawn into this slot */
     };
     ShadowCacheKey shadowCacheKey[4];
     DWORD shadowCacheLogAt=0,shadowPhaseLogAt=0;unsigned shadowCacheRenders=0,shadowCacheReuses=0,culledReplayDraws=0;
@@ -292,30 +290,28 @@ private:
     // after a settle; these writers also drop any result not used yet.
     void dropStaticDirtyJobs(){for(auto& job:staticDirtyJobs)job.ready=false;}
     // Disjoint texel rects covering every changed static slice (old and new).
-    // persistentChanged (0.3.141): also the boxes of persistent casters added or removed.
     // 0.3.152: a slot whose plan the plan worker built may already hold the result
     // (same inputs, frozen since the kick: the slot's key, its plan, the batches).
-    bool staticDirtyRects(const ShadowCacheKey& key,const float* matrix,bool staticChanged=true,bool persistentChanged=false){
+    bool staticDirtyRects(const ShadowCacheKey& key,const float* matrix,bool staticChanged=true){
         staticDirty.clear();staticDirtyFootprints.clear();
         if(staticScissorCaps<0){D3DCAPS9 caps{};staticScissorCaps=SUCCEEDED(d->GetDeviceCaps(&caps))&&(caps.RasterCaps&D3DPRASTERCAPS_SCISSORTEST)?1:0;}if(!staticScissorCaps)return false;
         const ptrdiff_t slot=&key-shadowCacheKey;
-        if(slot>=0&&slot<4&&staticChanged&&!persistentChanged){auto& job=staticDirtyJobs[slot];staticCasters.joinPlan(matrix);
+        if(slot>=0&&slot<4&&staticChanged){auto& job=staticDirtyJobs[slot];staticCasters.joinPlan(matrix);
             if(job.ready&&job.frame==staticFrame&&staticCasters.kickedModeCurrent()&&!std::memcmp(staticSlotMatrix[slot],matrix,sizeof staticSlotMatrix[slot])){
                 job.ready=false;staticDirty.swap(job.dirty);shadowCachePartialBounding+=job.boundingChoices;shadowCacheCostFull+=job.costFull;shadowCachePartialCalls+=job.calls;shadowCachePartialFullCalls+=job.fullCalls;++staticDirtyJobsUsed;
                 return job.result;}}
         return dirtyRectsFrom({staticDirtyScratch,staticDirtyFootprints,staticDirty,staticDirtyBounding,staticDirtyCosts,shadowCachePartialBounding,shadowCacheCostFull,shadowCachePartialCalls,shadowCachePartialFullCalls},
-            key,matrix,staticChanged,persistentChanged,staticCasters.stats().instancing,true,staticCasters);
+            key,matrix,staticChanged,staticCasters.stats().instancing,staticCasters);
     }
     // The CPU part, for either thread. Plan: the GpuCache or the worker's detached
-    // view (same changedBounds/drawCalls). persistent=false: no persistent-caster hook.
-    template<class Plan> bool dirtyRectsFrom(DirtyWork w,const ShadowCacheKey& key,const float* matrix,bool staticChanged,bool persistentChanged,bool instancing,bool persistent,const Plan& plan){
+    // view (same changedBounds/drawCalls).
+    template<class Plan> bool dirtyRectsFrom(DirtyWork w,const ShadowCacheKey& key,const float* matrix,bool staticChanged,bool instancing,const Plan& plan){
         w.dirty.clear();w.footprints.clear();size_t models=0;
         w.scratch.clear();
         if(staticChanged){try {if(!plan.changedBounds(matrix,key.staticContent,w.scratch,models))return false;}catch(...){return false;}}
         // Unchanged static content is redrawn inside the rects too: it must be the recorded
         // content in the same instancing mode (changedBounds checks this when static changed).
         else if(!key.staticContent.valid||key.staticContent.instancing!=instancing)return false;
-        if(persistentChanged){try {if(!persistentChangedBounds(key,matrix))return false;}catch(...){return false;}}
         for(const auto& box:w.scratch){NorthlightShadowBounds::TexelRect footprint;
             if(!box.bounded||!NorthlightShadowBounds::texelFootprint(box.low,box.high,matrix,long(ShadowCacheSize),StaticCacheDirtyMargin,footprint))return false;
             w.footprints.push_back(footprint);}
@@ -331,7 +327,6 @@ private:
             NorthlightShadowBounds::TexelRect footprint;const bool known=NorthlightShadowBounds::texelFootprint(b.boundsLow,b.boundsHigh,matrix,long(ShadowCacheSize),StaticCacheDirtyMargin,footprint);
             ++w.costs[0];for(size_t k=1;k<candidates.size();++k)for(const auto& r:*candidates[k])if(!known||NorthlightShadowBounds::intersects(footprint,r))++w.costs[k];
         }
-        if(persistent)persistentDrawCalls(matrix,candidates,w.costs);
         if(w.costs[2]<w.costs[1]){w.dirty.swap(w.bounding);w.costs[1]=w.costs[2];++w.boundingChoices;}
         if(w.costs[1]>=w.costs[0]){++w.costFull;return false;}
         w.calls+=w.costs[1];w.fullCalls+=w.costs[0];
@@ -341,18 +336,17 @@ private:
     // first drawn slot's plan is prepared now and the later slots' missing plans
     // are built on the plan worker in loop order, joined at each slot's first use
     // (GpuCache::kickPlans). A later slot that may take the static-models rect path
-    // (valid key and content, no placement reason, no persistent casters) gets its
+    // (valid key and content, no placement reason) gets its
     // dirty-rect CPU part computed there right after its build. Until the join the
     // job reads only frozen state: that slot's key, the batches and terrain chunks.
     void staticPlanKick(const NorthlightWorldMath::ShadowCachePlacement* placements,const bool* sourceActive){
         int order[4];unsigned count=0;
         for(int source=0;source<2;++source)if(sourceActive[source])for(int cascade=0;cascade<2;++cascade)order[count++]=source*2+cascade;
         if(count<2)return;
-        const bool persistent=persistentEnabled();
-        if(!persistent&&staticScissorCaps<0){D3DCAPS9 caps{};staticScissorCaps=SUCCEEDED(d->GetDeviceCaps(&caps))&&(caps.RasterCaps&D3DPRASTERCAPS_SCISSORTEST)?1:0;}
+        if(staticScissorCaps<0){D3DCAPS9 caps{};staticScissorCaps=SUCCEEDED(d->GetDeviceCaps(&caps))&&(caps.RasterCaps&D3DPRASTERCAPS_SCISSORTEST)?1:0;}
         for(auto& job:staticDirtyJobs){job.ready=job.eligible=false;job.frame=staticFrame;job.boundingChoices=job.costFull=0;job.calls=job.fullCalls=0;}
         for(unsigned i=1;i<count;++i){const int slot=order[i];const auto& key=shadowCacheKey[slot];
-            staticDirtyJobs[slot].eligible=StaticCacheDirtyRects&&!persistent&&staticScissorCaps==1&&!placements[slot].reason&&key.valid&&key.staticContent.valid;}
+            staticDirtyJobs[slot].eligible=StaticCacheDirtyRects&&staticScissorCaps==1&&!placements[slot].reason&&key.valid&&key.staticContent.valid;}
         const float* later[3];for(unsigned i=1;i<count;++i)later[i-1]=staticSlotMatrix[order[i]];
         // A throwing changedBounds/drawCalls leaves the slot to the render thread (which returns false only if it throws there too).
         struct Traced {const StaticShadow::GpuCache::DetachedView& view;bool& threw;
@@ -362,16 +356,9 @@ private:
                 for(unsigned i=1;i<count;++i){const int slot=order[i];auto& job=staticDirtyJobs[slot];
                     if(!job.eligible||std::memcmp(staticSlotMatrix[slot],view.matrix(),sizeof staticSlotMatrix[slot])||view.signature()==shadowCacheKey[slot].staticSignature)continue; /* same signature: no static change */
                     bool threw=false;
-                    try {const bool result=dirtyRectsFrom(job.work(),shadowCacheKey[slot],staticSlotMatrix[slot],true,false,false,false,Traced{view,threw});if(!threw){job.result=result;job.ready=true;}}catch(...){}
+                    try {const bool result=dirtyRectsFrom(job.work(),shadowCacheKey[slot],staticSlotMatrix[slot],true,false,Traced{view,threw});if(!threw){job.result=result;job.ready=true;}}catch(...){}
                 }});}
         catch(...){staticCasters.reset();staticOwnerGeneration=UINT64_MAX;staticRetryTick=GetTickCount();} /* the first slot's prepare, as staticSignature() */
-    }
-    // A caster recorded in `old` that is no longer visible (merge walk; forVisible is in id order).
-    bool persistentCasterGone(const NorthlightPersistentCasters::Content& old,const float* matrix)const{
-        if(!old.valid)return true;if(!persistentEnabled())return !old.slices.empty();
-        auto a=old.slices.begin();bool removed=false;
-        persistentCasters.forVisible(matrix,[&](const NorthlightPersistentCasters::Registry::Entry& e){while(a!=old.slices.end()&&a->id<e.id){removed=true;++a;}if(a!=old.slices.end()&&a->id==e.id)++a;});
-        return removed||a!=old.slices.end();
     }
     // Debug self-check (off): after each rect redraw, render the same slot in full
     // into a scratch target, read both back and count differing texels.
@@ -392,7 +379,7 @@ private:
         ++shadowCacheVerified;if(differing){++shadowCacheVerifyMismatches;logf("WORLD shadow cache VERIFY MISMATCH slot=%d texels=%llu",slot,differing);}
         return true;
     }
-    void invalidateShadowCache(){staticCasters.settle();dropStaticDirtyJobs();for(auto& k:shadowCacheKey){k.valid=false;k.staticContent.valid=false;k.persistentContent.valid=false;}for(auto& c:staticSlices)c.reset();pointCacheValid=false;for(int s=0;s<2;++s){farShadow[s].invalidate();nearShadow[s].invalidate();}}
+    void invalidateShadowCache(){staticCasters.settle();dropStaticDirtyJobs();for(auto& k:shadowCacheKey){k.valid=false;k.staticContent.valid=false;}for(auto& c:staticSlices)c.reset();pointCacheValid=false;for(int s=0;s<2;++s){farShadow[s].invalidate();nearShadow[s].invalidate();}}
     uint64_t liveChunkHash()const{uint64_t h=1469598103934665603ull;for(const auto& c:liveTerrainChunks){h^=uint64_t(uint32_t(c.first))*0x9E3779B97F4A7C15ull+uint64_t(uint32_t(c.second));h*=1099511628211ull;}return h;}
     IDirect3DPixelShader9 *cachedFastPS=nullptr,*cachedOpaqueFastPS=nullptr,*cachedOpaquePS=nullptr;
     IDirect3DPixelShader9 *lightingPS=nullptr,*giPS=nullptr,*fogPS=nullptr,*fogBlurPS=nullptr,*localDirectPS=nullptr,*temporalPS=nullptr,*localFogPS=nullptr,*normalsPS=nullptr,*sourceVisPS=nullptr,*finalPS=nullptr,*shadowPS=nullptr,*cachedShadowPS=nullptr,*replayPS=nullptr;
@@ -540,7 +527,6 @@ private:
         bool gpuCached=false,shadowSkinned=false,shadowSelected=true;int fateSlot=-1;unsigned char fateClass=0;float fateDistance=0; /* shadow fate diagnostics */
         uint32_t staticProofMask=0;uint64_t staticProofRevision=0;std::string staticProofModel;
         V staticProofLow,staticProofHigh;
-        std::uint32_t persistentId=0;V persistentLow,persistentHigh; /* 0.3.141: ready persistent caster covering this draw (set per frame) */
         D3DPRIMITIVETYPE type;INT base;UINT min,vertices,start,count;bool indexed;
         void releaseResources(bool retainSnapshot=false){NorthlightReplayCaptureConstants::reset(*this);drop(shader);drop(originalShader);pointBounds={};boundsWork={};boundsPrepared.reset();drop(decl);drop(index);drop(texture);for(auto& s:stream)drop(s);shared.reset();if(!retainSnapshot)snapshot=NorthlightDrawSnapshot::Mesh{};}
         ~Replay(){releaseResources();}
@@ -590,6 +576,7 @@ private:
     unsigned skinnedCandidates=0,skinnedBlendRejected=0,skinnedProjectionRejected=0,skinnedBudgetRejected=0,skinnedSnapshotRejected=0,skinnedAccepted=0;
     size_t captureRejectedBytes=0,acceptedSkinnedBytes=0,acceptedOtherBytes=0;
     bool captureSampled=false;
+    bool captureShortfall=false; /* this capture frame lost a draw to the capture limits (bytes or count) */
     // 0.3.140 cadence of the constant-epoch self-check (replay_capture_constants.h
     // verify(): repairs a pose on mismatch): the renderer's frame%120==0, independent
     // of Diagnostics and RenderProfile. The diagnostic `sample` is a separate, gated flag.
@@ -1594,7 +1581,7 @@ public:
         staticCasters.setAdmission([this](size_t bytes){return admitStaticAllocation(bytes);});
         worker=std::thread([this]{work();});}
     ~WorldRenderer(){{std::lock_guard<std::mutex> lock(mutex);stopping=true;}wake.notify_one();if(worker.joinable())worker.join();releaseGPU();for(auto& p:captureShaders)drop(p.second.replacement);for(auto& p:terrainShadowShaders)drop(p.second);}
-    void releaseGPU(){replayBoundsAbandon();releaseReplayProbe();staticCasters.settle();releasePersistentGPU();rigidMemoryClear();neutralShadowMaps=false;sampledVertices.clear();rigidBones.clear();actorShadowHistory.clear();actorShadowOriginValid=false;replayBoundsMetadata.clear();replayBoundsCache.clear();declarationCache.clear();uploadedStaticOwners.reset();staticOwnerGeneration=UINT64_MAX;staticCasters.reset();staticMatcher.clear();staticScene.reset();staticRetryTick=0;stateBlocks.clear();uploadedTerrain.clear();liveTerrainIndices.clear();liveDirectionalIndices.clear();fixedTerrain.reset();liveTerrainGeneration=0;drop(regionalFogTexture);uploadedFogField.reset();releasePointGPU();probeActivation.reset();drop(baselineSurface);drop(baselineLight);releaseReplayGPU();liveTerrainGPU.clear();drop(liveIndicesGPU);liveIndexBytes=0;pendingMesh.reset();clearMesh();retiredMaterials.clear();releaseMeshPool();uploadedMap.clear();for(auto& t:shadow)drop(t);for(auto& s:shadowSurface)drop(s);for(auto& t:shadowCache)drop(t);for(auto& s:shadowCacheSurface)drop(s);drop(shadowCacheDepth);drop(shadowVerifySurface);drop(shadowVerify);for(auto& r:shadowVerifyRead)drop(r);drop(shadowScratch);drop(shadowScratchSurface);drop(unionPS);invalidateShadowCache();for(auto& t:probe)drop(t);drop(shadowDepth);drop(lightSurface);drop(fogSurface);drop(fogBlurredSurface);drop(colorSurface);drop(light);drop(fog);drop(fogBlurred);drop(color);drop(lightingPS);drop(giPS);drop(fogPS);drop(fogBlurPS);drop(localDirectPS);drop(temporalPS);drop(localFogPS);drop(normalsPS);drop(normalBuffer);drop(normalSurface);drop(sourceVisPS);for(int a=0;a<2;++a)for(int b=0;b<2;++b){drop(sourceVis[a][b]);drop(sourceVisSurface[a][b]);}sourceVisValid=false;for(int i=0;i<2;++i){drop(temporalLight[i]);drop(temporalLightSurface[i]);drop(temporalDepth[i]);drop(temporalDepthSurface[i]);}temporalValid=false;drop(finalPS);drop(shadowPS);drop(replayPS);drop(shadowVS);drop(cachedShadowVS);drop(cachedShadowPS);drop(cachedFastPS);drop(cachedOpaqueFastPS);drop(cachedOpaquePS);drop(shadowDecl);width=height=0;uploadedSerial=0;}
+    void releaseGPU(){replayBoundsAbandon();releaseReplayProbe();staticCasters.settle();rigidMemoryClear();neutralShadowMaps=false;sampledVertices.clear();rigidBones.clear();actorShadowHistory.clear();actorShadowOriginValid=false;replayBoundsMetadata.clear();replayBoundsCache.clear();declarationCache.clear();uploadedStaticOwners.reset();staticOwnerGeneration=UINT64_MAX;staticCasters.reset();staticMatcher.clear();staticScene.reset();staticRetryTick=0;stateBlocks.clear();uploadedTerrain.clear();liveTerrainIndices.clear();liveDirectionalIndices.clear();fixedTerrain.reset();liveTerrainGeneration=0;drop(regionalFogTexture);uploadedFogField.reset();releasePointGPU();probeActivation.reset();drop(baselineSurface);drop(baselineLight);releaseReplayGPU();liveTerrainGPU.clear();drop(liveIndicesGPU);liveIndexBytes=0;pendingMesh.reset();clearMesh();retiredMaterials.clear();releaseMeshPool();uploadedMap.clear();for(auto& t:shadow)drop(t);for(auto& s:shadowSurface)drop(s);for(auto& t:shadowCache)drop(t);for(auto& s:shadowCacheSurface)drop(s);drop(shadowCacheDepth);drop(shadowVerifySurface);drop(shadowVerify);for(auto& r:shadowVerifyRead)drop(r);drop(shadowScratch);drop(shadowScratchSurface);drop(unionPS);invalidateShadowCache();for(auto& t:probe)drop(t);drop(shadowDepth);drop(lightSurface);drop(fogSurface);drop(fogBlurredSurface);drop(colorSurface);drop(light);drop(fog);drop(fogBlurred);drop(color);drop(lightingPS);drop(giPS);drop(fogPS);drop(fogBlurPS);drop(localDirectPS);drop(temporalPS);drop(localFogPS);drop(normalsPS);drop(normalBuffer);drop(normalSurface);drop(sourceVisPS);for(int a=0;a<2;++a)for(int b=0;b<2;++b){drop(sourceVis[a][b]);drop(sourceVisSurface[a][b]);}sourceVisValid=false;for(int i=0;i<2;++i){drop(temporalLight[i]);drop(temporalLightSurface[i]);drop(temporalDepth[i]);drop(temporalDepthSurface[i]);}temporalValid=false;drop(finalPS);drop(shadowPS);drop(replayPS);drop(shadowVS);drop(cachedShadowVS);drop(cachedShadowPS);drop(cachedFastPS);drop(cachedOpaqueFastPS);drop(cachedOpaquePS);drop(shadowDecl);width=height=0;uploadedSerial=0;}
     // Explicit enable/retry only, called after the wrapper's clearFrame(). This
     // never calls endFrame(), so packet capture and cleanup run exactly once.
     void recover(){meshRetry.clear();if(!failed)return;releaseGPU();failed=false;valid=false;streamingReports=0;logf("WORLD explicit recovery requested");}
@@ -2193,7 +2180,6 @@ public:
         if(staticDrawFailures++<8)logf("STATIC SHADOW draw retry: base terrain/local shadows retained");
         staticCasters.reset();staticOwnerGeneration=UINT64_MAX;staticRetryTick=GetTickCount();return false;
     }
-#include "world_persistent_casters.inl"
 #include "world_rigid_memory.inl"
 #include "world_shadow_experiment.inl"
 #include "world_memory_guard.inl"
@@ -2522,23 +2508,17 @@ public:
             // content until the last band, which takes the rect path below with the cycle's reason.
             auto& slices=staticSlices[slot];if(reason)slices.reset();
             bool sliceBand=false; /* an intermediate band: drawn before the cascade action, without a reason */
-            const uint64_t staticNow=reason?0:staticSignature(cachedMatrix),persistentNow=reason?0:persistentSignature(cachedMatrix);
+            const uint64_t staticNow=reason?0:staticSignature(cachedMatrix);
             const bool staticChanged=!reason&&key.staticSignature!=staticNow;
-            const bool persistentChanged=!reason&&key.persistentSignature!=persistentNow;
-            if(slices.current(staticNow,persistentNow)&&(staticChanged||persistentChanged)&&!diagnosticCapture&&key.staticContent.valid&&key.staticContent.instancing==staticCasters.stats().instancing){
+            if(slices.current(staticNow)&&staticChanged&&!diagnosticCapture&&key.staticContent.valid&&key.staticContent.instancing==staticCasters.stats().instancing){
                 staticDirty=slices.band(); /* unchanged since the cycle (re)started: its next band */
                 if(slices.last()){reason=slices.reason;partialStatic=true;}else sliceBand=true;
-            }else if(staticChanged||persistentChanged){reason=staticChanged?"static-models":"persistent-casters";
-                partialStatic=StaticCacheDirtyRects&&key.valid&&staticDirtyRects(key,cachedMatrix,staticChanged,persistentChanged);
-                if(partialStatic)reason=staticChanged?"static-models-partial":"persistent-casters-partial";else ++shadowCacheStaticFullRenders;
-                persistentRerenders+=!staticChanged;
-                // Removed persistent casters finish now (their replays draw again at once), as does a
-                // persistent change inside a cycle (a caster added to a drawn band may be gone again).
-                const bool removal=quality.staticCacheSlices>1&&partialStatic&&persistentChanged&&
-                    (persistentCasterGone(key.persistentContent,cachedMatrix)||(slices.active&&slices.persistentSignature!=persistentNow));
-                if(NorthlightStaticSlices::sliceable(quality.staticCacheSlices,partialStatic,removal,diagnosticCapture!=0,StaticCacheDirtyRectVerify)){
+            }else if(staticChanged){reason="static-models";
+                partialStatic=StaticCacheDirtyRects&&key.valid&&staticDirtyRects(key,cachedMatrix);
+                if(partialStatic)reason="static-models-partial";else ++shadowCacheStaticFullRenders;
+                if(NorthlightStaticSlices::sliceable(quality.staticCacheSlices,partialStatic,diagnosticCapture!=0,StaticCacheDirtyRectVerify)){
                     staticSliceRestarts+=slices.active;
-                    slices.start(staticDirty,quality.staticCacheSlices,reason,staticNow,persistentNow,long(ShadowCacheSize),StaticCacheDirtyTile,StaticCacheDirtyMaxRects);
+                    slices.start(staticDirty,quality.staticCacheSlices,reason,staticNow,long(ShadowCacheSize),StaticCacheDirtyTile,StaticCacheDirtyMaxRects);
                     staticDirty=slices.band();if(!slices.last()){reason=nullptr;sliceBand=true;}
                 }else if(partialStatic&&slices.active){ /* finish now; drawn bands hold content newer than the key */
                     staticDirtyFootprints=staticDirty;staticDirtyFootprints.insert(staticDirtyFootprints.end(),slices.drawn.begin(),slices.drawn.end());
@@ -2596,16 +2576,15 @@ public:
                 }
                 if(real){localDraws=drawnBatches[cascade];localMs=phaseNow()-selectMs;staticStart=phaseNow();}
                 const bool ok=drawStaticCasters(cachedMatrix,partial?&staticDirty:nullptr);
-                const bool persistentOK=drawPersistentCasters(cachedMatrix,partial?&staticDirty:nullptr);
                 if(partial){DWORD enabled=FALSE;if(StaticCacheDirtyRectVerify&&SUCCEEDED(d->GetRenderState(D3DRS_SCISSORTESTENABLE,&enabled))&&!enabled)++shadowCacheScissorLeaks;shadowCachePartialSkippedDraws+=unsigned(staticCasters.stats().rectSkipped);}
-                return ok&&persistentOK?1:0;
+                return ok?1:0;
             };
             if(sliceBand){
                 // Into the cache target only; the cascade's own schedule decides whether this frame's map
                 // unites it. Any failure drops the cycle and the key: a full redraw follows.
                 const int drawn=renderCache(shadowCacheSurface[slot],true,true,true);if(drawn<0)return false;
                 staticMs=phaseNow()-staticStart;staticDraws=staticCasters.stats().drawCalls;staticInstances=staticCasters.stats().instances;
-                if(drawn>0){slices.drew();++staticSliceBands;}else{slices.reset();key.valid=false;key.staticContent.valid=false;key.persistentContent.valid=false;}
+                if(drawn>0){slices.drew();++staticSliceBands;}else{slices.reset();key.valid=false;key.staticContent.valid=false;}
                 d->SetTexture(0,nullptr);d->SetSamplerState(0,D3DSAMP_ADDRESSU,D3DTADDRESS_WRAP);d->SetSamplerState(0,D3DSAMP_ADDRESSV,D3DTADDRESS_WRAP);
             }
             // Far/NearShadowInterval>1 only: between updates keep the last complete map with
@@ -2637,7 +2616,6 @@ public:
                 if(recordable){try {staticCasters.record(cachedMatrix,key.staticContent);}catch(...){key.staticContent.valid=false;}}else key.staticContent.valid=false;
                 if(StaticCacheDirtyRectVerify&&partialStatic&&staticOK&&!verifyStaticCache(slot,[&](IDirect3DSurface9* t){return renderCache(t,false,false);}))return false;
                 key.valid=staticOK&&(recordable||!StaticCacheDirtyRects);key.frame=placement.frame;key.direction=sourceDirections[source];key.serial=meshGeneration;key.chunkHash=chunkHash;key.staticSignature=staticSignature(cachedMatrix);key.localContent=localShadowSignature(key,cachedMatrix);key.localContentKnown=bool(uploadedLocalShadowRecords);++shadowCacheRenders;
-                key.persistentSignature=persistentSignature(cachedMatrix);if(staticOK&&persistentEnabled())persistentCasters.record(cachedMatrix,key.persistentContent);else key.persistentContent.valid=false;
                 DWORD tick=GetTickCount();if(NorthlightDiagnostics::enabled()&&(!shadowCacheLogAt||tick-shadowCacheLogAt>=1000)){shadowCacheLogAt=tick;logf("WORLD shadow cache rerender source=%d cascade=%d reason=%s anchorRetained=%u prebuilds=%u prebuildHits=%u prebuildMisses=%u prebuildDiscards=%u",source,cascade,reason,unsigned(!placement.reason),staticPrebuild.stats.built,staticPrebuild.stats.hits,staticPrebuild.stats.misses,staticPrebuild.stats.discarded);}
             } else {key.serial=meshGeneration;++shadowCacheReuses;}
             if(diagnosticCapture){
@@ -2698,9 +2676,6 @@ public:
                     if(key.staticContent.valid&&!key.staticContent.contains(p->staticProofModel,p->staticProofRevision))++staticDedupUncommitted;
                     ++staticDedupSkipped;continue;
                 }
-                // 0.3.141: a ready persistent caster drawn into this slot's committed cache replaces the live draw.
-                if(p->persistentId&&key.valid&&NorthlightPersistentCasters::committed(key.persistentContent,p->persistentId)&&
-                   StaticShadow::containsBounds(cachedMatrix,p->persistentLow,p->persistentHigh)){++persistentSkipped;continue;}
                 ++replaySlotTested[slot];replaySlotBounded[slot]+=p->pointBounds.valid;
                 if(p->pointBounds.valid&&NorthlightShadowBounds::clipReject(V(p->pointBounds.low[0],p->pointBounds.low[1],p->pointBounds.low[2]),V(p->pointBounds.high[0],p->pointBounds.high[1],p->pointBounds.high[2]),matrices[cascade])){++culledReplayDraws;++replaySlotCulled[slot];continue;}
                 split.mark(Own);
