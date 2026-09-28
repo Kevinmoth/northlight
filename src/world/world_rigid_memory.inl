@@ -53,6 +53,9 @@
             if(place.category==1||place.category==3)x.add(place.translation.x,place.translation.y,place.translation.z,std::uint32_t(x.next));}
         x.complete=x.next==all.size();
     }
+    // The index is complete for this map's current static scene.
+    bool rigidIndexCurrent()const{
+        return staticScene&&staticScene->map==lastRequest.map&&rigidIndex.scene==staticScene.get()&&rigidIndex.revision==rigidSceneRevision(*staticScene)&&rigidIndex.complete;}
     // 1: the static cache draws it (a placement at W's origin with W's axes), 0: not (or no scene
     // for this map after 15 s), -1: not known yet.
     int rigidStaticCovered(const NorthlightRigidMemory::Observation& o,DWORD now){
@@ -105,8 +108,7 @@
     // A body root on a static-cache placement origin is a doodad (a lantern, a banner): it holds
     // nothing. Unknown (no scene for this map, index incomplete): it counts as a body.
     bool rigidStaticBody(const float* root){
-        if(!staticScene||staticScene->map!=lastRequest.map)return false;const auto& x=rigidIndex;
-        if(x.scene!=staticScene.get()||x.revision!=rigidSceneRevision(*staticScene)||!x.complete)return false;
+        if(!rigidIndexCurrent())return false;const auto& x=rigidIndex;
         return x.find(root,rigidMemory.tuning().staticBodyTolerance,[](std::uint32_t){return true;}); /* the index holds categories 1 and 3 only */
     }
     // Before retainSelected: observe, decide, copy the replays of remembered groups.
@@ -125,7 +127,10 @@
             [&](size_t n){return rigidStaticCovered(rigidObservations[n],now);},[&](const float* root){return rigidStaticBody(root);});
         for(size_t n=0;n<rigidObservations.size();++n)if(rigidObservations[n].action!=NorthlightRigidMemory::Observation::None)rigidMemory.store(rigidObservations[n],rigidCopy(n),now);
         rigidDrawKeysRebuild(); /* after store: the drawn test of the next capture frame */
-        if(rigidMemory.screening())rigidIndexStep();
+        // The index is stepped while a settled track waits for the screen, and (0.3.173) while it is
+        // not complete for this scene and tracks exist (all within range): the doodad-body test of
+        // held needs it too, also after a static-scene revision change.
+        if(rigidMemory.screening()||(rigidMemory.stats().tracks&&!rigidIndexCurrent()))rigidIndexStep();
         rigidGroupDraws.clear();
         rigidObserveMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
     }

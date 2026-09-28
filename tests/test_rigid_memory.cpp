@@ -106,6 +106,10 @@ static void held(){
      assert(s.reg.stats().held==1);s.bodies.clear();s.step({},s.away);assert(s.injected==1&&s.reg.entries().size()==1);}
     // A body root on a static-cache placement origin (a lantern) holds nothing.
     {Scene s;s.bodies={20,3,3};s.doodads={{20.1f,3,3}};assert(s.settle(o,s.away)==Settle&&s.reg.stats().held==0);}
+    // Until the placement index is complete (a static-scene revision change) the doodad counts as a body: held;
+    // once the index is complete again (the renderer steps it while tracks exist) the hold decays and it is remembered.
+    {Scene s;s.bodies={20,3,3};for(unsigned k=0;k<100;++k)s.step({o},s.away);assert(s.reg.stats().held==1&&s.reg.stats().remembered==0);
+     s.doodads={{20.1f,3,3}};unsigned k=0;for(;k<300&&!s.reg.stats().remembered;++k)s.step({o},s.away);assert(s.reg.stats().remembered==1&&s.reg.stats().held==0&&k<60);}
     std::puts("PASS held: >= 80% of >= 8 complete frames (shortfall frames excluded), a passer-by does not hold, an entry is never dropped by a body, doodad bodies ignored");
 }
 // F3: unsettled, held or mobile tracks are forgotten after 2 s unseen; settled free ones after 60 s.

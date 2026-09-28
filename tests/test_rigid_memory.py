@@ -52,6 +52,11 @@ checks['LiveUnselected: captured non-small draws only (small at capture never ob
 checks['RIGID event lines: Diagnostics only, 20 per second, 2000 a session']=('if(NorthlightDiagnostics::enabled()){rigidMemory.takeEvents(rigidEvents);' in m and 'RigidEventsPerSecond=20,RigidEventLines=2000;' in m
     and 'if(!rigidEventTokens||rigidEventLines>=RigidEventLines){++rigidEventSuppressed;continue;}' in m and 'rigidMemory.events(NorthlightDiagnostics::enabled());' in m)
 checks['counters reset on a map change; doodad bodies from the static index']=('if(lastRequest.map!=rigidMap){rigidMemoryClear();rigidMemory.resetStats();' in m and 'return rigidStaticBody(root);' in m)
+checks['placement index stepped while incomplete with tracks (doodad bodies after a revision change), same per-frame step']=(
+    'if(rigidMemory.screening()||(rigidMemory.stats().tracks&&!rigidIndexCurrent()))rigidIndexStep();' in observe
+    and observe.index('rigidMemory.frame(')<observe.index('rigidIndexStep();') and 'static constexpr size_t RigidIndexStep=2048;' in m
+    and m.count('rigidIndexStep()')==2 and 'if(!rigidIndexCurrent())return false;const auto& x=rigidIndex;' in m
+    and re.search(r'bool rigidIndexCurrent\(\)const\{\s*return staticScene&&staticScene->map==lastRequest.map&&rigidIndex.scene==staticScene.get\(\)&&rigidIndex.revision==rigidSceneRevision\(\*staticScene\)&&rigidIndex.complete;\}',m) is not None)
 for name,ok in checks.items():print(('PASS ' if ok else 'FAIL ')+name)
 assert all(checks.values())
 with tempfile.TemporaryDirectory(prefix='northlight-rigid-memory-') as tmp:
