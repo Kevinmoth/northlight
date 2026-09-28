@@ -1,5 +1,5 @@
 {
-  "source_sha256": "9281609813d4f1ef55dc584e94ded6e28a93cdba3004d3285d31dc87b6cfe92a",
+  "source_sha256": "d04d564f9467d1c3ed08f8b53b8abb34e53d9104cf3a40207bd299b7eb8ead77",
   "target": "ps_3_0",
   "shaders": {
     "AO": {
@@ -29,16 +29,19 @@
         "endrep": 1
       }
     },
-    "AOContact": {
-      "bytes": 7476,
-      "sha256": "0d3e3b83682838e5018ccaed1abb6ec5d4d20b4d17e471f83ea95bc1d3e4d21d",
-      "static_instruction_slots": 460,
-      "temporary_registers": 12,
+    "AOContactBloom": {
+      "bytes": 8176,
+      "sha256": "97092eb4d2c96de2ee47dd6f811c2a7e424c3dd9519818358fb2eab7ea255a48",
+      "static_instruction_slots": 493,
+      "temporary_registers": 13,
       "instructions": {
-        "mov": 87,
+        "mul": 86,
+        "texld": 5,
+        "dp3": 8,
+        "mad": 10,
+        "mov": 92,
+        "add": 122,
         "texldl": 7,
-        "add": 118,
-        "mul": 82,
         "cmp": 55,
         "if": 3,
         "max": 15,
@@ -47,7 +50,6 @@
         "else": 3,
         "endif": 3,
         "abs": 20,
-        "dp3": 3,
         "rsq": 3,
         "dp2add": 2,
         "frc": 2,

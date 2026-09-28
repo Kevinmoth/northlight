@@ -200,6 +200,7 @@ private:
     bool gpuDiagnosticArmed=true;unsigned gpuDiagnosticCaptures=0;
     std::string gpuDiagnosticDirectory;
     IDirect3DTexture9* regionalFogTexture=nullptr;
+    IDirect3DTexture9* neutralAO=nullptr; // 0.3.174: 1x1 (0,0,0,1) on s10 when the proxy does not fold its AO/bloom
     std::shared_ptr<const NorthlightRegionalFog::Field> uploadedFogField;
     NorthlightWorldContext::TerrainContext context;
     NorthlightCelestial::Context celestial,celestialLight;
@@ -1260,6 +1261,9 @@ private:
         if(!check(d->CreatePixelShader(kShadowUnionShader,&unionPS),"shadow union shader"))return false;
         invalidateShadowCache();
         {const UINT n=NorthlightGI::probeLayout().atlas;for(int i=0;i<5;++i)if(!check(d->CreateTexture(n*n,i==3?n*6:n,1,0,D3DFMT_A32B32G32R32F,D3DPOOL_MANAGED,&probe[i],nullptr),"GI probe texture"))return false;}
+        // AO 1, bloom 0 for TemporalLight/WorldComposite on frames the proxy composites itself.
+        if(!check(d->CreateTexture(1,1,1,0,D3DFMT_A8R8G8B8,D3DPOOL_MANAGED,&neutralAO,nullptr),"neutral AO texture"))return false;
+        {D3DLOCKED_RECT lock={};if(!check(neutralAO->LockRect(0,&lock,nullptr,0),"neutral AO lock"))return false;*static_cast<DWORD*>(lock.pBits)=0xff000000u;neutralAO->UnlockRect(0);}
         if(!target(w/2,h/2,D3DFMT_A16B16G16R16F,&baselineLight,&baselineSurface)||!target(w/2,h/2,D3DFMT_A16B16G16R16F,&light,&lightSurface)||!target(w/2,h/2,D3DFMT_A16B16G16R16F,&fog,&fogSurface)||!target(w/2,h/2,D3DFMT_A16B16G16R16F,&fogBlurred,&fogBlurredSurface)||!target(w/2,h/2,D3DFMT_A16B16G16R16F,&normalBuffer,&normalSurface)||!target(1,1,D3DFMT_A16B16G16R16F,&sourceVis[0][0],&sourceVisSurface[0][0])||!target(1,1,D3DFMT_A16B16G16R16F,&sourceVis[0][1],&sourceVisSurface[0][1])||!target(1,1,D3DFMT_A16B16G16R16F,&sourceVis[1][0],&sourceVisSurface[1][0])||!target(1,1,D3DFMT_A16B16G16R16F,&sourceVis[1][1],&sourceVisSurface[1][1])||!target(w/2,h/2,D3DFMT_A16B16G16R16F,&temporalLight[0],&temporalLightSurface[0])||!target(w/2,h/2,D3DFMT_A16B16G16R16F,&temporalLight[1],&temporalLightSurface[1])||!target(w/2,h/2,D3DFMT_R32F,&temporalDepth[0],&temporalDepthSurface[0])||!target(w/2,h/2,D3DFMT_R32F,&temporalDepth[1],&temporalDepthSurface[1])||!target(w,h,fmt,&color,&colorSurface))return false;
         const D3DVERTEXELEMENT9 elements[]={{0,0,D3DDECLTYPE_FLOAT3,D3DDECLMETHOD_DEFAULT,D3DDECLUSAGE_POSITION,0},{0,12,D3DDECLTYPE_FLOAT3,D3DDECLMETHOD_DEFAULT,D3DDECLUSAGE_NORMAL,0},{0,24,D3DDECLTYPE_FLOAT2,D3DDECLMETHOD_DEFAULT,D3DDECLUSAGE_TEXCOORD,0},D3DDECL_END()};
         return check(d->CreateVertexDeclaration(elements,&shadowDecl),"shadow declaration");
@@ -1581,7 +1585,7 @@ public:
         staticCasters.setAdmission([this](size_t bytes){return admitStaticAllocation(bytes);});
         worker=std::thread([this]{work();});}
     ~WorldRenderer(){{std::lock_guard<std::mutex> lock(mutex);stopping=true;}wake.notify_one();if(worker.joinable())worker.join();releaseGPU();for(auto& p:captureShaders)drop(p.second.replacement);for(auto& p:terrainShadowShaders)drop(p.second);}
-    void releaseGPU(){replayBoundsAbandon();releaseReplayProbe();staticCasters.settle();rigidMemoryClear();neutralShadowMaps=false;sampledVertices.clear();rigidBones.clear();actorShadowHistory.clear();actorShadowOriginValid=false;replayBoundsMetadata.clear();replayBoundsCache.clear();declarationCache.clear();uploadedStaticOwners.reset();staticOwnerGeneration=UINT64_MAX;staticCasters.reset();staticMatcher.clear();staticScene.reset();staticRetryTick=0;stateBlocks.clear();uploadedTerrain.clear();liveTerrainIndices.clear();liveDirectionalIndices.clear();fixedTerrain.reset();liveTerrainGeneration=0;drop(regionalFogTexture);uploadedFogField.reset();releasePointGPU();probeActivation.reset();drop(baselineSurface);drop(baselineLight);releaseReplayGPU();liveTerrainGPU.clear();drop(liveIndicesGPU);liveIndexBytes=0;pendingMesh.reset();clearMesh();retiredMaterials.clear();releaseMeshPool();uploadedMap.clear();for(auto& t:shadow)drop(t);for(auto& s:shadowSurface)drop(s);for(auto& t:shadowCache)drop(t);for(auto& s:shadowCacheSurface)drop(s);drop(shadowCacheDepth);drop(shadowVerifySurface);drop(shadowVerify);for(auto& r:shadowVerifyRead)drop(r);drop(shadowScratch);drop(shadowScratchSurface);drop(unionPS);invalidateShadowCache();for(auto& t:probe)drop(t);drop(shadowDepth);drop(lightSurface);drop(fogSurface);drop(fogBlurredSurface);drop(colorSurface);drop(light);drop(fog);drop(fogBlurred);drop(color);drop(lightingPS);drop(giPS);drop(fogPS);drop(fogBlurPS);drop(localDirectPS);drop(temporalPS);drop(localFogPS);drop(normalsPS);drop(normalBuffer);drop(normalSurface);drop(sourceVisPS);for(int a=0;a<2;++a)for(int b=0;b<2;++b){drop(sourceVis[a][b]);drop(sourceVisSurface[a][b]);}sourceVisValid=false;for(int i=0;i<2;++i){drop(temporalLight[i]);drop(temporalLightSurface[i]);drop(temporalDepth[i]);drop(temporalDepthSurface[i]);}temporalValid=false;drop(finalPS);drop(shadowPS);drop(replayPS);drop(shadowVS);drop(cachedShadowVS);drop(cachedShadowPS);drop(cachedFastPS);drop(cachedOpaqueFastPS);drop(cachedOpaquePS);drop(shadowDecl);width=height=0;uploadedSerial=0;}
+    void releaseGPU(){replayBoundsAbandon();releaseReplayProbe();staticCasters.settle();rigidMemoryClear();neutralShadowMaps=false;sampledVertices.clear();rigidBones.clear();actorShadowHistory.clear();actorShadowOriginValid=false;replayBoundsMetadata.clear();replayBoundsCache.clear();declarationCache.clear();uploadedStaticOwners.reset();staticOwnerGeneration=UINT64_MAX;staticCasters.reset();staticMatcher.clear();staticScene.reset();staticRetryTick=0;stateBlocks.clear();uploadedTerrain.clear();liveTerrainIndices.clear();liveDirectionalIndices.clear();fixedTerrain.reset();liveTerrainGeneration=0;drop(regionalFogTexture);drop(neutralAO);uploadedFogField.reset();releasePointGPU();probeActivation.reset();drop(baselineSurface);drop(baselineLight);releaseReplayGPU();liveTerrainGPU.clear();drop(liveIndicesGPU);liveIndexBytes=0;pendingMesh.reset();clearMesh();retiredMaterials.clear();releaseMeshPool();uploadedMap.clear();for(auto& t:shadow)drop(t);for(auto& s:shadowSurface)drop(s);for(auto& t:shadowCache)drop(t);for(auto& s:shadowCacheSurface)drop(s);drop(shadowCacheDepth);drop(shadowVerifySurface);drop(shadowVerify);for(auto& r:shadowVerifyRead)drop(r);drop(shadowScratch);drop(shadowScratchSurface);drop(unionPS);invalidateShadowCache();for(auto& t:probe)drop(t);drop(shadowDepth);drop(lightSurface);drop(fogSurface);drop(fogBlurredSurface);drop(colorSurface);drop(light);drop(fog);drop(fogBlurred);drop(color);drop(lightingPS);drop(giPS);drop(fogPS);drop(fogBlurPS);drop(localDirectPS);drop(temporalPS);drop(localFogPS);drop(normalsPS);drop(normalBuffer);drop(normalSurface);drop(sourceVisPS);for(int a=0;a<2;++a)for(int b=0;b<2;++b){drop(sourceVis[a][b]);drop(sourceVisSurface[a][b]);}sourceVisValid=false;for(int i=0;i<2;++i){drop(temporalLight[i]);drop(temporalLightSurface[i]);drop(temporalDepth[i]);drop(temporalDepthSurface[i]);}temporalValid=false;drop(finalPS);drop(shadowPS);drop(replayPS);drop(shadowVS);drop(cachedShadowVS);drop(cachedShadowPS);drop(cachedFastPS);drop(cachedOpaqueFastPS);drop(cachedOpaquePS);drop(shadowDecl);width=height=0;uploadedSerial=0;}
     // Explicit enable/retry only, called after the wrapper's clearFrame(). This
     // never calls endFrame(), so packet capture and cleanup run exactly once.
     void recover(){meshRetry.clear();if(!failed)return;releaseGPU();failed=false;valid=false;streamingReports=0;logf("WORLD explicit recovery requested");}
@@ -2359,8 +2363,13 @@ public:
         split.mark(NorthlightRenderThreadProbe::Draw);
         return ok(hr,"animated shadow draw");
     }
-    bool render(IDirect3DSurface9* targetSurface,IDirect3DTexture9* depth,UINT w,UINT h,D3DFORMAT fmt,float nearZ,float farZ,float minZ,float maxZ,int debug,NorthlightGpuProfile* profile,IDirect3DTexture9* waterMask){
-        shadowsComposited=false;lastRenderDebug=debug;
+    // 0.3.174: true once this frame's WorldComposite quad has drawn (the proxy's FOLD fallback reads it).
+    bool composited=false;
+    // foldScene/foldAO (0.3.174 FOLD): the proxy's pre-AO scene copy replaces the world colour
+    // copy, and its AOContactBloom target (bloom rgb, AO alpha) is applied by TemporalLight's
+    // removal smoothing and WorldComposite. Null: the proxy composited already (neutral s10).
+    bool render(IDirect3DSurface9* targetSurface,IDirect3DTexture9* depth,UINT w,UINT h,D3DFORMAT fmt,float nearZ,float farZ,float minZ,float maxZ,int debug,NorthlightGpuProfile* profile,IDirect3DTexture9* waterMask,IDirect3DTexture9* foldScene=nullptr,IDirect3DTexture9* foldAO=nullptr){
+        shadowsComposited=false;composited=false;lastRenderDebug=debug;
         if(debug!=1)gpuDiagnosticArmed=true;
         // 0.3.169 lastSkipReason(): why this call returned false. Untagged returns below the
         // upload gate are failed device calls in the draw stages ("draw").
@@ -2769,7 +2778,7 @@ public:
         if(pointUpdates!=pointUpdatesBefore&&profileSampled())profilePointUsed(); /* capture waste (RenderProfile) */
         if(profile)profile->mark("PointShadow");
         d->SetDepthStencilSurface(nullptr);d->SetTexture(0,nullptr);
-        if(!check(d->StretchRect(targetSurface,nullptr,colorSurface,nullptr,D3DTEXF_NONE),"world color copy"))return false;
+        if(!foldScene&&!check(d->StretchRect(targetSurface,nullptr,colorSurface,nullptr,D3DTEXF_NONE),"world color copy"))return false;
         d->SetVertexShader(nullptr);d->SetFVF(D3DFVF_XYZRHW|D3DFVF_TEX1);d->SetStreamSourceFreq(0,1);d->SetRenderState(D3DRS_ZENABLE,FALSE);d->SetRenderState(D3DRS_ZWRITEENABLE,FALSE);
         d->SetTextureStageState(0,D3DTSS_TEXCOORDINDEX,0);d->SetTextureStageState(0,D3DTSS_TEXTURETRANSFORMFLAGS,D3DTTFF_DISABLE);d->SetRenderState(D3DRS_WRAP0,0);
         float c[68][4]={};c[0][0]=1.f/w;c[0][1]=1.f/h;c[0][2]=nearZ;c[0][3]=farZ;
@@ -2885,7 +2894,7 @@ public:
         for(int source=0;source<2;++source)if(sourceWeights[source]>0&&sourceActive[source])
             c[15][3]=std::max(c[15][3],std::max({sourceColors[source].x,sourceColors[source].y,sourceColors[source].z})*drawnWeight/sourceWeights[source]);
         c[30][0]=waterMask?1.f:0.f;d->SetPixelShaderConstantF(0,&c[0][0],68);
-        IDirect3DTexture9* textures[]={color,depth,shadow[0],shadow[1],probe[0],probe[1],probe[2],probe[3],nullptr,nullptr,probe[4],waterMask,nullptr,regionalFogTexture};
+        IDirect3DTexture9* textures[]={foldScene?foldScene:color,depth,shadow[0],shadow[1],probe[0],probe[1],probe[2],probe[3],nullptr,nullptr,probe[4],waterMask,nullptr,regionalFogTexture};
         for(int i=0;i<14;++i){d->SetTexture(i,textures[i]);d->SetSamplerState(i,D3DSAMP_ADDRESSU,D3DTADDRESS_CLAMP);d->SetSamplerState(i,D3DSAMP_ADDRESSV,D3DTADDRESS_CLAMP);d->SetSamplerState(i,D3DSAMP_MINFILTER,(i==0||i==9)?D3DTEXF_LINEAR:D3DTEXF_POINT);d->SetSamplerState(i,D3DSAMP_MAGFILTER,(i==0||i==9)?D3DTEXF_LINEAR:D3DTEXF_POINT);d->SetSamplerState(i,D3DSAMP_MIPFILTER,D3DTEXF_NONE);d->SetSamplerState(i,D3DSAMP_SRGBTEXTURE,FALSE);}
         auto setSource=[&](int source,bool first,bool volume=false){
             d->SetTexture(2,shadow[source*2]);d->SetTexture(3,shadow[source*2+1]);
@@ -2956,6 +2965,9 @@ public:
             d->SetRenderState(D3DRS_ALPHABLENDENABLE,FALSE);d->SetRenderState(D3DRS_COLORWRITEENABLE,15);
             if(!check(d->SetRenderTarget(0,temporalLightSurface[cur]),"temporal light target")||!check(d->SetRenderTarget(1,temporalDepthSurface[cur]),"temporal depth target"))return false;
             d->SetRenderState(D3DRS_COLORWRITEENABLE1,15);
+            // 0.3.174: s10 switches from ProbeMetadata (WorldGI, done) to the AO/bloom target for the
+            // removal smoothing and WorldComposite; the frame-start loop rebinds probe[4] POINT.
+            d->SetTexture(10,foldAO?foldAO:neutralAO);d->SetSamplerState(10,D3DSAMP_MINFILTER,D3DTEXF_LINEAR);d->SetSamplerState(10,D3DSAMP_MAGFILTER,D3DTEXF_LINEAR);
             // 0.3.171: LightHistory (s14) is read bilinearly at the unrounded reprojection; the depth history
             // (s15, R32F) stays POINT. The normals setup rebinds s14 POINT every frame.
             d->SetTexture(8,light);d->SetTexture(12,baselineLight);d->SetTexture(14,temporalLight[prev]);d->SetTexture(15,temporalDepth[prev]); /* s12 stays bound for the composite (0.3.159: smoothRemoval reads it here) */
@@ -3016,7 +3028,7 @@ public:
         // c34 belongs to the blur above and to HorizonHaze ONLY in the final pass;
         // set on fog-off frames too, where the blur did not run.
         d->SetPixelShaderConstantF(34,haze.haze,1);
-        d->SetRenderTarget(0,targetSurface);d->SetTexture(8,temporalLight[1-temporalIndex]);d->SetTexture(9,fog);d->SetPixelShader(finalPS);if(!check(quad(w,h),"world composite"))return false;if(profile)profile->mark("WorldComposite");
+        d->SetRenderTarget(0,targetSurface);d->SetTexture(8,temporalLight[1-temporalIndex]);d->SetTexture(9,fog);d->SetPixelShader(finalPS);if(!check(quad(w,h),"world composite"))return false;composited=true;if(profile)profile->mark("WorldComposite");
         if(diagnosticCapture){
             gpuDiagnosticArmed=false;unsigned capture=++gpuDiagnosticCaptures;
             const std::string& directory=gpuDiagnosticDirectory;
@@ -3035,7 +3047,10 @@ public:
             dump(d,temporalLightSurface[1-temporalIndex],directory,"temporal-light",capture);
             dump(d,temporalDepthSurface[1-temporalIndex],directory,"distance",capture);
             dump(d,fogSurface,directory,"fog",capture);
-            dump(d,colorSurface,directory,"scene",capture);
+            // 0.3.174 FOLD: the proxy's scene copy, before AO and bloom (the colour copy was skipped).
+            if(foldScene){IDirect3DSurface9* folded=nullptr;if(SUCCEEDED(foldScene->GetSurfaceLevel(0,&folded))){dump(d,folded,directory,"scene",capture);folded->Release();}}
+            else dump(d,colorSurface,directory,"scene",capture);
+            logf("WORLD GPU diagnostic capture=%u scene=%s",capture,foldScene?"pre-AO (folded AO/bloom)":"post-AO composite");
         }
         if(++frames==1||(frames%600==0&&NorthlightDiagnostics::enabled()))logf("WORLD frame=%u GI probes=%u valid=%u rays=%u bounces=%u cacheTriangles=%zu replayDraws=%zu liveTerrainChunks=%zu terrainAttempts=%u terrainSnapshots=%u cascadesPerSource=2x1024 volumeStepsMax=49 fogWorldSpacing=2.667 fogShadowFilter=1.5 fogLightHeight=12 fogAmbient=0.35",frames,NorthlightGI::probeLayout().count(),active->validProbes,quality.giRays,quality.giBounces,active->bvh->triangleCount(),replays.size(),liveTerrainChunks.size(),terrainAttempts,terrainSnapshots);
         if(captureSampled)logf("VOLUME sources sunRGB=%.5f,%.5f,%.5f moonRGB=%.5f,%.5f,%.5f ambientRGB=%.5f,%.5f,%.5f sunGain=1.2 moonGain=1.2 directCaps=0.38,0.24 airCells=%u airDensity=%.5f,%.5f forestAir=%.4f night=%.3f",

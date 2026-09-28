@@ -245,7 +245,7 @@ class Device final : public GuardedMirrorDevice {
     NorthlightMemoryGuard::Guard memoryGuard;
     IDirect3DTexture9 *scene = nullptr, *depthTex = nullptr, *ao = nullptr;
     IDirect3DSurface9 *sceneSurface = nullptr, *aoSurface = nullptr, *worldDepth = nullptr;
-    IDirect3DPixelShader9 *aoPS = nullptr, *aoContactPS = nullptr, *compositePS = nullptr;
+    IDirect3DPixelShader9 *aoPS = nullptr, *aoContactBloomPS = nullptr, *compositePS = nullptr;
     // Low bits: 1 terrain, 2 UI. kWaterTag: the water renderer holds a mask shader
     // for it (set at registration, where the water map changes), so non-water
     // draws need no second hash lookup.
@@ -316,7 +316,7 @@ class Device final : public GuardedMirrorDevice {
     void releaseResources() {
         stateBlocks.clear();clearFrame();
         drop(sceneSurface); drop(aoSurface); drop(scene); drop(depthTex); drop(ao);
-        drop(aoPS); drop(aoContactPS); drop(compositePS); width = height = 0;
+        drop(aoPS); drop(aoContactBloomPS); drop(compositePS); width = height = 0;
     }
     bool error(HRESULT hr, const char* stage) {
         if (SUCCEEDED(hr)) return false;
@@ -332,7 +332,7 @@ class Device final : public GuardedMirrorDevice {
         }
         width = w; height = h; sceneFormat = format;
         if (!aoPS && error(ext->CreatePixelShader(kAoShader, &aoPS), "AO shader")) return false;
-        if (!aoContactPS && error(ext->CreatePixelShader(kAoContactShader, &aoContactPS), "AO contact shader")) return false;
+        if (!aoContactBloomPS && error(ext->CreatePixelShader(kAoContactBloomShader, &aoContactBloomPS), "AO contact bloom shader")) return false;
         if (!compositePS && error(ext->CreatePixelShader(kCompositeShader, &compositePS), "composite shader")) return false;
         if (error(ext->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, format, D3DPOOL_DEFAULT, &scene, nullptr), "scene texture")) return false;
         if (!depthTex && error(ext->CreateTexture(w, h, 1, D3DUSAGE_DEPTHSTENCIL, (D3DFORMAT)MAKEFOURCC('I','N','T','Z'), D3DPOOL_DEFAULT, &depthTex, nullptr), "INTZ depth texture")) return false;
@@ -435,34 +435,9 @@ class Device final : public GuardedMirrorDevice {
         for(unsigned k=0;k<3;++k){hue.sun[k]=published.sun[k];hue.sunCore[k]=published.sunCore[k];}
         hue.strength=published.strength;return hue;
     }
-    void renderEffects() {
-        CpuScope cpu(sampled()?&cpuEffects:nullptr);
-        // 0.3.154: sceneMs end = the last entry before effects apply; the read is billed to cpuEffects.
-        if(gateFrame&&!applied){QueryPerformanceCounter(&gateSceneEnd);gateSceneDraws=drawCalls;gateSceneReads=CpuScope::reads;}
-        if (applied || !enabled || failed || !projectionValid) return;
-        // RenderProfile: every applying frame (two clock reads), the FRAME cost effects series.
-        CpuScope frameCostScope(!sampled()&&NorthlightRenderThreadProbe::profiling()?&cpuEffects:nullptr);
-        // The scope outlives every SavedState, including nested depth passes.
-        // Game captures remain outside; the device gate stays held throughout.
-        ExtensionDevice::RawScope rawEffects(*ext);
-        D3DSURFACE_DESC desc;
-        if (!fullViewport(desc) || !resources(desc.Width, desc.Height, desc.Format) || !resolveDepth()) return;
-        SavedState saved(ext,&stateBlocks);
-        if (!saved.ok) return;
-        if(diagnostics())gpuProfile->beginFrame(frame,NorthlightRenderThreadProbe::sampleFrame(frame)); // otherwise no queries; mark/endFrame are no-ops
-        struct ProfileEnd { NorthlightGpuProfile* p; ~ProfileEnd(){p->endFrame();} } profileEnd{gpuProfile.get()};
-        IDirect3DTexture9* waterMask=water?water->maskTextureForDepth(worldMinDepth,worldMaxDepth):nullptr;
-        // discs and glare, then the wrap-ring visibility in the same group of
-        // 1x1 passes before the scene copy; the veil follows water (below).
-        const bool celestial=celestialDiscs&&world&&debugMode==0&&worldDebug==0;float sunElevation=0;
-        if(celestial){
-            NorthlightCelestial::Context sky;float inverseView[16],projection[3];
-            if(world->celestialContext(sky,inverseView,projection)){sunElevation=sky.sun.direction[2];
-                celestialDiscs->render(saved.targets[0],depthTex,waterMask,width,height,world->legacyFogParameters(),worldMinDepth,worldMaxDepth,nearZ,farZ,projection,inverseView,sky,celestialGlowHue());}
-        }
-        gpuProfile->mark("CelestialDiscs");
-        if(celestial){celestialDiscs->renderRing();gpuProfile->mark("CelestialRing");}
-        if (error(ext->StretchRect(saved.targets[0], nullptr, sceneSurface, nullptr, D3DTEXF_NONE), "copy scene")) return;
+    // Fixed-function, render and sampler state of the effect passes (AO, legacy composite).
+    // 0.3.174: also re-established before a legacy composite after a world render.
+    void effectState() {
         ext->SetDepthStencilSurface(nullptr);
         for (int i=1; i<4; ++i) ext->SetRenderTarget(i,nullptr);
         ext->SetVertexShader(nullptr);
@@ -491,21 +466,63 @@ class Device final : public GuardedMirrorDevice {
             ext->SetSamplerState(i,D3DSAMP_MIPFILTER,D3DTEXF_NONE);
             ext->SetSamplerState(i,D3DSAMP_SRGBTEXTURE,FALSE);
         }
+    }
+    void renderEffects() {
+        CpuScope cpu(sampled()?&cpuEffects:nullptr);
+        // 0.3.154: sceneMs end = the last entry before effects apply; the read is billed to cpuEffects.
+        if(gateFrame&&!applied){QueryPerformanceCounter(&gateSceneEnd);gateSceneDraws=drawCalls;gateSceneReads=CpuScope::reads;}
+        if (applied || !enabled || failed || !projectionValid) return;
+        // RenderProfile: every applying frame (two clock reads), the FRAME cost effects series.
+        CpuScope frameCostScope(!sampled()&&NorthlightRenderThreadProbe::profiling()?&cpuEffects:nullptr);
+        // The scope outlives every SavedState, including nested depth passes.
+        // Game captures remain outside; the device gate stays held throughout.
+        ExtensionDevice::RawScope rawEffects(*ext);
+        D3DSURFACE_DESC desc;
+        if (!fullViewport(desc) || !resources(desc.Width, desc.Height, desc.Format) || !resolveDepth()) return;
+        SavedState saved(ext,&stateBlocks);
+        if (!saved.ok) return;
+        if(diagnostics())gpuProfile->beginFrame(frame,NorthlightRenderThreadProbe::sampleFrame(frame)); // otherwise no queries; mark/endFrame are no-ops
+        struct ProfileEnd { NorthlightGpuProfile* p; ~ProfileEnd(){p->endFrame();} } profileEnd{gpuProfile.get()};
+        IDirect3DTexture9* waterMask=water?water->maskTextureForDepth(worldMinDepth,worldMaxDepth):nullptr;
+        // discs and glare, then the wrap-ring visibility in the same group of
+        // 1x1 passes before the scene copy; the veil follows water (below).
+        const bool celestial=celestialDiscs&&world&&debugMode==0&&worldDebug==0;float sunElevation=0;
+        if(celestial){
+            NorthlightCelestial::Context sky;float inverseView[16],projection[3];
+            if(world->celestialContext(sky,inverseView,projection)){sunElevation=sky.sun.direction[2];
+                celestialDiscs->render(saved.targets[0],depthTex,waterMask,width,height,world->legacyFogParameters(),worldMinDepth,worldMaxDepth,nearZ,farZ,projection,inverseView,sky,celestialGlowHue());}
+        }
+        gpuProfile->mark("CelestialDiscs");
+        if(celestial){celestialDiscs->renderRing();gpuProfile->mark("CelestialRing");}
+        if (error(ext->StretchRect(saved.targets[0], nullptr, sceneSurface, nullptr, D3DTEXF_NONE), "copy scene")) return;
+        effectState();
         float constants[]={1.f/width,1.f/height,nearZ,farZ,scaleX,scaleY,.60f,(world&&world->ready()?0.f:.12f),.08f,2.f,float(debugMode),0,worldMinDepth,1.f/(worldMaxDepth-worldMinDepth),worldMaxDepth,0};
 
-        float waterFlags[]={waterMask?1.f:0.f,0,0,0};ext->SetPixelShaderConstantF(4,waterFlags,1);ext->SetTexture(3,waterMask);
-        ext->SetPixelShaderConstantF(0,constants,4);
-        ext->SetTexture(0,scene); ext->SetTexture(1,depthTex); ext->SetTexture(2,nullptr);
+        float waterFlags[]={waterMask?1.f:0.f,0,0,0};
+        auto bindEffects=[&](IDirect3DTexture9* ambient){
+            ext->SetPixelShaderConstantF(4,waterFlags,1);ext->SetTexture(3,waterMask);
+            ext->SetPixelShaderConstantF(0,constants,4);
+            ext->SetTexture(0,scene); ext->SetTexture(1,depthTex); ext->SetTexture(2,ambient);
+        };
+        bindEffects(nullptr);
         if (error(ext->SetRenderTarget(0,aoSurface),"AO render target")) return;
-        ext->SetPixelShader(constants[7]==0.f?aoContactPS:aoPS);
+        ext->SetPixelShader(constants[7]==0.f?aoContactBloomPS:aoPS);
         if (error(quad(width/2,height/2),"AO pass")) return;
         gpuProfile->mark("AO");
-        if (error(ext->SetRenderTarget(0,saved.targets[0]),"composition render target")) return;
-        ext->SetTexture(2,ao); ext->SetPixelShader(compositePS);
-        if (error(quad(width,height),"composition pass")) return;
-        gpuProfile->mark("AOComposite");
+        // 0.3.174 FOLD: with a ready world and no effect debug view, WorldComposite applies the
+        // AO and bloom (AOContactBloom: bloom rgb, AO alpha) to the scene copy itself, so the
+        // full-resolution composite and the world's colour copy are skipped. LEGACY (any other
+        // frame) keeps the composite before the world, exactly as before.
+        const bool fold=world&&debugMode==0&&world->ready();
+        auto legacyComposite=[&]{
+            if (error(ext->SetRenderTarget(0,saved.targets[0]),"composition render target")) return false;
+            ext->SetTexture(2,ao); ext->SetPixelShader(compositePS);
+            if (error(quad(width,height),"composition pass")) return false;
+            gpuProfile->mark("AOComposite");return true;
+        };
+        if(!fold&&!legacyComposite())return;
         if(world&&debugMode==0){
-            if(!world->render(saved.targets[0],depthTex,width,height,sceneFormat,nearZ,farZ,worldMinDepth,worldMaxDepth,worldDebug,gpuProfile.get(),waterMask)){
+            if(!world->render(saved.targets[0],depthTex,width,height,sceneFormat,nearZ,farZ,worldMinDepth,worldMaxDepth,worldDebug,gpuProfile.get(),waterMask,fold?scene:nullptr,fold?ao:nullptr)){
                 if(++worldSkippedFrames<=8||(worldSkippedFrames%120==0&&diagnostics()))
                     logf("WORLD skipped frame=%u tick=%lu context=%d ready=%d count=%u reason=%s",frame,(unsigned long)GetTickCount(),world->hasContext(),world->ready(),worldSkippedFrames,world->lastSkipReason());
                 worldSkipLast=world->lastSkipReason();if(!worldSkipRun++){worldSkipStart=GetTickCount();worldSkipFirst=worldSkipLast;}
@@ -513,6 +530,9 @@ class Device final : public GuardedMirrorDevice {
                 if(++worldSkipEpisodes<=32||diagnostics())logf("WORLD skip episode reason=%s last=%s frames=%u ms=%lu",worldSkipFirst,worldSkipLast,worldSkipRun,(unsigned long)(GetTickCount()-worldSkipStart));
                 worldSkipRun=0;
             }
+            // A folded frame the world did not composite (skipped or failed; it left the target
+            // untouched): re-establish the effect state it changed, then the legacy composite.
+            if(fold&&!world->composited){effectState();bindEffects(ao);if(!legacyComposite())return;}
         }
         if(kWaterEffectsEnabled&&world&&water&&debugMode==0&&worldDebug==0){NorthlightWaterContext waterContext;
             if(world->waterContext(waterContext,nearZ,farZ,worldMinDepth,worldMaxDepth))water->render(saved.targets[0],depthTex,width,height,sceneFormat,waterContext);
@@ -1161,7 +1181,7 @@ static HMODULE backend() {
     // Only DXVK keeps the legacy (unchecked, no RESZ dummy draw) rules; every
     // other runtime, including the system fallback, gets the native rules.
     if(module&&(result.fallback||(configured==NorthlightBackend::Kind::Legacy&&!last.info.dxvk)))selectedBackend=NorthlightBackend::Kind::Native;
-    logf("Northlight renderer 0.3.173; reference sun look (sun glow hue from native/sunHalo band, soft-shoulder glare, veil, sun-tinted haze), native sun/moon suppressed (F1b), lamps dimmed to 30 pct in direct sun, native moon02 skipped by texture identity, no game bytes in the DLL, MEMREAD self-read profile (RenderProfile), soft sun removal in shadow, jump-stable shadow anchor, geometry coverage hold with travel lead, steadier animated shadow edges (near 5x5 tent, still-camera shadow history), native blob shadows identified in 16-bit A1R5G5B5 uploads, bilinear lighting history, near capture reserve for the player and companions, remembered rigid prop shadows (drawn-by-game states, windowed held); backend=%s path=%ls loaded=%d error=%lu",
+    logf("Northlight renderer 0.3.174; reference sun look (sun glow hue from native/sunHalo band, soft-shoulder glare, veil, sun-tinted haze), native sun/moon suppressed (F1b), lamps dimmed to 30 pct in direct sun, native moon02 skipped by texture identity, no game bytes in the DLL, MEMREAD self-read profile (RenderProfile), soft sun removal in shadow, jump-stable shadow anchor, geometry coverage hold with travel lead, steadier animated shadow edges (near 5x5 tent, still-camera shadow history), native blob shadows identified in 16-bit A1R5G5B5 uploads, bilinear lighting history, near capture reserve for the player and companions, remembered rigid prop shadows (drawn-by-game states, windowed held), AO and bloom folded into the world composite; backend=%s path=%ls loaded=%d error=%lu",
          NorthlightBackend::name(configured),last.path.c_str(),module!=nullptr,module?0ul:(last.error?last.error:(unsigned long)ERROR_INVALID_PARAMETER));
     logAttempts(result.attempts);
     logHostExecutable(sys.selfPath);

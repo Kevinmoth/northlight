@@ -128,14 +128,34 @@ float4 AOImpl(float2 uv, bool colorBounce)
 }
 
 float4 AO(float2 uv : TEXCOORD0) : COLOR0 { return AOImpl(uv, true); }
-// World GI already supplies this term. A separate entry makes the unused
-// colour fetches disappear at compile time, retaining the identical AO alpha.
-float4 AOContact(float2 uv : TEXCOORD0) : COLOR0 { return AOImpl(uv, false); }
 
 float3 Bright(float3 c)
 {
     float luminance = dot(c, float3(0.2126, 0.7152, 0.0722));
     return c * saturate((luminance - 0.72) / 0.28);
+}
+
+// World GI already supplies the colour bounce: this entry drops the unused colour fetches,
+// retaining the identical AO alpha. 0.3.174: rgb carries Composite's bloom, pre-weighted
+// (.125 x Options.x), for every pixel including sky and water, so the world composite can
+// fold the AO composite; Composite itself ignores it (Lighting.w is 0 with a ready world).
+// Bright() as one weight: saturate((luminance-.72)/.28) written as a single mad (slot budget).
+float3 BrightTap(float3 c, float3 sum)
+{
+    return mad(c, saturate(mad(dot(c, float3(0.2126, 0.7152, 0.0722)), 1.0 / 0.28, -0.72 / 0.28)), sum);
+}
+
+float4 AOContactBloom(float2 uv : TEXCOORD0) : COLOR0
+{
+    // Composite's bloom taps: the centre (x4) and 4 px along each axis. Scene has one level,
+    // so tex2D (texld, before any flow control) reads what tex2Dlod does, in fewer slots.
+    float4 b = ImageAndClip.xyxy * float4(4, 0, 0, 4);
+    float3 bloom = BrightTap(tex2D(Scene, uv).rgb, 0) * 4.0;
+    bloom = BrightTap(tex2D(Scene, uv + b.xy).rgb, bloom);
+    bloom = BrightTap(tex2D(Scene, uv - b.xy).rgb, bloom);
+    bloom = BrightTap(tex2D(Scene, uv + b.zw).rgb, bloom);
+    bloom = BrightTap(tex2D(Scene, uv - b.zw).rgb, bloom);
+    return float4(bloom * (0.125 * Options.x), AOImpl(uv, false).a);
 }
 
 float3 NeighbourNormal(float2 uv, float3 p)

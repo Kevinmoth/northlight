@@ -36,7 +36,8 @@ PRE_LIFT_COMPOSITE_SLOTS = 467
 # Expected after the lift-colour compile. WorldComposite: the lift mad reads c35.yzw instead of a def, the
 # same instruction, so 467 (by inspection of WorldComposite.bin.asm). SourceVisibilityPS: +8 ring taps,
 # estimated 440-460 but not knowable without the compiler.
-LIFT_COMPOSITE_SLOTS = 467
+# 0.3.174: WorldComposite folds the AO/bloom composite (s10 AO in the tent loop, bloom, original'): 498.
+LIFT_COMPOSITE_SLOTS = 498
 SOURCE_VISIBILITY_SLOTS = 492  # compiled at integration (was 281 before the wrap ring)
 BEFORE = {
     'WorldNormals': '1e8d22d66a1022bad26c930dd719398eba02c22179084a275f4fe52bf54c1db5',

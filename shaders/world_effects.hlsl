@@ -17,6 +17,7 @@ float4 RegionalFogInfo : register(c31); // world node0 XY, inverse field span, n
 float4 WaterInfo : register(c30);
 float4 RemovalInfo : register(c30); // TemporalLight only: y 1 when a lit source is drawn, z 1/(summed source weight), w disc radius in half-res pixels at view distance 1
 sampler2D ProbeMetadata : register(s10); // exact integer world-cell xyz, first-valid time w (-1 invalid)
+sampler2D AmbientOcclusion : register(s10); // 0.3.174 TemporalLight/WorldComposite: half-res contact AO (a), pre-weighted bloom (rgb), LINEAR; neutral (0,0,0,1) unless the world composites
 
 float4 ImageClip : register(c0); // invWidth, invHeight, near, far
 float4 Projection : register(c1); // signed projection X,Y,Zsign,worldMinZ
@@ -443,8 +444,9 @@ float4 LocalDirect(float2 uv:TEXCOORD0):COLOR0 {
 // light, because the albedo estimate saturates there.
 // The composite applies correction*min(transported/baseline,T); as a fraction of the
 // transported colour that is correction*T/removalScale.
+// legacyT>=.001 keeps the first operand >=.00015, so the scene term needs no floor.
 float3 removalScale(float3 baseline,float3 scene,float3 fog,float legacyT){
-    return max(legacyT*max(baseline,.15),max(scene-min(fog,scene),.0001));
+    return max(legacyT*max(baseline,.15),scene-min(fog,scene));
 }
 float3 smoothRemoval(float4 current,float2 q,float2 base,float2 size,float z){
     float amount=saturate((1-current.a*RemovalInfo.z)/GridInfo.z);
@@ -454,7 +456,9 @@ float3 smoothRemoval(float4 current,float2 q,float2 base,float2 size,float z){
     [branch]if(amount>1.0/256){
         float legacyT=max(mad(LegacyFog.w,saturate(pow(max(mad(z*Projection.z,LegacyFog.x,LegacyFog.y),0),LegacyFog.z))-1,1),.001);
         float3 fog=(1-legacyT)*LegacyFogColor.rgb;
-        float3 scale=removalScale(tex2Dlod(BaselineLighting,float4(q,0,0)).rgb,tex2Dlod(Scene,float4(q,0,0)).rgb,fog,legacyT);
+        // 0.3.174: the Scene copy precedes the contact AO when the world composites; apply it here
+        // (a neutral 1 otherwise) so the removal sees the colour the composite relights.
+        float3 scale=removalScale(tex2Dlod(BaselineLighting,float4(q,0,0)).rgb,tex2Dlod(Scene,float4(q,0,0)).rgb*tex2Dlod(AmbientOcclusion,float4(q,0,0)).a,fog,legacyT);
         float3 ratio=current.rgb*legacyT/scale;
         float radius=clamp(RemovalInfo.w/z,3,16);
         float depthScale=-1.442695/max(.25,z*.03);
@@ -464,7 +468,7 @@ float3 smoothRemoval(float4 current,float2 q,float2 base,float2 size,float z){
             float2 tq=(clamp(floor(base+.5+dir*(sqrt(t*(1.0/24))*radius)),0,size-1)+.5)/size;
             float4 light=tex2Dlod(LightingBuffer,float4(tq,0,0));
             float w=exp2(abs(viewDistance(normalizedDepth(depthUV(tq)))-z)*depthScale)*saturate(1-abs(light.a-current.a)*visibilityScale);
-            sum+=max(light.rgb*legacyT/removalScale(tex2Dlod(BaselineLighting,float4(tq,0,0)).rgb,tex2Dlod(Scene,float4(tq,0,0)).rgb,fog,legacyT),-.45)*w;total+=w;
+            sum+=max(light.rgb*legacyT/removalScale(tex2Dlod(BaselineLighting,float4(tq,0,0)).rgb,tex2Dlod(Scene,float4(tq,0,0)).rgb*tex2Dlod(AmbientOcclusion,float4(tq,0,0)).a,fog,legacyT),-.45)*w;total+=w;
             dir=float2(dir.x*-.7373688-dir.y*.6754903,dir.x*.6754903-dir.y*.7373688);t+=1;
         }
         result=lerp(ratio,sum/total,amount)*scale/legacyT;
@@ -756,18 +760,16 @@ float3 horizonHaze(float3 color,float2 uv,float viewZ,bool sky) {
 float4 WorldComposite(float2 uv:TEXCOORD0):COLOR0 {
     float4 original=tex2Dlod(Scene,float4(uv,0,0));
     float2 centerUV=depthUV(uv);
-    float d=normalizedDepth(centerUV);float3 color=original.rgb;
+    float d=normalizedDepth(centerUV);
     float liquid=waterDistance(centerUV,d);float viewZ=liquid>0?liquid:viewDistance(d);
     // Original Terrain VS uses SIGNED view Z, including right-handed cameras.
     // Unknown fog uploads the safe identity (0,1,1,0), giving T=1 exactly.
     float legacyT=mad(LegacyFog.w,saturate(pow(max(mad(viewZ*Projection.z,LegacyFog.x,LegacyFog.y),0),LegacyFog.z))-1,1);
-    // Terrain fog is only an estimate on interior/blended materials. It cannot
-    // account for more light than the observed color in any channel.
-    float3 fogPart=min((1-legacyT)*LegacyFogColor.rgb,original.rgb);
     bool relight=d<.99999&&liquid<=0;
         float3 baseline=0;
         float3 bounce=0;float shadow=0,total=0,closest=1e20;
         float4 fallbackLight=0;float3 fallbackBase=0;
+        float ao=0,fallbackAO=1; // 0.3.174: contact AO on the lighting grid (s10)
         // Fog uses the same four half-resolution texel centres, but DIFFERENT
         // depth weights and fallback. Share only coordinates/raw depth reads;
         // retain receiverDistance (including water) for each fog sample.
@@ -790,8 +792,9 @@ float4 WorldComposite(float2 uv:TEXCOORD0):COLOR0 {
             float weight=blend.x*blend.y*exp(-delta/max(.15,center*.01));
             float4 light=tex2Dlod(LightingBuffer,float4(q,0,0));
             float3 lit=tex2Dlod(BaselineLighting,float4(q,0,0)).rgb;
-            bounce+=light.rgb*weight;shadow+=light.a*weight;baseline+=lit*weight;total+=weight;
-            if(delta<closest){closest=delta;fallbackLight=light;fallbackBase=lit;}
+            float occlusion=tex2Dlod(AmbientOcclusion,float4(q,0,0)).a;
+            bounce+=light.rgb*weight;shadow+=light.a*weight;baseline+=lit*weight;ao+=occlusion*weight;total+=weight;
+            if(delta<closest){closest=delta;fallbackLight=light;fallbackBase=lit;fallbackAO=occlusion;}
             }
             float fogDelta=abs(receiverDistance(depthUV(q),sampleDepth)-viewZ);
             float4 fogSample=tex2Dlod(FogBuffer,float4(q,0,0));
@@ -800,6 +803,17 @@ float4 WorldComposite(float2 uv:TEXCOORD0):COLOR0 {
             if(fogDelta<fogClosest){fogClosest=fogDelta;fogFallback=fogSample;}
         }
     float4 fog=fogTotal>.00001?fogSum*(1/fogTotal):fogFallback;
+    // 0.3.174: the contact AO and bloom composite, folded in (it ran as a separate full-res
+    // pass before). Same result as that pass's tail: lit=original*ao, plus bloom where not
+    // saturated. AO follows this pass's depth-weighted tent (1 on sky and water); bloom is the
+    // hardware-bilinear half-res value, like the old pass's unfiltered glow.
+    ao=relight?(total<.02?fallbackAO:ao/total):1;
+    float3 bloom=tex2Dlod(AmbientOcclusion,float4(uv,0,0)).rgb;
+    original.rgb=saturate(mad(bloom,1-saturate(original.rgb*ao),original.rgb*ao));
+    float3 color=original.rgb;
+    // Terrain fog is only an estimate on interior/blended materials. It cannot
+    // account for more light than the observed color in any channel.
+    float3 fogPart=min((1-legacyT)*LegacyFogColor.rgb,original.rgb);
     if(relight){
         // Thin receivers whose depth matches none of the four texels keep the
         // nearest-depth texel instead of losing their shadow and GI entirely.

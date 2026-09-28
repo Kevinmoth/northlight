@@ -25,7 +25,7 @@ state, and writes it back as a correction.
    The 0.3.158 output for the comparison is the emulation's reference (off) path."""
 import sys; from pathlib import Path; sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root
 import northlight_paths as fp; fp.use_source_modules()
-import json,math,re,struct
+import json,math,random,re,struct
 
 hlsl=fp.src('world_effects.hlsl').read_text();w=fp.src('world_renderer.h').read_text();q=fp.src('quality_settings.h').read_text();r=fp.src('renderer.cpp').read_text()
 ini=fp.src('windows-package/northlight-quality.ini').read_text();readme=fp.src('windows-package/README.txt').read_text(encoding='utf-8')
@@ -59,7 +59,10 @@ checks['no quality key (always on): no ShadowRemovalSmoothing in settings, ini, 
 # The emulation below mirrors these shader constants; fail loudly if the shader moves.
 for needle in ('clamp(RemovalInfo.w/z,3,16)','-1.442695/max(.25,z*.03)','2*RemovalInfo.z/GridInfo.z','saturate((1-current.a*RemovalInfo.z)/GridInfo.z)','[branch]if(amount>1.0/256){',
                '[loop]for(int i=0;i<24;++i)','sqrt(t*(1.0/24))','float3 sum=max(ratio,-.45);float total=1,t=.5;float2 dir=float2(1,0);',
-               'return max(legacyT*max(baseline,.15),max(scene-min(fog,scene),.0001));','float3 ratio=current.rgb*legacyT/scale;',
+               'return max(legacyT*max(baseline,.15),scene-min(fog,scene));','float3 ratio=current.rgb*legacyT/scale;',
+               # 0.3.174: both Scene reads carry the contact AO (s10; a neutral 1 unless the world folds it)
+               'tex2Dlod(Scene,float4(q,0,0)).rgb*tex2Dlod(AmbientOcclusion,float4(q,0,0)).a,fog,legacyT);',
+               'tex2Dlod(Scene,float4(tq,0,0)).rgb*tex2Dlod(AmbientOcclusion,float4(tq,0,0)).a,fog,legacyT),-.45)*w;total+=w;',
                'float legacyT=max(mad(LegacyFog.w,saturate(pow(max(mad(z*Projection.z,LegacyFog.x,LegacyFog.y),0),LegacyFog.z))-1,1),.001);',
                'float3 fog=(1-legacyT)*LegacyFogColor.rgb;','sum+=max(light.rgb*legacyT/removalScale(','fog,legacyT),-.45)*w;total+=w;',
                'dir=float2(dir.x*-.7373688-dir.y*.6754903,dir.x*.6754903-dir.y*.7373688);t+=1;',
@@ -75,10 +78,16 @@ def legacy_t(z,fog):
     """WorldComposite's legacyT; fog=(LegacyFog c25, Projection.z sign)."""
     p,sign=fog;return p[3]*(min(max(max(z*sign*p[0]+p[1],0)**p[2],0),1)-1)+1
 def removal_scale(base,scene,fogc,T):
-    return [max(T*max(b,.15),max(s-min(f,s),.0001)) for b,s,f in zip(base,scene,fogc)]
-def smooth(light,base,dist,scene,x,y,size,on,inv,pixel,fog=((0,1,1,0),1),fogcolor=(0,0,0),strength=.85):
-    """light/base/scene(x,y) -> rgba correction / rgb baseline / rgb scene at a half-res texel; dist -> view distance.
-    Returns TemporalLight's current.rgb."""
+    return [max(T*max(b,.15),s-min(f,s)) for b,s,f in zip(base,scene,fogc)]
+# 0.3.174 dropped the .0001 floor on the scene term: T>=.001 keeps the first operand >=.00015.
+_r=random.Random(174)
+for _ in range(20000):
+    T=max(_r.random(),.001);b=[_r.random() for _ in range(3)];s=[_r.random() for _ in range(3)];f=[_r.random() for _ in range(3)]
+    assert removal_scale(b,s,f,T)==[max(T*max(x,.15),max(y-min(z,y),.0001)) for x,y,z in zip(b,s,f)]
+def smooth(light,base,dist,scene,x,y,size,on,inv,pixel,fog=((0,1,1,0),1),fogcolor=(0,0,0),strength=.85,ao=lambda x,y:1.):
+    """light/base/scene(x,y) -> rgba correction / rgb baseline / rgb scene at a half-res texel; dist -> view distance;
+    ao(x,y) -> the contact AO alpha on s10 (0.3.174; 1 unless the world folds it). Returns TemporalLight's current.rgb."""
+    unfolded=scene;scene=lambda x,y:[c*ao(x,y) for c in unfolded(x,y)]
     cur=light(x,y);z=dist(x,y)
     if not on:return cur[:3]
     amount=min(max((1-cur[3]*inv)/strength,0),1)

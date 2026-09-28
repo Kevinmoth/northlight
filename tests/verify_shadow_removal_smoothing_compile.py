@@ -36,8 +36,10 @@ shaders=manifest['shaders'];checks={}
 changed=sorted(k for k,v in shaders.items() if v['sha256']!=BEFORE.get(k))
 checks[f'only TemporalLight (and the WorldComposite) changed (changed: {changed})']=changed==['LocalDirect','SourceVisibilityPS','TemporalLight','WorldComposite','WorldLighting'] and sorted(shaders)==sorted(BEFORE)
 t=shaders['TemporalLight']
-checks[f"TemporalLight {t['static_instruction_slots']}/512 slots, {t['temporary_registers']}/32 temporaries (0.3.158: 217, 11)"]=t['static_instruction_slots']<=512 and t['temporary_registers']<=32 and t['target']=='ps_3_0'
-checks[f"TemporalLight samplers {t['samplers']} = 0.3.158 [1,8,14,15] + Scene s0 + BaselineLighting s12"]=t['samplers']==[0,1,8,12,14,15]
+# 0.3.174 (r72 decisions-g1 §8): an exact budget of 509 (the ps_3_0 minimum 512 is the hard gate). Headroom is
+# exhausted: any later TemporalLight change must free slots first, or this fails loudly.
+checks[f"TemporalLight {t['static_instruction_slots']} slots == 509 (<= 512), {t['temporary_registers']}/32 temporaries (0.3.158: 217, 11)"]=t['static_instruction_slots']==509<=512 and t['temporary_registers']<=32 and t['target']=='ps_3_0'
+checks[f"TemporalLight samplers {t['samplers']} = 0.3.158 [1,8,14,15] + Scene s0 + AO/bloom s10 + BaselineLighting s12"]=t['samplers']==[0,1,8,10,12,14,15]
 checks['every .bin matches its manifest hash']=all(hashlib.sha256(fp.src(f'{k}.bin').read_bytes()).hexdigest()==v['sha256'] for k,v in shaders.items())
 for name,ok in checks.items():print(('PASS ' if ok else 'FAIL ')+name)
 assert all(checks.values())
