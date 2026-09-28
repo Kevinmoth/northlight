@@ -496,9 +496,17 @@ TemporalOutput TemporalLight(float2 uv:TEXCOORD0) {
     if(abs(hz-w)>max(.25,w*.03))return o;
     // 0.3.171: bilinear history (s14 LINEAR in this pass). The nearest history texel drifted
     // up to .75 half-res px while moving (sign flipping with the flow's fraction: waves on
-    // static edges). A per-tap depth test does not fit the slot budget (515): the depth test
-    // stays at the nearest texel, and a half-texel mix at a moving silhouette is bounded by the box.
-    float4 history=tex2Dlod(LightHistory,float4(puv,0,0));
+    // static edges). A per-tap weighted depth test does not fit the slot budget (515): read
+    // bilinearly only where all four footprint depths agree with this surface; elsewhere
+    // (silhouettes) read the nearest texel's centre, which LINEAR returns unmixed, as before.
+    float tol=max(.25,w*.03);
+    float2 texel=1/half,corner=(floor(puv*half-.5)+.5)*texel; // CLAMP addressing repeats the border
+    float4 footprint=float4(tex2Dlod(DepthHistory,float4(corner,0,0)).r,
+        tex2Dlod(DepthHistory,float4(corner+float2(texel.x,0),0,0)).r,
+        tex2Dlod(DepthHistory,float4(corner+float2(0,texel.y),0,0)).r,
+        tex2Dlod(DepthHistory,float4(corner+texel,0,0)).r);
+    bool agree=all(abs(footprint-w)<=tol);
+    float4 history=tex2Dlod(LightHistory,float4(agree?puv:pq,0,0));
     float4 lo=current,hi=current;
     [unroll]for(int i=0;i<4;++i){
         float2 offset=float2(i==0?-1:(i==1?1:0),i==2?-1:(i==3?1:0));
