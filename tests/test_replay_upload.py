@@ -93,6 +93,7 @@ class WorldRenderer {public:
  bool forceBulkPressure=false,denyAllGrowth=false;
  bool admitsGrowth(const char* kind,size_t){if(denyAllGrowth&&!std::strcmp(kind,"replay-growth"))return false;return !forceBulkPressure||std::strcmp(kind,"replay-growth")||replayGpuCache.bytes()==0;}
  bool check(HRESULT h,const char*){return !FAILED(h);}
+ void deferLogf(const char*,...){} /* 0.3.176: the sampled MODEL GPU lines are written from endFrame */
  static UINT roundBuffer(UINT bytes,size_t){return bytes;} // exact allocations in fake device
  explicit WorldRenderer(IDirect3DDevice9* dev):d(dev){}
  ~WorldRenderer(){replays.clear();replayGpuCache.clear();for(auto& p:replayVerticesGPU)drop(p);drop(replayIndicesGPU);}

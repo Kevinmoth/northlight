@@ -62,10 +62,10 @@
         // per candidate and per accepted draw (captured: replays + held; a rejected candidate costs about nothing).
         const unsigned captureReads=replayCaptureCalls+capturePhases.clockReads+actorPhases.clockReads;
         const double captureNetMs=std::max(0.0,double(replayCaptureTicks)*tick-double(captureReads)*clock);
-        if(profileSampled())logf("WORLD profile frame worldFrame=%u capture=%s cascades=%c%c%c%c (sun near,far moon near,far: R render U reuse D defer - off) probe=%s probeRan=%u captured=%zu unused=%zu unusedBytes=%zu heldUnselected=%zu giPacked=%zu captureUsPerCandidate=%.3f unusedCaptureMsEstimate=%.3f captureClockReads=%u captureNetMs=%.3f captureNetUsPerCandidate=%.3f captureNetUsPerAccepted=%.3f uploadWindowMs=%.3f",
+        if(profileSampled())logf("WORLD profile frame worldFrame=%u capture=%s cascades=%c%c%c%c (sun near,far moon near,far: R render U reuse D defer - off) probe=%s probeRan=%u captured=%zu unused=%zu unusedBytes=%zu heldUnselected=%zu giPacked=%zu captureUsPerCandidate=%.3f unusedCaptureMsEstimate=%.3f captureClockReads=%u captureNetMs=%.3f captureNetUsPerCandidate=%.3f captureNetUsPerAccepted=%.3f uploadWindowMs=%.3f staging=%d probeUpload=%d",
             frames,captureMode==CaptureSkipped?"skipped":captureMode==CaptureFresh?"fresh":"none",cascadeActions[0],cascadeActions[1],cascadeActions[2],cascadeActions[3],
             NorthlightRenderThreadProbe::probeModeName(replayProbeMode),unsigned(replayProbeRanThisFrame),captured,unused,unusedBytes,heldShadowReplays.size(),replayGiPacked.size(),perCandidateUs,double(unused)*perCandidateUs/1000.0,
-            captureReads,captureNetMs,replayCaptureCalls?captureNetMs*1000.0/replayCaptureCalls:0.0,captured?captureNetMs*1000.0/double(captured):0.0,uploadWindowTicks<0?-1.0:double(uploadWindowTicks)*tick);
+            captureReads,captureNetMs,replayCaptureCalls?captureNetMs*1000.0/replayCaptureCalls:0.0,captured?captureNetMs*1000.0/double(captured):0.0,uploadWindowTicks<0?-1.0:double(uploadWindowTicks)*tick,int(frameStaging),int(frameProbeUpload));
         replayProfileUsed.clear();replayGiPacked.clear();uploadWindowTicks=-1;
     }
 

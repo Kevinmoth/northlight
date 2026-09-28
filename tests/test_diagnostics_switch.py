@@ -45,7 +45,7 @@ KEEP={
  'WORLD GPU diagnostic':'user-triggered GPU capture (F12 debug)','WORLD slow submission':'capped: first 12','POINT pass skipped':'capped: first 12',
  'CELESTIAL disabled':'error','CELESTIAL native texture identity':'error','CELESTIAL early draw skipped':'capped: first 4',
  'SHADOWBLOB candidate':'capped: first 4','SHADOWBLOB identified':'capped: first 8','WATER disabled':'error','WATER explicit recovery':'user-triggered',
- 'WATER registered':'one-off: shader registration','WATER mask patch skipped':'capped: first 8 (patch rejected or patched hash mismatch; that shader only)','GPU profile':'gated: no sample opens when off (beginFrame/poll gated)','%s':'gpu_profile report: gated as above',
+ 'WATER registered':'one-off: shader registration','WATER mask patch skipped':'capped: first 8 (patch rejected or patched hash mismatch; that shader only)','GPU profile':'gated: no sample opens when off (beginFrame/poll gated)','%s':'gpu_profile report: gated as above; 0.3.176 flushDeferredLogs(): lines formatted at their gated deferLogf sites',
 }
 def conditions(s,pos):
     out=[];j=max(s.rfind(';',0,pos),s.rfind('{',0,pos),s.rfind('}',0,pos));out.append(s[j+1:pos])
@@ -60,9 +60,9 @@ def conditions(s,pos):
 gated,kept,unknown=[],[],[]
 for f in FILES:
     s=fp.src(f).read_text()
-    for m in re.finditer(r'\blogf\(',s):
+    for m in re.finditer(r'\b(?:logf|deferLogf)\(',s):
         if re.search(r'(void|Include after the renderer\'s|Include after)\s*$',s[max(0,m.start()-40):m.start()]):continue
-        fmt=re.match(r'logf\("([^"]{0,60})',s[m.start():]);fmt=fmt.group(1) if fmt else s[m.start():m.start()+30].replace('\n',' ')
+        fmt=re.match(r'(?:logf|deferLogf)\("([^"]{0,60})',s[m.start():]);fmt=fmt.group(1) if fmt else s[m.start():m.start()+30].replace('\n',' ')
         if fmt.startswith('const char*'):continue # comment text
         where=f'{f}:{s.count(chr(10),0,m.start())+1}'
         if any(g in c for c in conditions(s,m.start())[:6] for g in GATES):gated.append((where,fmt));continue
@@ -88,7 +88,7 @@ checks={
  'RenderProfile needs Diagnostics (its log gates count as diagnostics gates)':'inline bool renderProfile(const Settings& s){return s.diagnostics&&s.renderProfile;}' in fp.src('quality_settings.h').read_text(),
  'near capture reserve counters only on the sampled MODEL frame capture line':(lambda t:t.count('nearAdmitted=%u nearBytes=%zu nearRefused=%u nearSelf=%d nearReserve=%zu')==1
    and 'if(captureSampled)logf("MODEL frame capture skinnedCandidates=' in t[t.rindex('\n',0,t.index('nearAdmitted=%u')):t.index('nearAdmitted=%u')])(w),
- 'RIGID event lines (0.3.173): Diagnostics only, rate-limited and capped; recording off otherwise':(lambda t:t.count('logf("RIGID event ')==1
+ 'RIGID event lines (0.3.173): Diagnostics only, rate-limited and capped; recording off otherwise':(lambda t:t.count('deferLogf("RIGID event ')==1
    and 'if(NorthlightDiagnostics::enabled()){rigidMemory.takeEvents(rigidEvents);' in t and 'rigidMemory.events(NorthlightDiagnostics::enabled());' in t
    and 'if(!rigidEventTokens||rigidEventLines>=RigidEventLines){++rigidEventSuppressed;continue;}' in t)(fp.src('world_rigid_memory.inl').read_text()),
  'celestial mask counters (0.3.175): on the gated CELESTIAL line, the clock only with RenderProfile':(lambda t:'const int64_t started=NorthlightRenderThreadProbe::profiling()?QpcClock::now():0;' in t
@@ -98,3 +98,56 @@ checks={
 for name,ok in checks.items():print(('PASS ' if ok else 'FAIL ')+name)
 assert all(checks.values())
 print('PASS Diagnostics=0 audit: every periodic line gated, only start-up/settings/error/capped/event/user-triggered lines remain')
+
+# 0.3.176 (U0/S0): no log write inside the selection and upload effects buckets. From the start of
+# WorldRenderer::render() to its Upload mark (the selection span, then the upload span), every
+# function reachable by an unqualified call (member functions of the world renderer's files; calls on
+# other objects and namespaces excluded) is searched for logf(. Early exits (blocks ending in
+# return false) are excluded: they never reach the Upload mark, so their time rolls into a later
+# bucket. What remains may only be error or one-off event lines; the sampled lines (MODEL GPU
+# cache/bulk/policy/clears, MODEL shadow actors/selection, RIGID memory/event, WORLD actor packets)
+# are deferLogf, written by flushDeferredLogs() from endFrame(). Counterfactual: with deferLogf
+# turned back into logf the audit must find those lines.
+SPAN_FILES=['world_renderer.h','world_shadow_experiment.inl','world_point_rendering.inl','world_replay_probe.inl','world_rigid_memory.inl','world_diagnostics.h']
+SPAN_ALLOWED={'WORLD DISABLED':'error (check())','GEOMETRY MEMORY':'warning: allocation deferral','WORLD pending mesh released':'event (0.3.156)',
+ 'SHADOW experiment selection allocation failed':'error','WORLD streaming retry':'capped error','WORLD staged mesh committed':'event: one per commit'}
+SPAN_DEFERRED=['MODEL GPU cache','MODEL bulk sharing','MODEL GPU policy','MODEL GPU clears','MODEL shadow actors','MODEL shadow selection','RIGID memory','RIGID event','WORLD actor packets']
+KEYWORDS={'if','for','while','switch','return','catch','sizeof','defined','decltype','static_assert','alignof','noexcept','do','else','try','new','delete'}
+def uncomment(t):return re.sub(r'/\*.*?\*/','',re.sub(r'//[^\n]*','',t),flags=re.S)
+def span_logs(texts):
+    defs={}
+    for t in texts:
+        for m in re.finditer(r'\b([A-Za-z_]\w*)\s*\(([^;{}()]*(?:\([^;{}()]*\)[^;{}()]*)*)\)\s*(?:const\s*)?(?:noexcept\s*)?(?:->\s*[\w:<>*&\s]+)?\{',t):
+            pre=t[max(0,m.start()-200):m.start()]
+            if m.group(1) in KEYWORDS or not re.search(r'[\w>*&]\s*$',pre) or re.search(r'(=|return|,|\()\s*$',pre):continue
+            i=m.end()-1;depth=0
+            for k in range(i,len(t)):
+                depth+=(t[k]=='{')-(t[k]=='}')
+                if depth==0:break
+            defs.setdefault(m.group(1),[]).append(t[i:k+1])
+    w=texts[0];a=w.index('{',w.index('bool render(IDirect3DSurface9* targetSurface'));b=w.index('bucket(NorthlightEffectsBuckets::Upload);',a)
+    root=re.sub(r'\{[^{}]*return false;\s*\}','{}',w[a:b])
+    seen=set();stack=[root];logs=set()
+    while stack:
+        body=stack.pop()
+        logs.update(re.findall(r'\blogf\(\s*"([^"]{0,60})',body))
+        for m in re.finditer(r'(?<![\w.>:])([A-Za-z_]\w*)\s*\(',body):
+            if m.group(1) in defs and m.group(1) not in seen:seen.add(m.group(1));stack.extend(defs[m.group(1)])
+    return logs,seen
+texts=[uncomment(fp.src(f).read_text()) for f in SPAN_FILES]
+logs,reached=span_logs(texts)
+print(f'U0/S0 span audit: {len(reached)} functions reachable in the selection and upload spans')
+for fmt in sorted(logs):print('  SPAN LOG',fmt,'--',next((v for k,v in SPAN_ALLOWED.items() if fmt.startswith(k)),'NOT ALLOWED'))
+bad=[fmt for fmt in logs if not any(fmt.startswith(k) for k in SPAN_ALLOWED)]
+counter,_=span_logs([t.replace('deferLogf(','logf(') for t in texts])
+missed=[k for k in SPAN_DEFERRED if not any(fmt.startswith(k) for fmt in counter)]
+ra=fp.src('renderer.cpp').read_text();ao=ra.index('effectsBuckets.mark(Bucket::AO);')
+span_checks={
+ 'U0/S0: no logf( reachable between the selection/upload bucket marks except errors and one-off events':not bad,
+ 'U0/S0 counterfactual: the sampled lines are reachable there when not deferred':not missed and {'selectShadowReplays','uploadReplay','rigidMemoryInject','finishActorScene','uploadLiveTerrain'}<=reached,
+ 'U0/S0: the proxy has no log line from the AO mark to world->render()':'logf(' not in ra[ao:ra.index('world->render(',ao)],
+ 'U0/S0: deferred lines are written from endFrame() before anything else':'void endFrame(bool retainPool=true){\n        flushDeferredLogs();' in fp.src('world_renderer.h').read_text(),
+}
+for name,ok in span_checks.items():print(('PASS ' if ok else 'FAIL ')+name)
+assert all(span_checks.values()),(bad,missed)
+

@@ -23,6 +23,8 @@
     std::unordered_map<IDirect3DVertexShader9*,bool> rigidAudited;
     NorthlightRigidGeometry::PlacementIndex rigidIndex;static constexpr size_t RigidIndexStep=2048; /* ~0.1 ms */
     std::string rigidMap;DWORD rigidMapMs=0;unsigned rigidInjected=0;double rigidObserveMs=0;
+    // 0.3.176 (D2): placements the index stepped this frame and (RenderProfile sample frames) its time; -1: not measured.
+    size_t rigidIndexItems=0;double rigidIndexMs=-1;
     NorthlightRigidMemory::DrawKeySet rigidDrawKeys; /* (original shader, primitives) of every remembered draw: the drawn test at capture */
     std::vector<NorthlightRigidMemory::Event> rigidEvents;unsigned rigidEventTokens=0,rigidEventLines=0,rigidEventSuppressed=0;DWORD rigidEventRefillMs=0;
     static constexpr unsigned RigidEventsPerSecond=20,RigidEventLines=2000; /* RIGID event lines: rate and session cap */
@@ -48,10 +50,13 @@
     // track waits for the screen (rigidMemory.screening()).
     void rigidIndexStep(){
         if(!staticScene||staticScene->map!=lastRequest.map)return;auto& x=rigidIndex;const auto& all=staticScene->placements;
+        const bool timed=profileSampled();const auto started=timed?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
         if(x.scene!=staticScene.get()||x.revision!=rigidSceneRevision(*staticScene))x.reset(staticScene.get(),rigidSceneRevision(*staticScene));
+        const size_t first=x.next;
         for(const size_t end=std::min(all.size(),x.next+RigidIndexStep);x.next<end;++x.next){const auto& place=all[x.next];
             if(place.category==1||place.category==3)x.add(place.translation.x,place.translation.y,place.translation.z,std::uint32_t(x.next));}
-        x.complete=x.next==all.size();
+        x.complete=x.next==all.size();rigidIndexItems+=x.next-first;
+        if(timed)rigidIndexMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
     }
     // The index is complete for this map's current static scene.
     bool rigidIndexCurrent()const{
@@ -113,7 +118,7 @@
     }
     // Before retainSelected: observe, decide, copy the replays of remembered groups.
     void rigidMemoryObserve(){
-        rigidInjected=0;rigidObserveMs=0;
+        rigidInjected=0;rigidObserveMs=0;rigidIndexItems=0;rigidIndexMs=-1;
         if(!effects.shadows){rigidMemoryClear();return;}
         const auto started=std::chrono::steady_clock::now();const DWORD now=GetTickCount();
         if(lastRequest.map!=rigidMap){rigidMemoryClear();rigidMemory.resetStats();rigidMap=lastRequest.map;rigidMapMs=now;}
@@ -155,17 +160,17 @@
                     replays.emplace_back(p.release());++rigidInjected;}});
         }
         if(captureSampled){const auto& s=rigidMemory.stats();const double ms=rigidObserveMs+std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
-            logf("RIGID memory tracks=%zu entries=%zu injected=%u seen=%zu held=%zu static=%zu mobile=%zu droppedInView=%llu droppedRange=%llu droppedTeleport=%llu droppedMoved=%llu droppedUnseen=%llu evicted=%llu remembered=%llu indexComplete=%d bytes=%zu ms=%.3f drawn=%zu drawnNotCaptured=%zu liveUnselected=%zu notDrawn=%zu drawnMoved=%llu rememberGateFar=%llu tracksForgotten=%llu refreshSkipped=%llu sortMs=%.3f eventsSuppressed=%u",
+            deferLogf("RIGID memory tracks=%zu entries=%zu injected=%u seen=%zu held=%zu static=%zu mobile=%zu droppedInView=%llu droppedRange=%llu droppedTeleport=%llu droppedMoved=%llu droppedUnseen=%llu evicted=%llu remembered=%llu indexComplete=%d bytes=%zu ms=%.3f drawn=%zu drawnNotCaptured=%zu liveUnselected=%zu notDrawn=%zu drawnMoved=%llu rememberGateFar=%llu tracksForgotten=%llu refreshSkipped=%llu sortMs=%.3f eventsSuppressed=%u indexMs=%.3f indexItems=%zu",
                 s.tracks,s.entries,rigidInjected,s.seen,s.held,s.statics,s.mobile,(unsigned long long)s.droppedInView,(unsigned long long)s.droppedRange,(unsigned long long)s.droppedTeleport,
                 (unsigned long long)s.droppedMoved,(unsigned long long)s.droppedUnseen,(unsigned long long)s.evicted,(unsigned long long)s.remembered,int(rigidIndex.complete),s.bytes,ms,
-                s.drawn,s.drawnNotCaptured,s.liveUnselected,s.notDrawn,(unsigned long long)s.droppedDrawnMoved,(unsigned long long)s.rememberGateFar,(unsigned long long)s.tracksForgotten,(unsigned long long)s.refreshSkipped,s.sortMs,rigidEventSuppressed);}
+                s.drawn,s.drawnNotCaptured,s.liveUnselected,s.notDrawn,(unsigned long long)s.droppedDrawnMoved,(unsigned long long)s.rememberGateFar,(unsigned long long)s.tracksForgotten,(unsigned long long)s.refreshSkipped,s.sortMs,rigidEventSuppressed,rigidIndexMs,rigidIndexItems);}
         // F6 (Diagnostics=1): RIGID event lines, at most RigidEventsPerSecond, RigidEventLines a session.
         if(NorthlightDiagnostics::enabled()){rigidMemory.takeEvents(rigidEvents);const DWORD now=GetTickCount();
             for(const auto& v:rigidEvents){if(now-rigidEventRefillMs>=1000){rigidEventRefillMs=now;rigidEventTokens=RigidEventsPerSecond;}
                 if(!rigidEventTokens||rigidEventLines>=RigidEventLines){++rigidEventSuppressed;continue;}--rigidEventTokens;++rigidEventLines;
                 float eye=0,pivot=0;const float* p=actorShadowOriginValid?actorShadowOrigin:context.camera;
                 for(unsigned k=0;k<3;++k){eye+=(v.at[k]-context.camera[k])*(v.at[k]-context.camera[k]);pivot+=(v.at[k]-p[k])*(v.at[k]-p[k]);}
-                logf("RIGID event %s reason=%s state=%s shape=%016llx at=(%.1f %.1f %.1f) eye=%.1f pivot=%.1f body=%d bodyAt=(%.1f %.1f %.1f) bodyDistance=%.1f ratio=%.2f",
+                deferLogf("RIGID event %s reason=%s state=%s shape=%016llx at=(%.1f %.1f %.1f) eye=%.1f pivot=%.1f body=%d bodyAt=(%.1f %.1f %.1f) bodyDistance=%.1f ratio=%.2f",
                     NorthlightRigidMemory::eventName(v.kind),NorthlightRigidMemory::reasonName(v.reason),NorthlightRigidMemory::stateName(v.state),(unsigned long long)v.shape,
                     v.at[0],v.at[1],v.at[2],std::sqrt(eye),std::sqrt(pivot),int(v.hasBody),v.body[0],v.body[1],v.body[2],v.bodyDistance,v.ratio);}}
     }

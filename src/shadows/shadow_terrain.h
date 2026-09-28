@@ -29,8 +29,9 @@ inline bool outside(Vec3 lo,Vec3 hi,Vec3 a,Vec3 b){
 }
 // Snapshot positions/indices have already passed the terrain capture validator.
 // Original indices remain intact for point lights; this is an appended stream.
+// triangleTests (0.3.176 D1, optional): counts the per-triangle chunk tests of a straddling snapshot.
 template<class Snapshot> void appendLiveDirectional(const Snapshot& snapshot,
-        const std::set<std::pair<int,int>>& fixed,uint32_t offset,std::vector<uint32_t>& out){
+        const std::set<std::pair<int,int>>& fixed,uint32_t offset,std::vector<uint32_t>& out,std::size_t* triangleTests=nullptr){
     bool anyFixed=false,anyLive=false;
     for(const auto& c:snapshot.bounds.chunks){if(fixed.count({c.x,c.y}))anyFixed=true;else anyLive=true;}
     if(!anyFixed){for(auto i:snapshot.indices)out.push_back(i+offset);return;}
@@ -38,6 +39,7 @@ template<class Snapshot> void appendLiveDirectional(const Snapshot& snapshot,
     auto position=[&](uint32_t i){const auto& p=snapshot.positions[i];return Vec3(p.x,p.y,p.z);};
     for(size_t i=0;i<snapshot.indices.size();i+=3){
         const auto a=snapshot.indices[i],b=snapshot.indices[i+1],c=snapshot.indices[i+2];
+        if(triangleTests)++*triangleTests;
         if(fixed.count(chunk(position(a),position(b),position(c))))continue;
         out.insert(out.end(),{a+offset,b+offset,c+offset});
     }

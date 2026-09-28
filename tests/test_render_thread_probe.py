@@ -61,7 +61,7 @@ checks={
  'upload window timer only on profile frames':'const int64_t uploadWindowStart=profileSampled()?QpcClock::now():0;' in w and 'if(uploadWindowStart)uploadWindowTicks=QpcClock::now()-uploadWindowStart;' in w
    and 'uploadWindowMs=%.3f' in probe and 'uploadWindowTicks<0?-1.0:double(uploadWindowTicks)*tick' in probe,
  'no log line inside the cascade: split/profile/probe lines from endFrame':'logf(' not in loop and 'logf(' not in submit and 'keepReplaySplit(slot,split,' in w
-   and 'if(profileSampled())logRenderProfile();else{replayProfileUsed.clear();replayGiPacked.clear();}\n        logReplayProbeWindow();' in w
+   and 'if(profileSampled())logRenderProfile();else{replayProfileUsed.clear();replayGiPacked.clear();}\n        frameStaging=frameProbeUpload=false;\n        logReplayProbeWindow();' in w
    and w.count('logRenderProfile()')==1 and w.count('logReplayProbeWindow()')==1,
  'profile logs gated':'if(profileSampled())logf("WORLD replay split ' in probe and 'if(profileSampled())logf("WORLD profile frame ' in probe
    and 'if(NorthlightRenderThreadProbe::profiling())logf("WORLD replay probe window=' in probe,
@@ -92,7 +92,7 @@ checks={
  'probe failures counted, disabled after 8':'ReplayProbeFailureLimit=8' in probe and 'if(++replayProbeFailures<ReplayProbeFailureLimit&&hr!=E_OUTOFMEMORY)return;' in probe,
  'sample lines tag the mirror audit frame (no skipping)':'mirrorAudit=%u counted=%d' in r and 'CPU timers frame=%u mirrorAudit=%u' in r and r.count('unsigned(sampleFrame%120==60)')==2,
  # version
- 'version 0.3.175':'logf("Northlight renderer 0.3.175; reference sun look (sun glow hue from native/sunHalo band, soft-shoulder glare, veil, sun-tinted haze), native sun/moon suppressed (F1b), lamps dimmed to 30 pct in direct sun, native moon02 skipped by texture identity, no game bytes in the DLL, MEMREAD self-read profile (RenderProfile), soft sun removal in shadow, jump-stable shadow anchor, geometry coverage hold with travel lead, steadier animated shadow edges (near 5x5 tent, still-camera shadow history), native blob shadows identified in 16-bit A1R5G5B5 uploads, bilinear lighting history, near capture reserve for the player and companions, remembered rigid prop shadows (drawn-by-game states, windowed held), AO and bloom folded into the world composite, ground normals reject object tops, both wide samples, batched celestial terrain mask, DXVK async left to the runtime; backend=' in r,
+ 'version 0.3.176':'logf("Northlight renderer 0.3.176; reference sun look (sun glow hue from native/sunHalo band, soft-shoulder glare, veil, sun-tinted haze), native sun/moon suppressed (F1b), lamps dimmed to 30 pct in direct sun, native moon02 skipped by texture identity, no game bytes in the DLL, MEMREAD self-read profile (RenderProfile), soft sun removal in shadow, jump-stable shadow anchor, geometry coverage hold with travel lead, steadier animated shadow edges (near 5x5 tent, still-camera shadow history), native blob shadows identified in 16-bit A1R5G5B5 uploads, bilinear lighting history, near capture reserve for the player and companions, remembered rigid prop shadows (drawn-by-game states, windowed held), AO and bloom folded into the world composite, ground normals reject object tops, both wide samples, batched celestial terrain mask, DXVK async left to the runtime, render-thread terrain upload and rigid bookkeeping trims; backend=' in r,
 }
 for name,ok in checks.items():print(('PASS ' if ok else 'FAIL ')+name)
 assert all(checks.values())

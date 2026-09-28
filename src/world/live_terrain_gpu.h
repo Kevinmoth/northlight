@@ -60,7 +60,7 @@ template<class Snapshot,class Vertex> class Cache {
         auto retired=std::make_unique<Retired>();
         // Start reclamation before exhaustion, leaving a quarter-arena runway
         // for new captures while the nonblocking completion query is pending.
-        const bool pressure=free_.available()<capacity_/4;
+        const bool pressure=free_.available()<capacity_/4;collectVisited+=entries_.size();
         for(auto it=entries_.begin();it!=entries_.end();){
             auto& e=it->second;
             if(e.touched!=frame_&&(pressure||e.owner.expired()||frame_-e.touched>90||indexBytes_>IndexLimit||entries_.size()>4096)){
@@ -78,6 +78,8 @@ template<class Snapshot,class Vertex> class Cache {
     }
 public:
     size_t uploadedBytes=0,reusedVertices=0;unsigned rollovers=0;
+    // 0.3.176 (D1) this frame: owners inserted, directional lists rebuilt (and their triangles), entries collect() visited.
+    unsigned newOwners=0,directionalBuilds=0;size_t directionalTriangles=0,collectVisited=0;
     explicit Cache(uint32_t limitBytes=16u*1024u*1024u):limit_(limitBytes/sizeof(Vertex)){}
     ~Cache(){clear();}
     Cache(const Cache&)=delete;Cache& operator=(const Cache&)=delete;
@@ -85,7 +87,7 @@ public:
     IDirect3DVertexBuffer9* vertices()const{return vertices_;}
     uint32_t vertexCapacity()const{return capacity_;}
     size_t bytes()const{return size_t(capacity_)*sizeof(Vertex);}
-    void beginFrame(){++frame_;uploadedBytes=0;reusedVertices=0;}
+    void beginFrame(){++frame_;uploadedBytes=0;reusedVertices=0;newOwners=0;directionalBuilds=0;directionalTriangles=0;collectVisited=0;}
 
     template<class Admission,class Convert> HRESULT update(IDirect3DDevice9* d,const std::vector<Owner>& active,Admission admit,Convert convert){
         try{
@@ -124,7 +126,7 @@ public:
                     Entry e;e.owner=owner;e.range=range;e.touched=frame_;e.indices.reserve(owner->indices.size());
                     for(auto i:owner->indices)e.indices.push_back(i+range.first);
                     indexBytes_+=e.indices.capacity()*sizeof(uint32_t);
-                    auto inserted=entries_.emplace(owner.get(),std::move(e));
+                    auto inserted=entries_.emplace(owner.get(),std::move(e));++newOwners;
                     pending.push_back({owner,&inserted.first->second});
                 }
                 if(!full)break;
@@ -156,7 +158,8 @@ public:
         for(const auto& owner:active){
             auto it=entries_.find(owner.get());if(it==entries_.end()||it->second.owner.lock()!=owner)return false;
             auto& e=it->second;
-            if(e.directionalGeneration!=generation){indexBytes_-=e.directional.capacity()*sizeof(uint32_t);e.directional.clear();build(*owner,e.range.first,e.directional);indexBytes_+=e.directional.capacity()*sizeof(uint32_t);e.directionalGeneration=generation;}
+            if(e.directionalGeneration!=generation){indexBytes_-=e.directional.capacity()*sizeof(uint32_t);e.directional.clear();build(*owner,e.range.first,e.directional);indexBytes_+=e.directional.capacity()*sizeof(uint32_t);e.directionalGeneration=generation;
+                ++directionalBuilds;directionalTriangles+=e.directional.size()/3;}
             point.insert(point.end(),e.indices.begin(),e.indices.end());directional.insert(directional.end(),e.directional.begin(),e.directional.end());
         }
         return true;

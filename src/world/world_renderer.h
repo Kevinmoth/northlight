@@ -95,6 +95,7 @@
 #include "gi_solve_pool.h"
 #include "near_reserve.h"
 #include "effects_buckets.h"
+#include <cstdarg>
 #include "rigid_memory.h"
 
 // Included after SavedState. Worker never accesses D3D or game memory.
@@ -1363,6 +1364,7 @@ private:
         if(!check(regionalFogTexture->UnlockRect(0),"regional fog unlock"))return false;
         uploadedFogField=active->fogField;return true;
     }
+    bool frameStaging=false,frameProbeUpload=false; /* 0.3.176 (D3): this frame staged world mesh pages / uploaded the probe atlas */
     bool upload(NorthlightStreaming::Budget& streamBudget){
         retiredMaterials.drain(streamBudget);
         if(!uploadRegionalFog())return false;
@@ -1389,7 +1391,7 @@ private:
             for(const auto& page:plan.pages->pages)sizes.push_back({page.vertices.size()*sizeof(NorthlightGI::WorldVertex),page.indices.size()*sizeof(uint32_t)});
             if(!next.upload.begin(std::move(sizes)))return streamingFailure(D3DERR_INVALIDCALL,"page sizes");
         }
-        if(pendingMesh){
+        if(pendingMesh){frameStaging=true; /* 0.3.176 (D3) */
             auto& next=*pendingMesh;auto& plan=*next.plan;
             ++next.frames;
             // Each bounded driver operation yields back to the shared deadline.
@@ -1497,7 +1499,7 @@ private:
         // may render immediately; GridInfo.w prevents reading the old atlas.
         if(active->serial==0)uploadedSerial=0;
         if(uploadedSerial!=active->serial){
-            auto phase=streamingPhases.measure(NorthlightStreaming::PhaseProfile::Probes);
+            auto phase=streamingPhases.measure(NorthlightStreaming::PhaseProfile::Probes);frameProbeUpload=true; /* 0.3.176 (D3) */
             if(active->atlas.size()!=NorthlightGI::probeLayout().atlasSize())return false;
             probeActivation.begin(active->map);
             float activationNow=float(DWORD(GetTickCount()-animationEpoch))*.001f;
@@ -1515,10 +1517,23 @@ private:
             uploadedSerial=active->serial;
         }return true;
     }
+    // 0.3.176 (D1): this frame's terrain change (sample frames), per-triangle tests, and (RenderProfile
+    // sample frames) the arena / index build / lock+copy times; -1: not measured.
+    const char* terrainChange="none";size_t terrainTriangleTests=0;double terrainPartMs[3]={-1,-1,-1};
+    static const char* classifyTerrain(const std::vector<TerrainSnapshot>& now,const std::vector<TerrainSnapshot>& before,bool reused){
+        if(reused)return "none";if(now==before)return "identity"; /* the same owners in order: a generation or buffer change */
+        if(now.size()!=before.size())return "membership";
+        try{std::vector<const void*> a,b;for(const auto& s:now)a.push_back(s.get());for(const auto& s:before)b.push_back(s.get());
+            std::sort(a.begin(),a.end());std::sort(b.begin(),b.end());return a==b?"order":"membership";}catch(...){return "unknown";}
+    }
     bool uploadLiveTerrain(){
-        terrainUploadBytes=0;terrainUploadReused=false;
+        terrainUploadBytes=0;terrainUploadReused=false;terrainTriangleTests=0;for(auto& ms:terrainPartMs)ms=-1;
         liveTerrainGPU.beginFrame();
-        if(liveTerrainGeneration==meshGeneration&&frameTerrain==uploadedTerrain && (frameTerrain.empty()||(liveTerrainGPU.vertices()&&liveIndicesGPU))){terrainUploadReused=true;return true;}
+        const bool timedParts=profileSampled();auto partStart=timedParts?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
+        auto part=[&](int k){if(!timedParts)return;const auto now=std::chrono::steady_clock::now();terrainPartMs[k]=std::chrono::duration<double,std::milli>(now-partStart).count();partStart=now;};
+        const bool reuse=liveTerrainGeneration==meshGeneration&&frameTerrain==uploadedTerrain && (frameTerrain.empty()||(liveTerrainGPU.vertices()&&liveIndicesGPU));
+        if(captureSampled)terrainChange=classifyTerrain(frameTerrain,uploadedTerrain,reuse);
+        if(reuse){terrainUploadReused=true;return true;}
         NorthlightGeometryMemory::Sample arenaMemory;bool arenaSampled=false;
         std::optional<NorthlightStreaming::PhaseProfile::Scope> arenaPhase;arenaPhase.emplace(streamingPhases.peaks[NorthlightStreaming::PhaseProfile::TerrainArena]);
         const HRESULT terrainResult=liveTerrainGPU.update(d,frameTerrain,
@@ -1533,7 +1548,7 @@ private:
                 return admitsGrowth("live-terrain-arena",bytes,arenaSampled?&arenaMemory:nullptr);
             },
             [](const NorthlightTerrainCapture::Position& p){NorthlightGI::WorldVertex v;v.position=V(p.x,p.y,p.z);return v;});
-        arenaPhase.reset();
+        arenaPhase.reset();part(0);
         if(terrainResult==S_FALSE){
             // Preserve the existing memory-pressure fallback: the complete
             // cached terrain covers this frame; do not advertise absent live chunks.
@@ -1543,9 +1558,9 @@ private:
         std::optional<NorthlightStreaming::PhaseProfile::Scope> indexPhase;indexPhase.emplace(streamingPhases.peaks[NorthlightStreaming::PhaseProfile::TerrainIndices]);
         liveTerrainIndices.reserve(frameTerrainIndices);liveDirectionalIndices.reserve(frameTerrainIndices);
         if(!liveTerrainGPU.indices(frameTerrain,meshGeneration,[&](const auto& snapshot,uint32_t offset,std::vector<uint32_t>& output){
-            NorthlightShadowTerrain::appendLiveDirectional(snapshot,fixedTerrainChunks(),offset,output);
+            NorthlightShadowTerrain::appendLiveDirectional(snapshot,fixedTerrainChunks(),offset,output,captureSampled?&terrainTriangleTests:nullptr);
         },liveTerrainIndices,liveDirectionalIndices))return check(E_FAIL,"live terrain arena membership");
-        indexPhase.reset();
+        indexPhase.reset();part(1);
         if(liveTerrainIndices.empty()){uploadedTerrain=frameTerrain;liveTerrainGeneration=meshGeneration;return true;}
         auto indexUpload=streamingPhases.measure(NorthlightStreaming::PhaseProfile::TerrainIndexUpload);
         UINT ib=UINT((liveTerrainIndices.size()+liveDirectionalIndices.size())*sizeof(uint32_t));
@@ -1563,6 +1578,7 @@ private:
         memcpy(data,liveTerrainIndices.data(),originalBytes);
         if(!liveDirectionalIndices.empty())memcpy(static_cast<char*>(data)+originalBytes,liveDirectionalIndices.data(),liveDirectionalIndices.size()*sizeof(uint32_t));
         if(!check(liveIndicesGPU->Unlock(),"live index unlock"))return false;
+        part(2);
         uploadedTerrain=frameTerrain;liveTerrainGeneration=meshGeneration;terrainUploadBytes=liveTerrainGPU.uploadedBytes+ib;
         return true;
     }
@@ -1638,12 +1654,23 @@ public:
         effects=next;
     }
     void reset(){shadowsComposited=false;pivotValid=false;pivotDistance=12.f;cascadeAnchor.reset();endFrame();replaySnapshots.clearIndexCache();actorJobComplete.reset();actorJobSerial_=0;actorSceneMap_.clear();lastActorCapture=0;terrainBoundsCache.clearPersistent();previousCacheHits=0;freeReplays.clear();pooledSnapshotBytes=0;valid=false;failed=false;releaseGPU();}
+    // 0.3.176 (U0/S0): the sample-frame lines of the selection and upload spans (and the RIGID event
+    // lines) are formatted where they are today and written here, from endFrame, so no log write (a
+    // vfprintf and fflush under the log lock) is inside a bucketed span. The text is the same.
+    std::vector<std::string> deferredLines;
+    __attribute__((format(printf,2,3))) void deferLogf(const char* format,...){
+        va_list a;va_start(a,format);va_list b;va_copy(b,a);const int n=std::vsnprintf(nullptr,0,format,a);va_end(a);
+        if(n>=0)try{std::string line(size_t(n),'\0');std::vsnprintf(&line[0],size_t(n)+1,format,b);deferredLines.push_back(std::move(line));}catch(...){}
+        va_end(b);}
+    void flushDeferredLogs(){for(const auto& line:deferredLines)logf("%s",line.c_str());deferredLines.clear();}
     void endFrame(bool retainPool=true){
+        flushDeferredLogs(); /* 0.3.176 (U0/S0): after every bucketed span of the frame */
         replayBoundsAbandon(); /* render() joined it; packets are recycled below */
         paletteFrameValid=false;staticPivotReady=false;rigidMemory.clearDrawn(); /* 0.3.173: drawn marks are per capture frame */
         if(!valid||failed||workerFault())stateBlocks.clear();
         /* 0.3.149 RenderProfile lines: after every measured span of the frame */
         if(profileSampled())logRenderProfile();else{replayProfileUsed.clear();replayGiPacked.clear();}
+        frameStaging=frameProbeUpload=false;
         logReplayProbeWindow();
         for(int slot=0;slot<4;++slot){lastCascadeActions[slot]=cascadeActions[slot];cascadeActions[slot]='-';}
         if(captureSampled&&captureFrequency.QuadPart>0){double ms=1000.0/double(captureFrequency.QuadPart);
@@ -2104,13 +2131,13 @@ public:
         phase.stop(); // Report I/O is not part of cache/bulk timing.
         if(captureSampled){size_t bulk=indexBytes;for(auto total:totals)bulk+=total;
             const auto residency=NorthlightReplayGPU::batchStats(replayGpuCache);
-            logf("MODEL GPU cache hits=%u reusedBytes=%zu newBytes=%zu residentBytes=%zu bulkUploadBytes=%zu batches=%zu batchBytes=%zu liveBytes=%zu separateBytes=%zu batchedUploads=%u separateUploads=%u compactions=%u compactedBytes=%zu batchFailures=%u",replayGpuCache.hits(),replayGpuCache.reused(),replayGpuCache.uploaded(),replayGpuCache.bytes(),bulk,
+            deferLogf("MODEL GPU cache hits=%u reusedBytes=%zu newBytes=%zu residentBytes=%zu bulkUploadBytes=%zu batches=%zu batchBytes=%zu liveBytes=%zu separateBytes=%zu batchedUploads=%u separateUploads=%u compactions=%u compactedBytes=%zu batchFailures=%u",replayGpuCache.hits(),replayGpuCache.reused(),replayGpuCache.uploaded(),replayGpuCache.bytes(),bulk,
                 residency.batches,residency.batchBytes,residency.liveBytes,residency.separateBytes,residency.batchedUploads,residency.separateUploads,residency.compactions,residency.compactedBytes,residency.batchFailures);
-            logf("MODEL bulk sharing duplicateDraws=%zu avoidedBytes=%zu actualBytes=%zu",sharedBulkDraws,sharedBulkBytes,bulk);
+            deferLogf("MODEL bulk sharing duplicateDraws=%zu avoidedBytes=%zu actualBytes=%zu",sharedBulkDraws,sharedBulkBytes,bulk);
             const auto population=replayGpuCache.population();const auto& policy=replayGpuCache.stats();
-            logf("MODEL GPU policy entries=%zu resident=%zu probation=%zu countPressure=%u bytePressure=%u roomRejected=%u promotionCountOnly=%u promotionCountRejected=%u evictions=%u warmup=%u uploadDeferred=%u admissionRejected=%u entryLimit=%zu scanPasses=%u scanVisits=%u scanMemoHits=%u attemptDeferred=%u uploadByteDeferred=%u expiredEntries=%u expiredBytes=%zu evictionChecks=%u lruMoves=%u",population.entries,population.resident,population.probation,policy.countPressure,policy.bytePressure,policy.roomRejected,policy.promotionCountOnly,policy.promotionCountRejected,policy.evictions,policy.warmup,policy.uploadDeferred,policy.admissionRejected,replayGpuCache.entryLimit(),policy.scanPasses,policy.scanVisits,policy.scanMemoHits,policy.attemptDeferred,policy.uploadByteDeferred,policy.expiredEntries,policy.expiredBytes,policy.evictionChecks,policy.lruMoves);
+            deferLogf("MODEL GPU policy entries=%zu resident=%zu probation=%zu countPressure=%u bytePressure=%u roomRejected=%u promotionCountOnly=%u promotionCountRejected=%u evictions=%u warmup=%u uploadDeferred=%u admissionRejected=%u entryLimit=%zu scanPasses=%u scanVisits=%u scanMemoHits=%u attemptDeferred=%u uploadByteDeferred=%u expiredEntries=%u expiredBytes=%zu evictionChecks=%u lruMoves=%u",population.entries,population.resident,population.probation,policy.countPressure,policy.bytePressure,policy.roomRejected,policy.promotionCountOnly,policy.promotionCountRejected,policy.evictions,policy.warmup,policy.uploadDeferred,policy.admissionRejected,replayGpuCache.entryLimit(),policy.scanPasses,policy.scanVisits,policy.scanMemoHits,policy.attemptDeferred,policy.uploadByteDeferred,policy.expiredEntries,policy.expiredBytes,policy.evictionChecks,policy.lruMoves);
             const auto& cleared=replayGpuCache.clearStats();
-            logf("MODEL GPU clears lifetimeCalls=%llu lifetimeEntries=%llu lifetimeBytes=%llu",(unsigned long long)cleared.calls,(unsigned long long)cleared.entries,(unsigned long long)cleared.bytes);
+            deferLogf("MODEL GPU clears lifetimeCalls=%llu lifetimeEntries=%llu lifetimeBytes=%llu",(unsigned long long)cleared.calls,(unsigned long long)cleared.entries,(unsigned long long)cleared.bytes);
         }
         return true;
     }
@@ -2172,7 +2199,7 @@ public:
     void finishActorScene(){
         if(!actorCaptureEnabled())return;lastActorCapture=GetTickCount();actorJob->center=vec(context.camera);
         actorJobComplete=std::move(actorJob);actorCaptureDue=false;++actorJobSerial_;actorSceneMap_=active?active->map:std::string{};
-        if(captureSampled)logf("WORLD actor packets draws=%u queuedVertices=%u skippedAlpha=%u snapshotReadBytes=%zu material=actual-rgba128-or-neutral035",actorDraws,actorVerticesEvaluated,actorSkippedAlpha,replaySnapshots.bytesRead());
+        if(captureSampled)deferLogf("WORLD actor packets draws=%u queuedVertices=%u skippedAlpha=%u snapshotReadBytes=%zu material=actual-rgba128-or-neutral035",actorDraws,actorVerticesEvaluated,actorSkippedAlpha,replaySnapshots.bytesRead());
     }
     std::shared_ptr<const NorthlightActorGeometry::ActorJob> completedActorJob()const{return actorJobComplete;}
     uint64_t actorJobSerial()const{return actorJobSerial_;}
@@ -3134,7 +3161,8 @@ public:
         if(frames==1||frames%600==0){if(frames==1||NorthlightDiagnostics::enabled())logf("SHADOW reuse nearInterval=%u farInterval=%u nearReuses=%u farReuses=%u captureSkippedFrames=%u captureDeferrals=%u captureSkip=%u",
             quality.nearShadowInterval,quality.farShadowInterval,nearReuses,farReuses,captureSkippedFrames,captureDeferrals,unsigned(NorthlightQuality::captureSkipPossible(quality,NorthlightQuality::actorShadowWork(quality,effects.shadows))));
             nearReuses=farReuses=captureSkippedFrames=captureDeferrals=0;}
-        if(captureSampled)logf("WORLD terrain reuse=%u snapshots=%zu uploadBytes=%zu vertexUploadBytes=%zu reusedVertices=%zu arenaMiB=%.2f rollovers=%u",unsigned(terrainUploadReused),frameTerrain.size(),terrainUploadBytes,liveTerrainGPU.uploadedBytes,liveTerrainGPU.reusedVertices,double(liveTerrainGPU.bytes())/1048576,liveTerrainGPU.rollovers);
+        if(captureSampled)logf("WORLD terrain reuse=%u snapshots=%zu uploadBytes=%zu vertexUploadBytes=%zu reusedVertices=%zu arenaMiB=%.2f rollovers=%u change=%s newOwners=%u directionalBuilds=%u directionalTriangles=%zu straddlingTriangleTests=%zu collectVisited=%zu terrainMs=%.3f,%.3f,%.3f",unsigned(terrainUploadReused),frameTerrain.size(),terrainUploadBytes,liveTerrainGPU.uploadedBytes,liveTerrainGPU.reusedVertices,double(liveTerrainGPU.bytes())/1048576,liveTerrainGPU.rollovers,
+            terrainChange,liveTerrainGPU.newOwners,liveTerrainGPU.directionalBuilds,liveTerrainGPU.directionalTriangles,terrainTriangleTests,liveTerrainGPU.collectVisited,terrainPartMs[0],terrainPartMs[1],terrainPartMs[2]);
         if(frames==1||(frames%600==0&&NorthlightDiagnostics::enabled()))logf("WORLD replay constants bytes=%zu previousBytes=%zu calls=%zu previousCalls=%zu",replayConstantBytes,replays.size()*2*(1024*4+16*4+64*4+16*4),replayConstantCalls,replays.size()*2*4);
         if(frames==1||frames%600==0){
             if(frames==1||NorthlightDiagnostics::enabled())logf("WORLD replay cull tested=%llu,%llu,%llu,%llu bounded=%llu,%llu,%llu,%llu culled=%llu,%llu,%llu,%llu (sun near,far moon near,far)",
