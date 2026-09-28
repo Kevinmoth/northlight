@@ -24,10 +24,6 @@ struct Settings {
     unsigned giStrength=60;
     // 0.3.141: still replay actors become cached world-space shadow casters (persistent_casters.h).
     unsigned persistentCasters=0; /* 0 = the 0.3.140 path */
-    // Rigid props (single-matrix still models: signs, event fences/tents) become cached
-    // casters with their alpha cutouts and stay off-screen (persistent_casters.h). 0 = 0.3.144.
-    // Experimental, off by default: no visible effect in the 0.3.146 game test, ~0.4 ms median cost.
-    unsigned persistentRigidProps=0;
     // 0.3.141: shadow fate tracker (diagnostic log only; never changes the image).
     // Diagnostics=0: periodic logs, diagnostic counters and pure measurement off
     // (diagnostics_switch.h); it also forces the fate tracker off.
@@ -59,7 +55,7 @@ struct Settings {
     // (character, creature, server object) shadows, the game's blob shadows return, and model
     // capture runs only for GI actor packets. Forces the replay-derived keys off (effective()).
     unsigned actorShadows=1;
-    char origin[33]={'d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d'};
+    char origin[32]={'d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d'};
 };
 struct Key { const char* name; unsigned Settings::*field; unsigned low,high; unsigned preset[3]; };
 // preset[] = Quality, Balanced, Performance. Quality must equal Settings{}.
@@ -83,7 +79,6 @@ inline const Key Keys[]={
     {"GIStrength",&Settings::giStrength,0,100,{60,60,60}},
     {"ShadowFateDiagnostics",&Settings::shadowFateDiagnostics,0,1,{0,0,0}},
     {"PersistentCasters",&Settings::persistentCasters,0,1,{0,0,0}},
-    {"PersistentRigidProps",&Settings::persistentRigidProps,0,1,{0,0,0}},
     {"Diagnostics",&Settings::diagnostics,0,1,{0,0,0}},
     {"RenderProfile",&Settings::renderProfile,0,1,{0,0,0}},
     {"DiagReplayProbe",&Settings::diagReplayProbe,0,1,{0,0,0}},
@@ -122,8 +117,12 @@ inline float giIntensity(const Settings& s){return .5f*float(s.giStrength)/60.f;
 // 0.3.158 ActorShadows=0: keys that only act on replay (actor) shadows are forced to 0.
 struct ForcedKey { const char* name; unsigned Settings::*field; };
 inline const ForcedKey ActorShadowForced[]={
-    {"PersistentCasters",&Settings::persistentCasters},{"PersistentRigidProps",&Settings::persistentRigidProps},
+    {"PersistentCasters",&Settings::persistentCasters},
     {"ShadowFateDiagnostics",&Settings::shadowFateDiagnostics},{"DiagReplayProbe",&Settings::diagReplayProbe}};
+// Keys of earlier versions that no longer exist: a line setting one is ignored with a
+// "retired" note instead of "unknown key". PersistentRigidProps: rigid_memory.h replaces it.
+struct RetiredKey { const char* name; const char* version; };
+inline const RetiredKey Retired[]={{"PersistentRigidProps","0.3.172"}};
 inline Settings effective(Settings s){if(!s.actorShadows)for(const auto& k:ActorShadowForced)s.*k.field=0;return s;}
 // Names of the keys effective() turned off (requested non-zero), space separated; "none" if nothing.
 inline std::string forcedOff(const Settings& requested){
@@ -172,6 +171,8 @@ inline void apply(const std::vector<Entry>& entries,Settings& s,const char* sour
         const std::string key=lower(e.key);const std::string where=std::string(source)+" line "+std::to_string(e.line)+": ";
         if(key=="preset"){if(!allowPreset)problems.push_back(where+"Preset ignored here");continue;}
         const Key* match=nullptr;unsigned index=0;for(unsigned i=0;i<sizeof(Keys)/sizeof(Keys[0]);++i)if(lower(Keys[i].name)==key){match=&Keys[i];index=i;}
+        const RetiredKey* retired=nullptr;for(const auto& r:Retired)if(lower(r.name)==key)retired=&r;
+        if(retired){problems.push_back(where+retired->name+" retired in "+retired->version+" (ignored)");continue;}
         if(!match){problems.push_back(where+"unknown key "+e.key+" ignored");continue;}
         unsigned v=0;
         if(!number(e.value,v)||v<match->low||v>match->high){

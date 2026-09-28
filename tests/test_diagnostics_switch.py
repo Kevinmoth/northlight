@@ -44,7 +44,6 @@ KEEP={
  'TERRAIN projection':'capped: first 12','STATIC SHADOW draw retry':'capped: first 8','MODEL snapshot rejected':'capped: first 12',
  'WORLD GPU diagnostic':'user-triggered GPU capture (F12 debug)','WORLD slow submission':'capped: first 12','POINT pass skipped':'capped: first 12',
  'PERSISTENT casters disabled':'error: allocation failure','PERSISTENT caster draw failed':'error',
- 'PERSISTENT near':'gated: only in persistentDiagnostics(), called only under persistentDiag() (PersistentRigidProps && NorthlightDiagnostics::enabled(); audited below)',
  'CELESTIAL disabled':'error','CELESTIAL native texture identity':'error','CELESTIAL early draw skipped':'capped: first 4',
  'SHADOWBLOB candidate':'capped: first 4','SHADOWBLOB identified':'capped: first 8','WATER disabled':'error','WATER explicit recovery':'user-triggered',
  'WATER registered':'one-off: shader registration','WATER mask patch skipped':'capped: first 8 (patch rejected or patched hash mismatch; that shader only)','GPU profile':'gated: no sample opens when off (beginFrame/poll gated)','%s':'gpu_profile report: gated as above',
@@ -86,10 +85,7 @@ checks={
  'Diagnostics read once at quality load':'NorthlightDiagnostics::configure(quality.diagnostics!=0);' in w,
  'fate tracker: Diagnostics=0 wins':'shadowFateDiagnostics=NorthlightQuality::shadowFate(quality);' in w,
  'streaming phase clocks gated':'const bool on=NorthlightDiagnostics::enabled();' in fp.src('streaming_phase_profile.h').read_text(),
- 'persistent near diagnostics: one gated caller, registry recording off unless gated':(lambda t:t.count('persistentDiagnostics(')==2 and 'if(persistentDiag())try{persistentDiagnostics(now,pivot);}catch(...){persistentWatch.clear();}' in t
-   and 'bool persistentDiag()const{return quality.persistentRigidProps&&NorthlightDiagnostics::enabled();}' in t
-   and all(t.index('void persistentDiagnostics(')<m.start()<t.index('// Cache-slot drawing') for m in re.finditer(r'logf\("PERSISTENT near',t))
-   and 'persistentCasters.diagnostics(persistentDiag()?PersistentDiagRadius*1.6f:0.f,pivot);' in t and 'if(hold!=NorthlightPersistentCasters::Registry::Free&&persistentDiag())persistentDiagHold(c,hold);' in t)(fp.src('world_persistent_casters.inl').read_text()),
+ 'no PERSISTENT near diagnostics left (PersistentRigidProps retired in 0.3.172)':'PERSISTENT near' not in fp.src('world_persistent_casters.inl').read_text(),
  'RenderProfile needs Diagnostics (its log gates count as diagnostics gates)':'inline bool renderProfile(const Settings& s){return s.diagnostics&&s.renderProfile;}' in fp.src('quality_settings.h').read_text(),
  'near capture reserve counters only on the sampled MODEL frame capture line':(lambda t:t.count('nearAdmitted=%u nearBytes=%zu nearRefused=%u nearSelf=%d nearReserve=%zu')==1
    and 'if(captureSampled)logf("MODEL frame capture skinnedCandidates=' in t[t.rindex('\n',0,t.index('nearAdmitted=%u')):t.index('nearAdmitted=%u')])(w),
