@@ -25,6 +25,7 @@ row_major float4x4 InverseView : register(c3);
 row_major float4x4 NearMatrix : register(c7);
 row_major float4x4 FarMatrix : register(c11);
 float4 Camera : register(c15);
+float4 TemporalReach : register(c15); // w: TemporalLight only, largest drawn source channel per unit of normalised visibility
 float4 SunDirection : register(c16); // toward source
 float4 DirectLight : register(c17);
 float4 AmbientLight : register(c18); // native ambient RGB, evening surface ambient gain in w
@@ -135,22 +136,31 @@ float shadowMap(float3 lp,bool useNear,float radius,float2 gradient) {
     // (near 0.05 u, far 0.1 u) and let the receiver plane absorb slopes.
     float receiver=lp.z-PassInfo.x*(useNear?1:2);
     // Depth-derived normals are noisy on foliage. Limit the receiver-plane
-    // slope so one flipped normal cannot swing all sixteen expected depths, but
+    // slope so one flipped normal cannot swing every expected depth, but
     // keep genuine grazing terrain inside the limit down to a 2-degree light
     // incidence (below that saturate(n.L) makes the shadow term negligible).
     // Same world-space slope limit for either depth span; XY texels stay
     // near .094 u / far .375 u. Only normalized depth units change.
     float limit=(useNear?2.688:10.752)*ShadowRange.x/DepthParams.w;
     gradient=clamp(gradient,-limit,limit);
-    // Continuous 4x4 tent (was 3x3): 33% wider support gently softens
+    // Continuous tent (4x4 was 3x3): the wider support gently softens
     // tree/fence edges without random sampling or changing shadow depth bias.
+    // Far: radius 2 texels (4x4). Near (0.3.170): radius 2.5 (5x5). An animated
+    // caster (idle pose) flips single near texels every frame; one tap then
+    // weighs at most 14.8% instead of 25%, for a 24% wider near penumbra.
+    // The far cascade keeps exactly its 4x4 taps and weights.
+    float size=useNear?5:4,reach=size*.5;
     float2 pixel=uv/DepthParams.w-.5;
-    float2 base=floor(pixel),fraction=pixel-base;
+    // Odd sizes centre on the nearest texel, even sizes on the one below: every tap in the support.
+    float2 base=floor(pixel+(useNear?.5:0)),fraction=pixel-base;
+    float start=useNear?-2:-1;
     float visibility=0,total=0;
-    [loop]for(int i=0;i<16;++i){
-        float2 offset=float2(i-floor(i/4.0)*4-1,floor(i/4.0)-1);
+    [loop]for(int i=0;i<25;++i){
+        if(i>=size*size)break;
+        float row=floor((i+.5)/size); // +.5: rcp may give 10/5 = 1.99999, which floors to row 1
+        float2 offset=float2(i-row*size,row)+start;
         float2 tapUV=(base+offset+.5)*DepthParams.w;
-        float2 weight=max(2-abs(offset-fraction),0);
+        float2 weight=max(reach-abs(offset-fraction),0);
         float w=weight.x*weight.y;
         // Compare each sample against the depth of the receiver's plane there.
         float expected=receiver+dot(gradient,tapUV-uv);
@@ -491,7 +501,20 @@ TemporalOutput TemporalLight(float2 uv:TEXCOORD0) {
         float4 s=tex2Dlod(LightingBuffer,float4((clamp(base+offset,0,half-1)+.5)/half,0,0));
         lo=min(lo,s);hi=max(hi,s);
     }
-    o.light=lerp(current,clamp(history,lo,hi),TemporalInfo.x);
+    // 0.3.170: shadow texel flips of an animated caster (idle pose) change visibility
+    // by up to 15% (near 5x5 tent) every frame, in step with the whole neighbourhood,
+    // so the tight clamp kept none of the history and each flip popped. With a still
+    // camera (reprojection within 1 half-res pixel, none from 2) let the visibility
+    // (alpha) history stray up to .15 of full visibility outside the neighbourhood, and
+    // the rgb by the direct light that change can carry (TemporalReach.w: the largest
+    // drawn source channel per unit of normalised visibility). History visibility
+    // inside the neighbourhood: exactly the tight clamp.
+    float4 tight=clamp(history,lo,hi);
+    float still=saturate(2-length(puv*half-(base+.5)));
+    float margin=.15/max(RemovalInfo.z,1e-4)*RemovalInfo.y*still;
+    float loose=clamp(history.a,lo.a-margin,hi.a+margin);
+    float3 reach=abs(loose-tight.a)*RemovalInfo.z*TemporalReach.w;
+    o.light=lerp(current,float4(clamp(history.rgb,lo.rgb-reach,hi.rgb+reach),loose),TemporalInfo.x);
     return o;
 }
 // 1x1 pass: fraction of the source disc (on screen) that is clear sky, from

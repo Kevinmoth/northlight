@@ -34,14 +34,16 @@ checks={}
 temporal=hlsl[hlsl.index('TemporalOutput TemporalLight('):hlsl.index('// 1x1 pass: fraction of the source disc')]
 old_lines=['    TemporalOutput o;float2 half=ScreenSize.zw;','    float2 base=floor(uv*half);float2 q=(base+.5)/half;',
     '    float4 current=tex2Dlod(LightingBuffer,float4(q,0,0));','    float2 duv=depthUV(q);float d=normalizedDepth(duv);float z=viewDistance(d);',
-    '    o.light=current;o.depth=float4(z,0,0,1);','    if(TemporalInfo.x<=0||d>=.99999)return o;','    o.light=lerp(current,clamp(history,lo,hi),TemporalInfo.x);']
+    '    o.light=current;o.depth=float4(z,0,0,1);','    if(TemporalInfo.x<=0||d>=.99999)return o;','    o.light=lerp(current,float4(clamp(history.rgb,lo.rgb-reach,hi.rgb+reach),loose),TemporalInfo.x);'] # 0.3.170 final line (test_shadow_shimmer)
 guard='    [branch]if(RemovalInfo.y>0&&d<.99999)current.rgb=smoothRemoval(current,q,base,half,z);\n'
 checks['TemporalLight: 0.3.158 lines intact, one guarded call between the reads and o.light']=(all(temporal.count(l+'\n')==1 for l in old_lines)
     and temporal.count(guard)==1 and temporal.index(old_lines[3])<temporal.index(guard)<temporal.index(old_lines[4]) and hlsl.count('smoothRemoval(')==2)
 checks['RemovalInfo aliases c30 (WaterInfo.x stays the water flag)']=('float4 WaterInfo : register(c30);' in hlsl and 'float4 RemovalInfo : register(c30);' in hlsl
     and hlsl.count('RemovalInfo.x')==0)
-const='        const float drawnWeight=std::max(sourceWeights[0],0.f)+std::max(sourceWeights[1],0.f);\n        if(drawnWeight>.001f){c[30][1]=1;c[30][2]=1/drawnWeight;c[30][3]=.75f*std::fabs(projection[0])*float(w/2)*.5f;}\n        c[30][0]=waterMask?1.f:0.f;d->SetPixelShaderConstantF(0,&c[0][0],68);'
-checks['c30.yzw only from the drawn source weight (sum of positive weights), set once']=(w.count(const)==1
+const='        const float drawnWeight=std::max(sourceWeights[0],0.f)+std::max(sourceWeights[1],0.f);\n        if(drawnWeight>.001f){c[30][1]=1;c[30][2]=1/drawnWeight;c[30][3]=.75f*std::fabs(projection[0])*float(w/2)*.5f;}\n'
+# 0.3.170: the TemporalReach (c15.w) lines sit between this block and the upload (test_shadow_shimmer).
+upload='        c[30][0]=waterMask?1.f:0.f;d->SetPixelShaderConstantF(0,&c[0][0],68);'
+checks['c30.yzw only from the drawn source weight (sum of positive weights), set once']=(w.count(const)==1 and w.count(upload)==1 and w.index(const)<w.index(upload)
     and re.search(r'c\[30\]\[[123]\]=',w.replace(const,'')) is None and 'if(sourceWeights[source]<=0&&source!=firstSource)continue;' in w)
 tb=w[w.index('{   // Temporal stabilization: light + history'):w.index('temporalIndex=prev;temporalValid=true;')]
 # s12 moved from the composite's binding line to the temporal pass: the same API calls per frame, and

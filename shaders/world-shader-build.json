@@ -1,5 +1,5 @@
 {
-  "source_sha256": "fc76c61fa9b2b0ddd756cb6df255398e305e4d9836aa7f61b54af232303f411a",
+  "source_sha256": "a8fca9ca5f85bd5156956996e55aaab41e97554a8ec8904d5c5872fa6060f425",
   "compiler": "Wine d3dcompiler_47 D3DCompile",
   "game_launched": false,
   "shaders": {
@@ -35,10 +35,10 @@
     },
     "WorldLighting": {
       "target": "ps_3_0",
-      "bytes": 7200,
-      "sha256": "a8f2855c9278d60b1c557acfffead9bdfaedace599587b2a88d3f6746c6a59a8",
-      "static_instruction_slots": 427,
-      "temporary_registers": 19,
+      "bytes": 7340,
+      "sha256": "82cd1349ff9dd8da31be0906ad3788c4be82528fe8281d84c89163fd21bd9e43",
+      "static_instruction_slots": 439,
+      "temporary_registers": 20,
       "samplers": [
         1,
         2,
@@ -47,22 +47,22 @@
         14
       ],
       "instructions": {
-        "mov": 103,
+        "mov": 102,
         "texldl": 5,
-        "mul": 71,
-        "frc": 4,
-        "add": 97,
+        "mul": 72,
+        "frc": 3,
+        "add": 99,
         "max": 20,
         "min": 6,
-        "cmp": 35,
-        "if": 9,
-        "rcp": 9,
-        "else": 9,
-        "endif": 9,
+        "cmp": 39,
+        "if": 10,
+        "rcp": 10,
+        "else": 10,
+        "endif": 10,
         "dp3": 6,
         "abs": 7,
         "rep": 2,
-        "break": 2,
+        "break": 3,
         "dp2add": 1,
         "endrep": 2
       }
@@ -205,9 +205,9 @@
     },
     "TemporalLight": {
       "target": "ps_3_0",
-      "bytes": 6884,
-      "sha256": "029e809d0b7f874a39ee1244dfc3e2b31b6ff5aa0a5f14febdc09afd84fb8c4d",
-      "static_instruction_slots": 423,
+      "bytes": 7348,
+      "sha256": "4c001a17d7916326ef40aec1e750a9a0a0121accfc6b870bc50bbbfbe368bac2",
+      "static_instruction_slots": 452,
       "temporary_registers": 23,
       "samplers": [
         0,
@@ -218,14 +218,14 @@
         15
       ],
       "instructions": {
-        "mul": 68,
+        "mul": 73,
         "frc": 5,
-        "add": 69,
-        "rcp": 38,
-        "mov": 96,
+        "add": 76,
+        "rcp": 40,
+        "mov": 102,
         "texldl": 14,
-        "max": 32,
-        "min": 17,
+        "max": 35,
+        "min": 19,
         "cmp": 20,
         "if": 7,
         "mad": 2,
@@ -235,9 +235,10 @@
         "break": 1,
         "else": 7,
         "endif": 7,
-        "rsq": 1,
-        "abs": 3,
-        "endrep": 1
+        "rsq": 2,
+        "abs": 4,
+        "endrep": 1,
+        "dp2add": 1
       }
     },
     "LocalFog": {

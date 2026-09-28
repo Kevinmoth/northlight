@@ -2867,6 +2867,11 @@ public:
         // (1.5 across) in half-res pixels at view distance 1.
         const float drawnWeight=std::max(sourceWeights[0],0.f)+std::max(sourceWeights[1],0.f);
         if(drawnWeight>.001f){c[30][1]=1;c[30][2]=1/drawnWeight;c[30][3]=.75f*std::fabs(projection[0])*float(w/2)*.5f;}
+        // 0.3.170 TemporalLight (c15.w, TemporalReach): the largest direct-light channel per unit of
+        // normalised visibility over the drawn, active sources. It bounds how far a flickering shadow
+        // may carry the rgb history outside its neighbourhood (0: exactly the tight clamp).
+        for(int source=0;source<2;++source)if(sourceWeights[source]>0&&sourceActive[source])
+            c[15][3]=std::max(c[15][3],std::max({sourceColors[source].x,sourceColors[source].y,sourceColors[source].z})*drawnWeight/sourceWeights[source]);
         c[30][0]=waterMask?1.f:0.f;d->SetPixelShaderConstantF(0,&c[0][0],68);
         IDirect3DTexture9* textures[]={color,depth,shadow[0],shadow[1],probe[0],probe[1],probe[2],probe[3],nullptr,nullptr,probe[4],waterMask,nullptr,regionalFogTexture};
         for(int i=0;i<14;++i){d->SetTexture(i,textures[i]);d->SetSamplerState(i,D3DSAMP_ADDRESSU,D3DTADDRESS_CLAMP);d->SetSamplerState(i,D3DSAMP_ADDRESSV,D3DTADDRESS_CLAMP);d->SetSamplerState(i,D3DSAMP_MINFILTER,(i==0||i==9)?D3DTEXF_LINEAR:D3DTEXF_POINT);d->SetSamplerState(i,D3DSAMP_MAGFILTER,(i==0||i==9)?D3DTEXF_LINEAR:D3DTEXF_POINT);d->SetSamplerState(i,D3DSAMP_MIPFILTER,D3DTEXF_NONE);d->SetSamplerState(i,D3DSAMP_SRGBTEXTURE,FALSE);}
