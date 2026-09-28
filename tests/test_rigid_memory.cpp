@@ -18,6 +18,24 @@
 using namespace NorthlightRigidMemory;
 using NorthlightRigidGeometry::oneBoneTemplate;using NorthlightRigidGeometry::worldBone;using NorthlightRigidGeometry::staticPlacement;using NorthlightRigidGeometry::PlacementIndex;
 using NorthlightActorDeformation::Program;
+// 0.3.176 (S1): the 0.3.175 index (a hash map of per-cell vectors), verbatim: the reference of the flat one.
+class MapPlacementIndex {
+    struct Item {float x=0,y=0,z=0;std::uint32_t index=0;};
+    std::unordered_map<std::uint64_t,std::vector<Item>> cells_;std::size_t items_=0;
+    static std::uint64_t key(long x,long y){return (std::uint64_t(std::uint32_t(x))<<32)|std::uint32_t(y);}
+    static long cell(float v){return long(std::floor(v/16.f));}
+public:
+    const void* scene=nullptr;std::uint64_t revision=0;std::size_t next=0;bool complete=false;
+    void reset(const void* s,std::uint64_t r){cells_.clear();items_=0;scene=s;revision=r;next=0;complete=false;}
+    void add(float x,float y,float z,std::uint32_t index){if(!std::isfinite(x)||!std::isfinite(y)||!std::isfinite(z))return;cells_[key(cell(x),cell(y))].push_back({x,y,z,index});++items_;}
+    std::size_t size()const{return items_;}
+    template<class Match> bool find(const float* root,float tolerance,Match match)const{
+        if(!std::isfinite(root[0])||!std::isfinite(root[1]))return false;const long cx=cell(root[0]),cy=cell(root[1]);
+        for(long dx=-1;dx<=1;++dx)for(long dy=-1;dy<=1;++dy){auto it=cells_.find(key(cx+dx,cy+dy));if(it==cells_.end())continue;
+            for(const auto& i:it->second)if(std::fabs(i.x-root[0])<=tolerance&&std::fabs(i.y-root[1])<=tolerance&&std::fabs(i.z-root[2])<=tolerance&&match(i.index))return true;}
+        return false;
+    }
+};
 static std::vector<NorthlightActorDeformation::Word> load(const char* path){
     FILE* f=std::fopen(path,"rb");assert(f);std::fseek(f,0,SEEK_END);long size=std::ftell(f);std::rewind(f);
     std::vector<NorthlightActorDeformation::Word> w(size_t(size)/4);assert(std::fread(w.data(),1,size_t(size),f)==size_t(size));std::fclose(f);return w;}
@@ -349,7 +367,54 @@ static void staticFlood(){
     assert(scene.screens==screens&&scene.reg.entries().size()==12&&scene.reg.stats().statics==statics); /* screened once: never asked again */
     std::printf("PASS static-doodad flood: %zu doodads in range (%zu real world-cache placements, scale .4-2.2) screened and never remembered, %zu beyond 72 yd never screened, 11 signs and a spawned crate beside its static twin remembered (%u frames), %u screen calls\n",statics,sizeof tradeDistrict/sizeof*tradeDistrict,far,frame,screens);
 }
+// 0.3.176 (S1): the flat placement index against the 0.3.175 map index. Real world-cache placements
+// (the trade district and Goldshire fixture) among 30000 synthetic ones (all categories, shared cells,
+// negative and huge coordinates, non-finite origins), stepped RigidIndexStep (2048) at a time with the
+// renderer's category filter; after every step the same size, next and complete, and the same find()
+// answer for exact, near, far and non-finite roots with both match users (the static placement and
+// "any", the doodad-body test) and a selective one.
+static void flatIndex(){
+    struct Place {unsigned category;float m[9],t[3];};std::vector<Place> all;std::mt19937 rng(1176);
+    for(const auto& r:tradeDistrict){Place p{r.category,{},{}};std::memcpy(p.m,r.m,36);std::memcpy(p.t,r.t,12);all.push_back(p);}
+    std::uniform_real_distribution<float> near(-400,400),angle(-3.1f,3.1f),scale(.4f,2.2f);const float centre[2]={-8850,620};
+    for(unsigned i=0;i<30000;++i){Place p{unsigned(rng()%5),{},{}};rotZ(angle(rng),scale(rng),p.m);
+        const unsigned kind=rng()%100;
+        if(kind<60){p.t[0]=centre[0]+near(rng);p.t[1]=centre[1]+near(rng);}
+        else if(kind<80){const auto& o=all[rng()%all.size()];p.t[0]=o.t[0]+float(int(rng()%5)-2)*.01f;p.t[1]=o.t[1]+float(int(rng()%5)-2)*16.f;} /* shared and adjacent cells */
+        else if(kind<95){p.t[0]=float(int(rng()%34000)-17000);p.t[1]=float(int(rng()%34000)-17000);}
+        else{const float bad[]={NAN,INFINITY,-INFINITY,3e38f,-3e38f};p.t[0]=bad[rng()%5];p.t[1]=rng()%2?bad[rng()%5]:centre[1];}
+        p.t[2]=rng()%50?90.f+float(rng()%40):NAN;all.push_back(p);}
+    std::shuffle(all.begin()+1,all.end(),rng);
+    MapPlacementIndex old;PlacementIndex flat;int token=0;
+    old.reset(&token,1);flat.reset(&token,1,all.size());
+    auto step=[&](auto& x){for(const size_t end=std::min(all.size(),x.next+2048);x.next<end;++x.next){const auto& place=all[x.next];
+        if(place.category==1||place.category==3)x.add(place.t[0],place.t[1],place.t[2],std::uint32_t(x.next));}x.complete=x.next==all.size();};
+    size_t queries=0,hits=0,placedHits=0,steps=0;
+    while(!old.complete){step(old);step(flat);++steps;
+        assert(old.size()==flat.size()&&old.next==flat.next&&old.complete==flat.complete);
+        for(unsigned q=0;q<3000;++q){
+            float root[3],axes[9];const auto& o=all[rng()%all.size()];const unsigned kind=rng()%6;
+            for(unsigned k=0;k<3;++k)root[k]=o.t[k];for(unsigned r=0;r<3;++r)for(unsigned w=0;w<3;++w)axes[r*3+w]=o.m[w*3+r]; /* model axes: matrix columns */
+            if(kind==1)for(unsigned k=0;k<3;++k)root[k]+=float(int(rng()%21)-10)*.006f;          /* within / across the tolerance */
+            else if(kind==2){root[0]=centre[0]+near(rng);root[1]=centre[1]+near(rng);root[2]=100;}
+            else if(kind==3){root[rng()%3]=NAN;}
+            else if(kind==4)for(unsigned k=0;k<2;++k)root[k]=std::floor(root[k]/16.f)*16.f+(rng()%2?-.01f:.01f); /* cell borders */
+            const float tolerance=rng()%4?.05f:.5f;
+            auto placed=[&](std::uint32_t i){return staticPlacement(root,axes,all[i].t,all[i].m);};
+            auto any=[](std::uint32_t){return true;};
+            const std::uint32_t pick=std::uint32_t(rng()%all.size());auto selective=[&](std::uint32_t i){return i%7==pick%7;};
+            const bool a=old.find(root,tolerance,placed),b=old.find(root,tolerance,any),c=old.find(root,tolerance,selective);
+            assert(a==flat.find(root,tolerance,placed)&&b==flat.find(root,tolerance,any)&&c==flat.find(root,tolerance,selective));
+            ++queries;hits+=a+b+c;placedHits+=a;}
+    }
+    assert(steps==(all.size()+2047)/2048&&flat.complete&&placedHits>500&&hits>queries/20);
+    flat.reset(nullptr,0);assert(flat.size()==0);float root[3]={all[0].t[0],all[0].t[1],all[0].t[2]};assert(!flat.find(root,.05f,[](std::uint32_t){return true;}));
+    PlacementIndex grown;grown.reset(&token,2); /* no reservation: the table grows */
+    for(size_t i=0;i<all.size();++i)grown.add(all[i].t[0],all[i].t[1],all[i].t[2],std::uint32_t(i));
+    for(unsigned q=0;q<2000;++q){const auto& o=all[rng()%all.size()];assert(grown.find(o.t,.05f,[](std::uint32_t){return true;})==(std::isfinite(o.t[0])&&std::isfinite(o.t[1])&&std::isfinite(o.t[2])));}
+    std::printf("PASS flat placement index == 0.3.175 map index: %zu placements (%zu real), %zu steps of 2048, %zu queries x 3 match users, %zu hits (%zu static placements)\n",all.size(),sizeof tradeDistrict/sizeof*tradeDistrict,steps,queries,hits,placedHits);
+}
 int main(int argc,char** argv){
-    assert(argc>1);settle();sticky();ranges();held();forgetting();identity();absence();states();trackMerge();caps();rebaseRoundTrip();oneBoneProgram(argv[1]);realSign();staticFlood();
+    assert(argc>1);settle();sticky();ranges();held();forgetting();identity();absence();states();trackMerge();caps();rebaseRoundTrip();oneBoneProgram(argv[1]);realSign();staticFlood();flatIndex();
     std::puts("rigid memory: all passed");
 }

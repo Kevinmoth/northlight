@@ -54,20 +54,58 @@ inline bool staticPlacement(const float* root,const float* axes,const float* tra
 // Static-cache placement origins bucketed in 16 yd cells, built a bounded number
 // of placements per frame for one scene identity (a large city scene never
 // stalls a frame); find() visits the placements within 3x3 cells of a root.
+// 0.3.176 (S1): a flat cell table (open addressing on the cell key) whose cells
+// head chains through one item vector, both reserved from the scene's placement
+// count at reset(), instead of a hash map of per-cell vectors. The same items
+// (non-finite origins skipped) and the same find() answer: match is pure, so the
+// visit order within the 3x3 cells does not matter.
 class PlacementIndex {
-    struct Item {float x=0,y=0,z=0;std::uint32_t index=0;};
-    std::unordered_map<std::uint64_t,std::vector<Item>> cells_;std::size_t items_=0;
+    static constexpr std::uint32_t None=0xffffffffu;
+    struct Item {float x=0,y=0,z=0;std::uint32_t index=0,next=None;};
+    struct Slot {std::uint64_t key=0;std::uint32_t head=None;}; /* head None: empty */
+    std::vector<Item> items_;std::vector<Slot> slots_;std::size_t cells_=0;
     static std::uint64_t key(long x,long y){return (std::uint64_t(std::uint32_t(x))<<32)|std::uint32_t(y);}
     static long cell(float v){return long(std::floor(v/16.f));}
+    static std::size_t hash(std::uint64_t k){k^=k>>31;k*=0x9e3779b97f4a7c15ull;k^=k>>29;return std::size_t(k);}
+    const Slot* lookup(std::uint64_t k)const{
+        if(slots_.empty())return nullptr;const std::size_t mask=slots_.size()-1;
+        for(std::size_t i=hash(k)&mask;;i=(i+1)&mask){const Slot& s=slots_[i];if(s.head==None)return nullptr;if(s.key==k)return &s;}
+    }
+    Slot& insert(std::vector<Slot>& table,std::uint64_t k){
+        const std::size_t mask=table.size()-1;std::size_t i=hash(k)&mask;
+        while(table[i].head!=None&&table[i].key!=k)i=(i+1)&mask;
+        return table[i];
+    }
+    // Room for one more cell at a load of at most one half.
+    void room(std::size_t cells){
+        if(2*cells<=slots_.size())return;
+        std::size_t size=16;while(size<2*cells)size*=2;
+        std::vector<Slot> table(size);for(const auto& s:slots_)if(s.head!=None)insert(table,s.key)=s;
+        slots_.swap(table);
+    }
 public:
     const void* scene=nullptr;std::uint64_t revision=0;std::size_t next=0;bool complete=false;
-    void reset(const void* s,std::uint64_t r){cells_.clear();items_=0;scene=s;revision=r;next=0;complete=false;}
-    void add(float x,float y,float z,std::uint32_t index){if(!std::isfinite(x)||!std::isfinite(y)||!std::isfinite(z))return;cells_[key(cell(x),cell(y))].push_back({x,y,z,index});++items_;}
-    std::size_t size()const{return items_;}
+    // placements: the scene's placement count (an upper bound of the items and cells). No scene: the
+    // memory is released.
+    void reset(const void* s,std::uint64_t r,std::size_t placements=0){
+        scene=s;revision=r;next=0;complete=false;items_.clear();cells_=0;
+        if(!s){std::vector<Item>().swap(items_);std::vector<Slot>().swap(slots_);return;}
+        std::fill(slots_.begin(),slots_.end(),Slot{});
+        if(placements){items_.reserve(placements);room(placements);}
+    }
+    void add(float x,float y,float z,std::uint32_t index){
+        if(!std::isfinite(x)||!std::isfinite(y)||!std::isfinite(z))return;
+        const std::uint64_t k=key(cell(x),cell(y));
+        room(cells_+1);items_.push_back({x,y,z,index,None});
+        Slot& s=insert(slots_,k);if(s.head==None){s.key=k;++cells_;}
+        items_.back().next=s.head;s.head=std::uint32_t(items_.size()-1);
+    }
+    std::size_t size()const{return items_.size();}
     template<class Match> bool find(const float* root,float tolerance,Match match)const{
         if(!std::isfinite(root[0])||!std::isfinite(root[1]))return false;const long cx=cell(root[0]),cy=cell(root[1]);
-        for(long dx=-1;dx<=1;++dx)for(long dy=-1;dy<=1;++dy){auto it=cells_.find(key(cx+dx,cy+dy));if(it==cells_.end())continue;
-            for(const auto& i:it->second)if(std::fabs(i.x-root[0])<=tolerance&&std::fabs(i.y-root[1])<=tolerance&&std::fabs(i.z-root[2])<=tolerance&&match(i.index))return true;}
+        for(long dx=-1;dx<=1;++dx)for(long dy=-1;dy<=1;++dy){const Slot* s=lookup(key(cx+dx,cy+dy));if(!s)continue;
+            for(std::uint32_t n=s->head;n!=None;n=items_[n].next){const Item& i=items_[n];
+                if(std::fabs(i.x-root[0])<=tolerance&&std::fabs(i.y-root[1])<=tolerance&&std::fabs(i.z-root[2])<=tolerance&&match(i.index))return true;}}
         return false;
     }
 };

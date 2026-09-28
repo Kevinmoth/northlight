@@ -51,7 +51,7 @@
     void rigidIndexStep(){
         if(!staticScene||staticScene->map!=lastRequest.map)return;auto& x=rigidIndex;const auto& all=staticScene->placements;
         const bool timed=profileSampled();const auto started=timed?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
-        if(x.scene!=staticScene.get()||x.revision!=rigidSceneRevision(*staticScene))x.reset(staticScene.get(),rigidSceneRevision(*staticScene));
+        if(x.scene!=staticScene.get()||x.revision!=rigidSceneRevision(*staticScene))x.reset(staticScene.get(),rigidSceneRevision(*staticScene),all.size());
         const size_t first=x.next;
         for(const size_t end=std::min(all.size(),x.next+RigidIndexStep);x.next<end;++x.next){const auto& place=all[x.next];
             if(place.category==1||place.category==3)x.add(place.translation.x,place.translation.y,place.translation.z,std::uint32_t(x.next));}
