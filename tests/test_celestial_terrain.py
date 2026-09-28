@@ -14,7 +14,7 @@ w=fp.src('world_renderer.h').read_text();sky=fp.src('celestial_disc_renderer.h')
 draw=w[w.index('    bool drawCelestialTerrain(unsigned body,const float* matrix){'):w.index('    void noteCelestialTerrainReuse(')]
 checks={
  'terrain list rebuilt only at the mesh commit and cleared with the mesh':w.count('rebuildTerrainLists();')==1 and '++meshGeneration;rebuildTerrainLists();' in w
-    and 'batches.clear();terrainBatchList.clear();terrainBatchListGeneration=UINT64_MAX;' in w and 'rebuildTerrainLists' not in sky and 'rebuildTerrainLists' not in draw,
+    and 'batches.clear();terrainBatchList.clear();shadowTerrainList.clear();terrainBatchListGeneration=UINT64_MAX;' in w and 'rebuildTerrainLists' not in sky and 'rebuildTerrainLists' not in draw,
  'merged runs only with this generation\'s list, per-batch fallback otherwise':'const bool listed=terrainBatchListGeneration==meshGeneration&&terrainBatchListSize==batches.size();' in draw
     and 'NorthlightCelestialTerrain::forEachRun(batches,terrainBatchList,NorthlightWorldMeshPages::PageIndexLimit,accept,emit,runs);' in draw
     and 'DrawIndexedPrimitive(D3DPT_TRIANGLELIST,0,r.minVertex,UINT(r.vertexEnd-r.minVertex),r.start,r.count)' in draw,

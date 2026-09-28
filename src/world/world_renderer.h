@@ -471,11 +471,16 @@ private:
     std::vector<Batch> batches;
     // 0.3.175 (S1a): indices of this mesh generation's terrain batches, in batch order; rebuilt only
     // at the mesh commit (rebuildTerrainLists), valid while terrainBatchListGeneration==meshGeneration.
-    std::vector<uint32_t> terrainBatchList;uint64_t terrainBatchListGeneration=UINT64_MAX;size_t terrainBatchListSize=0;
+    // 0.3.175 (S2): shadowTerrainList, the terrain batches outside this generation's fixed chunks
+    // (the directional terrain selection then tests only the live chunks), for terrainListFixed.
+    std::vector<uint32_t> terrainBatchList,shadowTerrainList;uint64_t terrainBatchListGeneration=UINT64_MAX;size_t terrainBatchListSize=0;const void* terrainListFixed=nullptr;
     void rebuildTerrainLists(){
-        terrainBatchListGeneration=UINT64_MAX;terrainBatchList.clear();
-        try{for(size_t i=0;i<batches.size()&&i<UINT32_MAX;++i)if(batches[i].terrain)terrainBatchList.push_back(uint32_t(i));}catch(...){terrainBatchList.clear();return;} /* fallback: the whole batch list */
-        terrainBatchListSize=batches.size();terrainBatchListGeneration=meshGeneration;
+        terrainBatchListGeneration=UINT64_MAX;terrainBatchList.clear();shadowTerrainList.clear();
+        const auto& fixed=fixedTerrainChunks();
+        try{for(size_t i=0;i<batches.size()&&i<UINT32_MAX;++i)if(batches[i].terrain){terrainBatchList.push_back(uint32_t(i));
+                if(!fixed.count({batches[i].chunkX,batches[i].chunkY}))shadowTerrainList.push_back(uint32_t(i));}}
+        catch(...){terrainBatchList.clear();shadowTerrainList.clear();return;} /* fallback: the whole batch list */
+        terrainBatchListSize=batches.size();terrainListFixed=&fixed;terrainBatchListGeneration=meshGeneration;
     }
     // CELESTIAL terrain mask line (rate-limited): the last redraw, and per body (sun, moon) redraws/reuses since the line.
     struct CelestialMaskStats {size_t candidates=0;unsigned accepted=0,runs=0,redraws[2]={},reuses[2]={};uint64_t triangles=0;bool listed=false;double ms=0,peakMs=0;DWORD lastLog=0;} celestialMask;
@@ -527,7 +532,7 @@ private:
     NorthlightStateBlockPool stateBlocks;
     unsigned terrainAttempts=0,terrainSnapshots=0,terrainFailures=0;
     NorthlightTerrainCapture::FrameCache terrainBoundsCache;
-    std::set<std::pair<int,int>> liveTerrainChunks;
+    NorthlightTerrainCandidates::ChunkSet liveTerrainChunks; /* 0.3.175: the set plus a flat bitmap */
     UINT width=0,height=0,vertexCount=0;
     struct Replay {
         IDirect3DVertexShader9* shader=nullptr,*originalShader=nullptr;
@@ -1268,7 +1273,7 @@ private:
       workerBusy=false;
     }
     bool check(HRESULT h,const char* s){if(SUCCEEDED(h))return true;if(!failed)logf("WORLD DISABLED: %s HRESULT=%08lx",s,(unsigned long)h);failed=true;return false;}
-    void clearMesh(){staticCasters.settle();dropStaticDirtyJobs();vertices=nullptr;indices=nullptr;for(auto& m:materials)drop(m);materials.clear();uploadedTextureBytes=0;batches.clear();terrainBatchList.clear();terrainBatchListGeneration=UINT64_MAX;uploadedAlphaCutoffs.clear();uploadedLocalShadowRecords.reset();uploaded.reset();}
+    void clearMesh(){staticCasters.settle();dropStaticDirtyJobs();vertices=nullptr;indices=nullptr;for(auto& m:materials)drop(m);materials.clear();uploadedTextureBytes=0;batches.clear();terrainBatchList.clear();shadowTerrainList.clear();terrainBatchListGeneration=UINT64_MAX;uploadedAlphaCutoffs.clear();uploadedLocalShadowRecords.reset();uploaded.reset();}
     bool target(UINT w,UINT h,D3DFORMAT fmt,IDirect3DTexture9** t,IDirect3DSurface9** s){return check(d->CreateTexture(w,h,1,D3DUSAGE_RENDERTARGET,fmt,D3DPOOL_DEFAULT,t,nullptr),"world render texture")&&check((*t)->GetSurfaceLevel(0,s),"world render surface");}
     bool resources(UINT w,UINT h,D3DFORMAT fmt){
         if(width==w&&height==h&&color)return true;
@@ -2520,8 +2525,11 @@ public:
         NorthlightTerrainCandidates::Selection<> terrainCandidates(directionalTerrainScratch);
         std::chrono::steady_clock::time_point terrainPrepareStart;double terrainPrepareMs=0;
         if(captureSampled)terrainPrepareStart=std::chrono::steady_clock::now();
-        if(effects.shadows&&(sourceActive[0]||sourceActive[1]))
-            terrainCandidates.prepare(batches,fixedTerrainChunks(),liveTerrainChunks,captureSampled);
+        if(effects.shadows&&(sourceActive[0]||sourceActive[1])){
+            // 0.3.175 (S2): this generation's terrain-outside-fixed list, when it belongs to these batches and fixed set.
+            if(terrainBatchListGeneration==meshGeneration&&terrainBatchListSize==batches.size()&&terrainListFixed==&fixedTerrainChunks())
+                terrainCandidates.prepareListed(batches,shadowTerrainList,fixedTerrainChunks(),liveTerrainChunks,captureSampled);
+            else terrainCandidates.prepare(batches,fixedTerrainChunks(),liveTerrainChunks,captureSampled);}
         if(captureSampled)terrainPrepareMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-terrainPrepareStart).count();
         bool anyShadowCacheRender=false;
         ++shadowPasses;

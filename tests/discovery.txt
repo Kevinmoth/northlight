@@ -98,6 +98,7 @@ test_terrain_cache_capacity.py
 test_terrain_capture_bounds.py
 test_terrain_capture_optimization.py
 test_terrain_content_cache.py
+test_terrain_shadow_candidates.py
 test_terrain_shared_snapshot.py
 test_terrain_snapshot.py
 test_terrain_tracked_cache.py
