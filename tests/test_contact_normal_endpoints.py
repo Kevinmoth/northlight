@@ -69,6 +69,8 @@ def run_region(ground,wall,shift=0,quantize=True):
      qx=math.floor(qx+.5);qy=math.floor(qy+.5)
      valid=valid and agreement(a,sub(q,sample(qx-dx,qy-dy)))>=WIDE
     wide.append(q if valid else near)
+   # r77: the wide pair only when both wide samples pass (the current HLSL).
+   if fixed and (wide[0] is a1 or wide[1] is b1):wide=[a1,b1]
    da,db=sub(p,wide[0]),sub(wide[1],p)
    if agreement(da,db)>=.85:t=sub(wide[1],wide[0])
    else:
@@ -95,7 +97,7 @@ assert old>15,(old,new)
 assert new<1,(old,new)
 # r76: synthetic scenes on the captured camera and ground plane. The mirror of WorldNormals'
 # fixed path with the wide-sample threshold as a parameter; reports which wide samples it took.
-def scene_normal(surface,x,y,limit):
+def scene_normal(surface,x,y,limit,both=True):
  def sample(x,y):
   x=max(0,min(w-1,math.floor(x+.5)));y=max(0,min(h-1,math.floor(y+.5)))
   near,far=c[0][2:4];z=surface(x,y)
@@ -109,6 +111,7 @@ def scene_normal(surface,x,y,limit):
    dx,dy=mul(step,direction);qx=math.floor(x+dx*pixels+.5);qy=math.floor(y+dy*pixels+.5);q=sample(qx,qy)
    valid=abs(q[2]-p[2])<=max(.35,z*.04) and min(agreement(sub(near,p),sub(q,p)),agreement(sub(near,p),sub(q,sample(qx-dx,qy-dy))))>=limit
    wide.append(q if valid else near);taken.append(valid)
+  if both and not (taken[-1] and taken[-2]):wide=[a1,b1]  # r77: both wide samples or neither
   da,db=sub(p,wide[0]),sub(wide[1],p)
   if agreement(da,db)>=.85:t=sub(wide[1],wide[0])
   else:
@@ -150,14 +153,21 @@ def hill_scene(bend,crease=.3):
  return surface
 box=box_scene(.6,1.2)
 assert box(X0,Y0-round(WIDE_PX))<ground_hit(X0,Y0-round(WIDE_PX))[2]*sign  # the wide sample lands on the object's top
-base={limit:scene_normal(box,X0,Y0,limit) for limit in (.85,.95)}
+base={.85:scene_normal(box,X0,Y0,.85,both=False),.95:scene_normal(box,X0,Y0,.95)}  # 0.3.174 rule, current rule
 assert base[.85][0]>10 and base[.95][0]<1,base  # a .6 u object 1.2 u away: 0.3.174 tilted the ground, r76 does not
 # At this grazing view (about 21 degrees down) a bend across the screen row reaches the 1-px
 # continuation test amplified about 2.7x, so the acceptance limit is a few degrees of real bend
 # (.95: about 6, .85: about 11); gentle bends inside it keep the wide sample.
+# r77: a .5 u top 1.0 u away passes the .95 test on the upward side while the downward wide
+# sample fails the depth test; the lone wide sample against the 1-px neighbour tilted the
+# ground about 17 degrees (0.3.175). Both-or-neither keeps it flat.
+lone=box_scene(.5,1.0)
+asymmetric={'one wide sample':scene_normal(lone,X0,Y0,WIDE,both=False),'both or neither':scene_normal(lone,X0,Y0,WIDE)}
+assert asymmetric['one wide sample'][1][2:]==[True,False]  # upward on the top taken, downward rejected
+assert asymmetric['one wide sample'][0]>10 and asymmetric['both or neither'][0]<1,asymmetric
 hill={bend:scene_normal(hill_scene(bend),X0,Y0,WIDE) for bend in (3,5)}
-assert all(taken[1] for _,taken,_ in hill.values()),hill  # gentle bends keep the +x wide sample
-limit_bend={limit:max(b/2 for b in range(0,61) if scene_normal(hill_scene(b/2),X0,Y0,limit)[1][1]) for limit in (.85,.95)}
+assert all(taken[0] and taken[1] for _,taken,_ in hill.values()),hill  # gentle bends keep the x wide pair
+limit_bend={limit:max(b/2 for b in range(0,61) if all(scene_normal(hill_scene(b/2),X0,Y0,limit)[1][:2])) for limit in (.85,.95)}
 # Analytic near/far raster tests also cover signed view Z through the existing
 # raster reconstruction regression. This fixture targets the captured LH view.
 nb=Buffer(CAP/'capture-1-normals.fgr');lb=Buffer(CAP/'capture-1-light.fgr')
@@ -168,7 +178,8 @@ report={'status':'PASS','capture':'0.3.69/capture-1','game_or_gpu_launched':Fals
  'captured_normal_jump_degrees':math.degrees(math.acos(max(-1,min(1,dot(unit(a),unit(b)))))),
  'fitted_plane_regression':{'old_max_normal_error_degrees':old,'new_max_normal_error_degrees':new},
  'object_06u_at_12u_normal_tilt_degrees':{'0.85':base[.85][0],'0.95':base[.95][0]},
- 'hill_x_wide_sample_taken':{str(k):v[1][1] for k,v in hill.items()},
+ 'asymmetric_05u_at_10u_normal_tilt_degrees':{k:v[0] for k,v in asymmetric.items()},
+ 'hill_x_wide_pair_taken':{str(k):all(v[1][:2]) for k,v in hill.items()},
  'largest_hill_bend_keeping_the_wide_sample_degrees':{str(k):v for k,v in limit_bend.items()},
  'scope':'CPU planes fitted to capture, five wall offsets; patched GPU visual confirmation pending'}
 print(json.dumps(report,indent=2))

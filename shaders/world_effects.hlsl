@@ -331,6 +331,10 @@ float4 WorldNormals(float2 uv:TEXCOORD0):COLOR0 {
         float3 b1=viewPosition(right,normalizedDepth(right));
         float3 a=wideNeighbour(c,-step,pixels,lo,hi,p,z,a1);
         float3 b=wideNeighbour(c, step,pixels,lo,hi,p,z,b1);
+        // r77: the wide pair only when BOTH wide samples pass. One wide sample on a low object's
+        // top against the other side's 1-px neighbour spans the whole secant (a tilt of up to
+        // 18 degrees) beside the object; the 1-px pair keeps flat ground flat.
+        if(all(a==a1)||all(b==b1)){a=a1;b=b1;}
         float3 t=tangentAxis(p,a,b,a1,b1,confidence);
         if(axis==0)tx=t;else ty=t;
     }
