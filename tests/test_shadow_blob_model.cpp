@@ -89,13 +89,22 @@ int main(int argc,char** argv){
     assert(rejected>=100);
     std::printf("model: 32x32, %u opaque, BGRA8 round trip accepted, %u of %zu variants rejected\n",opaque,rejected,variants(model).size());
     sixteenBit();
-    // The model as A1R5G5B5 / A4R4G4B4 uploads is accepted; every variant keeps its
-    // 8-bit verdict through an A1R5G5B5 upload (no new claims from the 16-bit path).
+    // The model as A1R5G5B5 / A4R4G4B4 uploads is accepted. The filter's 16-bit formats
+    // add no claims: through A1R5G5B5 every variant keeps its 8-bit verdict, and
+    // X1R5G5B5 (no alpha) can only lose accepts. A4R4G4B4 is decoded (GI) but not
+    // mapped by the filter: its 17-level colour steps pull a 30-darker disc under the
+    // colour threshold, a new accept.
     for(bool round:{false,true})for(Format f:{Format::ARGB1555,Format::ARGB4444})assert(accepted(upload(model,f,round),model));
-    unsigned kept=0;const auto modelVariants=variants(model);
-    for(auto& v:modelVariants){const bool a=accepted(v,model),b=accepted(upload(v,Format::ARGB1555),model);if(a==b)++kept;else std::printf("A1R5G5B5 verdict differs: 8-bit=%d 16-bit=%d\n",a,b);}
-    assert(kept==modelVariants.size());
-    std::printf("16-bit: A1R5G5B5/X1R5G5B5/A4R4G4B4 decode exact; model accepted as A1R5G5B5 and A4R4G4B4; %u of %zu variants keep their verdict as A1R5G5B5\n",kept,modelVariants.size());
+    const auto modelVariants=variants(model);
+    for(Format f:{Format::ARGB1555,Format::ARGB4444,Format::XRGB1555}){
+        const char* name=f==Format::ARGB1555?"A1R5G5B5":f==Format::ARGB4444?"A4R4G4B4":"X1R5G5B5";
+        unsigned kept=0,added=0,accepts=0;
+        for(auto& v:modelVariants){const bool a=accepted(v,model),b=accepted(upload(v,f),model);kept+=a==b;added+=b&&!a;accepts+=b;
+            if(a!=b)std::printf("%s verdict differs: 8-bit=%d 16-bit=%d\n",name,a,b);}
+        std::printf("16-bit %s: %u of %zu variants keep their verdict, %u accepted, %u new accepts%s\n",name,kept,modelVariants.size(),accepts,added,f==Format::ARGB4444?" (not a filter format)":"");
+        if(f!=Format::ARGB4444)assert(!added&&(f==Format::XRGB1555||kept==modelVariants.size()));
+    }
+    std::puts("16-bit: A1R5G5B5/X1R5G5B5/A4R4G4B4 decode exact; model accepted as A1R5G5B5 and A4R4G4B4");
     if(argc<2)return 0;
     FILE* f=std::fopen(argv[1],"rb");assert(f);Pixels real(Bytes);assert(std::fread(real.data(),1,Bytes,f)==Bytes);std::fclose(f);
     double alpha=0,colour=0;

@@ -25,8 +25,9 @@ class NorthlightShadowBlobFilter {
         using Format=NorthlightActorTexture::Format;Format format;
         switch(desc.Format){case D3DFMT_A8R8G8B8:format=Format::BGRA8;break;case D3DFMT_X8R8G8B8:format=Format::BGRX8;break;case D3DFMT_R5G6B5:format=Format::RGB565;break;
         case D3DFMT_DXT1:format=Format::BC1;break;case D3DFMT_DXT3:format=Format::BC2;break;case D3DFMT_DXT5:format=Format::BC3;break;
-        // 0.3.171: shadowblob.blp has 1-bit alpha; the game uploads it as A1R5G5B5.
-        case D3DFMT_A1R5G5B5:format=Format::ARGB1555;break;case D3DFMT_X1R5G5B5:format=Format::XRGB1555;break;case D3DFMT_A4R4G4B4:format=Format::ARGB4444;break;
+        // 0.3.171: shadowblob.blp has 1-bit alpha; the game uploads it as A1R5G5B5. Not
+        // A4R4G4B4: 4-bit colour steps can bring a non-blob grey within the colour threshold.
+        case D3DFMT_A1R5G5B5:format=Format::ARGB1555;break;case D3DFMT_X1R5G5B5:format=Format::XRGB1555;break;
         default:if(unsupported++<4)logf("SHADOWBLOB candidate %ux%u format=%u unsupported by decoder",desc.Width,desc.Height,unsigned(desc.Format));return false;}
         if(desc.Usage&(D3DUSAGE_RENDERTARGET|D3DUSAGE_DEPTHSTENCIL|D3DUSAGE_DYNAMIC))return false;
         const UINT rows=NorthlightActorTexture::rowCount(desc.Height,format);
