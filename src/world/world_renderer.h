@@ -493,6 +493,7 @@ private:
     NorthlightTerrainCandidates::Scratch<> directionalTerrainScratch; // bounded capacity only; eligibility is render-local
     std::shared_ptr<const std::set<std::pair<int,int>>> fixedTerrain; /* immutable, shared with the worker-prepared commit */
     const std::set<std::pair<int,int>>& fixedTerrainChunks()const{static const std::set<std::pair<int,int>> none;return fixedTerrain?*fixedTerrain:none;}
+    NorthlightShadowTerrain::FixedChunkBits fixedTerrainBits; /* 0.3.176 (U1c): beside fixedTerrain, filled at the commit */
     std::string uploadedMap;
     IDirect3DIndexBuffer9* liveIndicesGPU=nullptr;
     UINT liveIndexBytes=0;
@@ -525,8 +526,7 @@ private:
     NorthlightReplayMetadata::Cache<NorthlightReplayBounds::Prepared,IDirect3DVertexShader9,IDirect3DVertexDeclaration9> replayBoundsMetadata;
     std::unordered_set<IDirect3DVertexShader9*> terrainShaders;
     NorthlightLiveTerrainGPU::Cache<NorthlightTerrainCapture::MeshSnapshot,NorthlightGI::WorldVertex> liveTerrainGPU;
-    std::vector<uint32_t> liveTerrainIndices;
-    std::vector<uint32_t> liveDirectionalIndices;
+    size_t liveTerrainIndexCount=0,liveDirectionalIndexCount=0; /* 0.3.176 (U1a): the live IB holds the point lists, then the directional */
     uint64_t liveTerrainGeneration=0;
     // Ordered immutable captures preserve exact point-light batch offsets.
     // Vertex residency is per capture; the compact active index stream keeps
@@ -1485,7 +1485,7 @@ private:
                 batches=std::move(committedBatches);uploadedAlphaCutoffs=std::move(cutoffs);
                 // Replaced shared sets may be last owners (~7000 + ~3000 nodes).
                 {auto& reaper=NorthlightStreaming::cpuRetirement();
-                 std::swap(fixedTerrain,committedFixed);std::swap(uploadedStaticOwners,committedOwners);
+                 std::swap(fixedTerrain,committedFixed);std::swap(uploadedStaticOwners,committedOwners);fixedTerrainBits.assign(fixedTerrain.get());
                  if(committedFixed)retirementBacklog.retire(reaper,committedFixed,committedFixed->size()*48);
                  if(committedOwners)retirementBacklog.retire(reaper,committedOwners,committedOwners->placements*(sizeof(StaticShadow::Placement)+64));}
                 uploaded=next.bvh;uploadedMap=std::move(committedMap);
@@ -1552,31 +1552,31 @@ private:
         if(terrainResult==S_FALSE){
             // Preserve the existing memory-pressure fallback: the complete
             // cached terrain covers this frame; do not advertise absent live chunks.
-            liveTerrainIndices.clear();liveDirectionalIndices.clear();liveTerrainChunks.clear();uploadedTerrain.clear();return true;
+            liveTerrainIndexCount=liveDirectionalIndexCount=0;liveTerrainChunks.clear();uploadedTerrain.clear();return true;
         }
         if(!check(terrainResult,"live terrain arena upload"))return false;
         std::optional<NorthlightStreaming::PhaseProfile::Scope> indexPhase;indexPhase.emplace(streamingPhases.peaks[NorthlightStreaming::PhaseProfile::TerrainIndices]);
-        liveTerrainIndices.reserve(frameTerrainIndices);liveDirectionalIndices.reserve(frameTerrainIndices);
-        if(!liveTerrainGPU.indices(frameTerrain,meshGeneration,[&](const auto& snapshot,uint32_t offset,std::vector<uint32_t>& output){
-            NorthlightShadowTerrain::appendLiveDirectional(snapshot,fixedTerrainChunks(),offset,output,captureSampled?&terrainTriangleTests:nullptr);
-        },liveTerrainIndices,liveDirectionalIndices))return check(E_FAIL,"live terrain arena membership");
+        // 0.3.176 (U1a/U1c): the totals first, then the lists straight into the locked IB (the bytes and
+        // order of the 0.3.175 concatenation); fixed-chunk membership from the bitmap beside the set.
+        const auto& fixed=fixedTerrainChunks();const bool bits=fixedTerrainBits.source()==&fixed;
+        if(!liveTerrainGPU.prepare(frameTerrain,meshGeneration,[&](const auto& snapshot,uint32_t offset,std::vector<uint32_t>& output){
+            NorthlightShadowTerrain::appendLiveDirectionalBy(snapshot,[&](std::pair<int,int> c){return bits?fixedTerrainBits.contains(c):fixed.count(c)!=0;},offset,output,captureSampled?&terrainTriangleTests:nullptr);
+        },liveTerrainIndexCount,liveDirectionalIndexCount))return check(E_FAIL,"live terrain arena membership");
         indexPhase.reset();part(1);
-        if(liveTerrainIndices.empty()){uploadedTerrain=frameTerrain;liveTerrainGeneration=meshGeneration;return true;}
+        if(!liveTerrainIndexCount){uploadedTerrain=frameTerrain;liveTerrainGeneration=meshGeneration;return true;}
         auto indexUpload=streamingPhases.measure(NorthlightStreaming::PhaseProfile::TerrainIndexUpload);
-        UINT ib=UINT((liveTerrainIndices.size()+liveDirectionalIndices.size())*sizeof(uint32_t));
+        UINT ib=UINT((liveTerrainIndexCount+liveDirectionalIndexCount)*sizeof(uint32_t));
         if(ib>liveIndexBytes){
             const UINT ibCapacity=roundBuffer(ib,8*NorthlightGeometryMemory::MiB);
             if(!admitsGrowth("live-terrain-index-growth",ibCapacity)){
-                liveTerrainIndices.clear();liveDirectionalIndices.clear();liveTerrainChunks.clear();uploadedTerrain.clear();return true;
+                liveTerrainIndexCount=liveDirectionalIndexCount=0;liveTerrainChunks.clear();uploadedTerrain.clear();return true;
             }
             drop(liveIndicesGPU);liveIndexBytes=ibCapacity;
             if(!check(d->CreateIndexBuffer(liveIndexBytes,D3DUSAGE_DYNAMIC|D3DUSAGE_WRITEONLY,D3DFMT_INDEX32,D3DPOOL_DEFAULT,&liveIndicesGPU,nullptr),"live index buffer"))return false;
         }
         void* data=nullptr;
         if(!check(liveIndicesGPU->Lock(0,ib,&data,D3DLOCK_DISCARD),"live index upload"))return false;
-        const size_t originalBytes=liveTerrainIndices.size()*sizeof(uint32_t);
-        memcpy(data,liveTerrainIndices.data(),originalBytes);
-        if(!liveDirectionalIndices.empty())memcpy(static_cast<char*>(data)+originalBytes,liveDirectionalIndices.data(),liveDirectionalIndices.size()*sizeof(uint32_t));
+        liveTerrainGPU.write(static_cast<uint32_t*>(data));
         if(!check(liveIndicesGPU->Unlock(),"live index unlock"))return false;
         part(2);
         uploadedTerrain=frameTerrain;liveTerrainGeneration=meshGeneration;terrainUploadBytes=liveTerrainGPU.uploadedBytes+ib;
@@ -1636,7 +1636,7 @@ public:
         staticCasters.setAdmission([this](size_t bytes){return admitStaticAllocation(bytes);});
         worker=std::thread([this]{work();});}
     ~WorldRenderer(){{std::lock_guard<std::mutex> lock(mutex);stopping=true;}wake.notify_one();if(worker.joinable())worker.join();releaseGPU();for(auto& p:captureShaders)drop(p.second.replacement);for(auto& p:terrainShadowShaders)drop(p.second);}
-    void releaseGPU(){replayBoundsAbandon();releaseReplayProbe();staticCasters.settle();rigidMemoryClear();neutralShadowMaps=false;sampledVertices.clear();rigidBones.clear();actorShadowHistory.clear();actorShadowOriginValid=false;replayBoundsMetadata.clear();replayBoundsCache.clear();declarationCache.clear();uploadedStaticOwners.reset();staticOwnerGeneration=UINT64_MAX;staticCasters.reset();staticMatcher.clear();staticScene.reset();staticRetryTick=0;stateBlocks.clear();uploadedTerrain.clear();liveTerrainIndices.clear();liveDirectionalIndices.clear();fixedTerrain.reset();liveTerrainGeneration=0;drop(regionalFogTexture);drop(neutralAO);uploadedFogField.reset();releasePointGPU();probeActivation.reset();drop(baselineSurface);drop(baselineLight);releaseReplayGPU();liveTerrainGPU.clear();drop(liveIndicesGPU);liveIndexBytes=0;pendingMesh.reset();clearMesh();retiredMaterials.clear();releaseMeshPool();uploadedMap.clear();for(auto& t:shadow)drop(t);for(auto& s:shadowSurface)drop(s);for(auto& t:shadowCache)drop(t);for(auto& s:shadowCacheSurface)drop(s);drop(shadowCacheDepth);drop(shadowVerifySurface);drop(shadowVerify);for(auto& r:shadowVerifyRead)drop(r);drop(shadowScratch);drop(shadowScratchSurface);drop(unionPS);invalidateShadowCache();for(auto& t:probe)drop(t);drop(shadowDepth);drop(lightSurface);drop(fogSurface);drop(fogBlurredSurface);drop(colorSurface);drop(light);drop(fog);drop(fogBlurred);drop(color);drop(lightingPS);drop(giPS);drop(fogPS);drop(fogBlurPS);drop(localDirectPS);drop(temporalPS);drop(localFogPS);drop(normalsPS);drop(normalBuffer);drop(normalSurface);drop(sourceVisPS);for(int a=0;a<2;++a)for(int b=0;b<2;++b){drop(sourceVis[a][b]);drop(sourceVisSurface[a][b]);}sourceVisValid=false;for(int i=0;i<2;++i){drop(temporalLight[i]);drop(temporalLightSurface[i]);drop(temporalDepth[i]);drop(temporalDepthSurface[i]);}temporalValid=false;drop(finalPS);drop(shadowPS);drop(replayPS);drop(shadowVS);drop(cachedShadowVS);drop(cachedShadowPS);drop(cachedFastPS);drop(cachedOpaqueFastPS);drop(cachedOpaquePS);drop(shadowDecl);width=height=0;uploadedSerial=0;}
+    void releaseGPU(){replayBoundsAbandon();releaseReplayProbe();staticCasters.settle();rigidMemoryClear();neutralShadowMaps=false;sampledVertices.clear();rigidBones.clear();actorShadowHistory.clear();actorShadowOriginValid=false;replayBoundsMetadata.clear();replayBoundsCache.clear();declarationCache.clear();uploadedStaticOwners.reset();staticOwnerGeneration=UINT64_MAX;staticCasters.reset();staticMatcher.clear();staticScene.reset();staticRetryTick=0;stateBlocks.clear();uploadedTerrain.clear();liveTerrainIndexCount=liveDirectionalIndexCount=0;fixedTerrain.reset();fixedTerrainBits.reset();liveTerrainGeneration=0;drop(regionalFogTexture);drop(neutralAO);uploadedFogField.reset();releasePointGPU();probeActivation.reset();drop(baselineSurface);drop(baselineLight);releaseReplayGPU();liveTerrainGPU.clear();drop(liveIndicesGPU);liveIndexBytes=0;pendingMesh.reset();clearMesh();retiredMaterials.clear();releaseMeshPool();uploadedMap.clear();for(auto& t:shadow)drop(t);for(auto& s:shadowSurface)drop(s);for(auto& t:shadowCache)drop(t);for(auto& s:shadowCacheSurface)drop(s);drop(shadowCacheDepth);drop(shadowVerifySurface);drop(shadowVerify);for(auto& r:shadowVerifyRead)drop(r);drop(shadowScratch);drop(shadowScratchSurface);drop(unionPS);invalidateShadowCache();for(auto& t:probe)drop(t);drop(shadowDepth);drop(lightSurface);drop(fogSurface);drop(fogBlurredSurface);drop(colorSurface);drop(light);drop(fog);drop(fogBlurred);drop(color);drop(lightingPS);drop(giPS);drop(fogPS);drop(fogBlurPS);drop(localDirectPS);drop(temporalPS);drop(localFogPS);drop(normalsPS);drop(normalBuffer);drop(normalSurface);drop(sourceVisPS);for(int a=0;a<2;++a)for(int b=0;b<2;++b){drop(sourceVis[a][b]);drop(sourceVisSurface[a][b]);}sourceVisValid=false;for(int i=0;i<2;++i){drop(temporalLight[i]);drop(temporalLightSurface[i]);drop(temporalDepth[i]);drop(temporalDepthSurface[i]);}temporalValid=false;drop(finalPS);drop(shadowPS);drop(replayPS);drop(shadowVS);drop(cachedShadowVS);drop(cachedShadowPS);drop(cachedFastPS);drop(cachedOpaqueFastPS);drop(cachedOpaquePS);drop(shadowDecl);width=height=0;uploadedSerial=0;}
     // Explicit enable/retry only, called after the wrapper's clearFrame(). This
     // never calls endFrame(), so packet capture and cleanup run exactly once.
     void recover(){meshRetry.clear();if(!failed)return;releaseGPU();failed=false;valid=false;streamingReports=0;logf("WORLD explicit recovery requested");}
@@ -2724,10 +2724,10 @@ public:
                 d->SetPixelShaderConstantF(0,material,1);d->SetTexture(0,materials[b.material]);
                 return bindMeshPage(b,terrainBoundPage)&&check(d->DrawIndexedPrimitive(D3DPT_TRIANGLELIST,0,b.minVertex,b.vertexCount,b.start,b.count),"static shadow cache draw");
             }))return false;
-            if(!liveDirectionalIndices.empty()){
+            if(liveDirectionalIndexCount){
                 float opaque[]={1,1,1,-1};d->SetPixelShaderConstantF(0,opaque,1);d->SetTexture(0,nullptr);
                 d->SetStreamSource(0,liveTerrainGPU.vertices(),0,sizeof(NorthlightGI::WorldVertex));d->SetIndices(liveIndicesGPU);
-                if(!check(d->DrawIndexedPrimitive(D3DPT_TRIANGLELIST,0,0,liveTerrainGPU.vertexCapacity(),UINT(liveTerrainIndices.size()),UINT(liveDirectionalIndices.size()/3)),"live terrain shadow"))return false;
+                if(!check(d->DrawIndexedPrimitive(D3DPT_TRIANGLELIST,0,0,liveTerrainGPU.vertexCapacity(),UINT(liveTerrainIndexCount),UINT(liveDirectionalIndexCount/3)),"live terrain shadow"))return false;
             }
             // Original model transforms and bone palette survive; replace view->clip only.
             if(diagnosticCapture){

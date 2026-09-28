@@ -4,6 +4,10 @@
 #include "world_mesh_plan.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <set>
+#include <utility>
+#include <vector>
 
 namespace NorthlightShadowTerrain {
 using NorthlightGI::Vec3;
@@ -27,22 +31,52 @@ inline std::pair<int,int> chunk(Vec3 a,Vec3 b,Vec3 c){
 inline bool outside(Vec3 lo,Vec3 hi,Vec3 a,Vec3 b){
     return hi.x<a.x||lo.x>b.x||hi.y<a.y||lo.y>b.y||hi.z<a.z||lo.z>b.z;
 }
+// 0.3.176 (U1c): the committed fixed-chunk set (unchanged, shared with the worker) plus a flat bitmap
+// of the global chunk grid beside it, 1024x1024 bits (128 KiB, kept across commits), filled from the
+// set in one pass. Coordinates outside the grid (-1: not one chunk) query the set, so membership is
+// the set's. A failed allocation leaves the bitmap off: the set answers alone.
+class FixedChunkBits {
+    const std::set<std::pair<int,int>>* set_=nullptr;std::vector<std::uint64_t> bits_;bool on_=false;
+    static constexpr int Grid=1024;
+    static bool inGrid(int x,int y){return x>=0&&y>=0&&x<Grid&&y<Grid;}
+    static std::size_t bit(int x,int y){return std::size_t(y)*Grid+std::size_t(x);}
+public:
+    void assign(const std::set<std::pair<int,int>>* set){
+        set_=set;on_=false;if(!set)return;
+        try{if(bits_.empty())bits_.assign(std::size_t(Grid)*Grid/64,0);else std::fill(bits_.begin(),bits_.end(),0);}catch(...){bits_.clear();return;}
+        for(const auto& c:*set)if(inGrid(c.first,c.second)){const auto i=bit(c.first,c.second);bits_[i>>6]|=std::uint64_t(1)<<(i&63);}
+        on_=true;
+    }
+    void reset(){set_=nullptr;on_=false;}
+    // The set these bits describe (null: none).
+    const std::set<std::pair<int,int>>* source()const{return set_;}
+    bool contains(std::pair<int,int> c)const{
+        if(!set_)return false;
+        if(!on_||!inGrid(c.first,c.second))return set_->count(c)!=0;
+        const auto i=bit(c.first,c.second);return (bits_[i>>6]>>(i&63))&1;
+    }
+};
 // Snapshot positions/indices have already passed the terrain capture validator.
 // Original indices remain intact for point lights; this is an appended stream.
+// fixed: bool(std::pair<int,int> chunk), the fixed-chunk membership (0.3.176: a functor).
 // triangleTests (0.3.176 D1, optional): counts the per-triangle chunk tests of a straddling snapshot.
-template<class Snapshot> void appendLiveDirectional(const Snapshot& snapshot,
-        const std::set<std::pair<int,int>>& fixed,uint32_t offset,std::vector<uint32_t>& out,std::size_t* triangleTests=nullptr){
+template<class Snapshot,class Fixed> void appendLiveDirectionalBy(const Snapshot& snapshot,
+        const Fixed& fixed,uint32_t offset,std::vector<uint32_t>& out,std::size_t* triangleTests=nullptr){
     bool anyFixed=false,anyLive=false;
-    for(const auto& c:snapshot.bounds.chunks){if(fixed.count({c.x,c.y}))anyFixed=true;else anyLive=true;}
+    for(const auto& c:snapshot.bounds.chunks){if(fixed(std::pair<int,int>{c.x,c.y}))anyFixed=true;else anyLive=true;}
     if(!anyFixed){for(auto i:snapshot.indices)out.push_back(i+offset);return;}
     if(!anyLive)return;
     auto position=[&](uint32_t i){const auto& p=snapshot.positions[i];return Vec3(p.x,p.y,p.z);};
     for(size_t i=0;i<snapshot.indices.size();i+=3){
         const auto a=snapshot.indices[i],b=snapshot.indices[i+1],c=snapshot.indices[i+2];
         if(triangleTests)++*triangleTests;
-        if(fixed.count(chunk(position(a),position(b),position(c))))continue;
+        if(fixed(chunk(position(a),position(b),position(c))))continue;
         out.insert(out.end(),{a+offset,b+offset,c+offset});
     }
+}
+template<class Snapshot> void appendLiveDirectional(const Snapshot& snapshot,
+        const std::set<std::pair<int,int>>& fixed,uint32_t offset,std::vector<uint32_t>& out,std::size_t* triangleTests=nullptr){
+    appendLiveDirectionalBy(snapshot,[&](std::pair<int,int> c){return fixed.count(c)!=0;},offset,out,triangleTests);
 }
 inline bool build(const NorthlightGI::WorldScene& local,const NorthlightGI::WorldScene& terrain,
                   Vec3 center,NorthlightWorldMesh::WorldMeshUploadPlan& output,std::string& error,

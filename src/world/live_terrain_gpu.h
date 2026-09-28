@@ -51,7 +51,12 @@ template<class Snapshot,class Vertex> class Cache {
     size_t indexBytes_=0;
     bool discard_=false;
     static constexpr size_t IndexLimit=32u*1024u*1024u;
-    void resetContents(){entries_.clear();retired_.clear();indexBytes_=0;free_.reset(capacity_);discard_=true;}
+    // 0.3.176 (U1b): update() records the entry of each active owner (after its weak_ptr check; null:
+    // none), for the owner list and frame it saw; prepare() uses it. Entries are map nodes, so the
+    // pointers survive inserts; resetContents() and retirement drop only entries not recorded.
+    std::vector<Entry*> active_;const void* activeSource_=nullptr;uint64_t activeFrame_=UINT64_MAX;
+    std::vector<const Entry*> prepared_; /* 0.3.176 (U1a): prepare()'s entries, in order, for write() */
+    void resetContents(){entries_.clear();retired_.clear();indexBytes_=0;free_.reset(capacity_);discard_=true;std::fill(active_.begin(),active_.end(),nullptr);prepared_.clear();}
     void collect(IDirect3DDevice9* d){
         for(auto it=retired_.begin();it!=retired_.end();){
             // flags=0: never D3DGETDATA_FLUSH, never a blocking poll loop.
@@ -83,19 +88,22 @@ public:
     explicit Cache(uint32_t limitBytes=16u*1024u*1024u):limit_(limitBytes/sizeof(Vertex)){}
     ~Cache(){clear();}
     Cache(const Cache&)=delete;Cache& operator=(const Cache&)=delete;
-    void clear(){entries_.clear();retired_.clear();indexBytes_=0;free_.reset(0);capacity_=0;frame_=0;discard_=false;if(vertices_)vertices_->Release();vertices_=nullptr;}
+    void clear(){entries_.clear();retired_.clear();indexBytes_=0;free_.reset(0);capacity_=0;frame_=0;discard_=false;if(vertices_)vertices_->Release();vertices_=nullptr;
+        active_.clear();activeSource_=nullptr;activeFrame_=UINT64_MAX;prepared_.clear();}
     IDirect3DVertexBuffer9* vertices()const{return vertices_;}
     uint32_t vertexCapacity()const{return capacity_;}
     size_t bytes()const{return size_t(capacity_)*sizeof(Vertex);}
     void beginFrame(){++frame_;uploadedBytes=0;reusedVertices=0;newOwners=0;directionalBuilds=0;directionalTriangles=0;collectVisited=0;}
 
     template<class Admission,class Convert> HRESULT update(IDirect3DDevice9* d,const std::vector<Owner>& active,Admission admit,Convert convert){
+        activeSource_=nullptr;try{active_.assign(active.size(),nullptr);activeSource_=&active;activeFrame_=frame_;}catch(...){active_.clear();} /* unrecorded: prepare() looks up */
+        const bool record=activeSource_!=nullptr;
         try{
             uint64_t required=0;
-            for(const auto& owner:active){
+            for(size_t k=0;k<active.size();++k){const auto& owner=active[k];
                 required+=owner->positions.size();
                 auto it=entries_.find(owner.get());
-                if(it!=entries_.end()&&it->second.owner.lock()==owner)it->second.touched=frame_;
+                if(it!=entries_.end()&&it->second.owner.lock()==owner){it->second.touched=frame_;if(record)active_[k]=&it->second;}
             }
             if(required>limit_)return E_OUTOFMEMORY;
             if(!required){collect(d);return S_OK;}
@@ -116,9 +124,10 @@ public:
             std::vector<Pending> pending;
             for(unsigned attempt=0;attempt<2;++attempt){
                 bool full=false;pending.clear();
-                for(const auto& owner:active){
+                for(size_t k=0;k<active.size();++k){const auto& owner=active[k];
+                    if(record&&active_[k]){reusedVertices+=owner->positions.size();continue;} /* found and checked above */
                     auto it=entries_.find(owner.get());
-                    if(it!=entries_.end()&&it->second.owner.lock()==owner){reusedVertices+=owner->positions.size();continue;}
+                    if(it!=entries_.end()&&it->second.owner.lock()==owner){reusedVertices+=owner->positions.size();if(record)active_[k]=&it->second;continue;} /* a repeated owner */
                     // Expired address reuse is retired by collect(), never an
                     // identity hit; retain no strong owners between frames.
                     Range range;
@@ -127,7 +136,7 @@ public:
                     for(auto i:owner->indices)e.indices.push_back(i+range.first);
                     indexBytes_+=e.indices.capacity()*sizeof(uint32_t);
                     auto inserted=entries_.emplace(owner.get(),std::move(e));++newOwners;
-                    pending.push_back({owner,&inserted.first->second});
+                    pending.push_back({owner,&inserted.first->second});if(record)active_[k]=&inserted.first->second;
                 }
                 if(!full)break;
                 // DISCARD renames the complete arena; all surviving snapshots
@@ -149,8 +158,37 @@ public:
                 discard_=false;uploadedBytes+=bytes;first=end;
             }
             return S_OK;
-        }catch(...){resetContents();return E_OUTOFMEMORY;}
+        }catch(...){resetContents();activeSource_=nullptr;return E_OUTOFMEMORY;}
     }
+    // 0.3.176 (U1a): indices() without the concatenation. Rebuilds stale directional lists exactly as
+    // indices() does and returns the two totals; write() then copies all point lists in `active` order,
+    // then all directional lists, into the caller's (locked) buffer: the bytes indices() would give.
+    // false: an owner has no entry (the counts are the lists before it, as indices() leaves them), or an
+    // allocation failed (contents reset, counts 0).
+    template<class Directional> bool prepare(const std::vector<Owner>& active,uint64_t generation,Directional build,size_t& pointCount,size_t& directionalCount){
+        pointCount=directionalCount=0;prepared_.clear();
+        const bool recorded=activeSource_==&active&&activeFrame_==frame_&&active_.size()==active.size();
+        try{
+        prepared_.reserve(active.size());
+        for(size_t k=0;k<active.size();++k){const auto& owner=active[k];
+            Entry* entry=nullptr;
+            if(recorded)entry=active_[k];
+            else{auto it=entries_.find(owner.get());if(it!=entries_.end()&&it->second.owner.lock()==owner)entry=&it->second;}
+            if(!entry){prepared_.clear();return false;}
+            auto& e=*entry;
+            if(e.directionalGeneration!=generation){indexBytes_-=e.directional.capacity()*sizeof(uint32_t);e.directional.clear();build(*owner,e.range.first,e.directional);indexBytes_+=e.directional.capacity()*sizeof(uint32_t);e.directionalGeneration=generation;
+                ++directionalBuilds;directionalTriangles+=e.directional.size()/3;}
+            pointCount+=e.indices.size();directionalCount+=e.directional.size();prepared_.push_back(&e);
+        }
+        return true;
+        }catch(...){resetContents();pointCount=directionalCount=0;return false;}
+    }
+    // After a successful prepare() and before any other call: pointCount+directionalCount indices.
+    void write(uint32_t* out)const noexcept{
+        for(const Entry* e:prepared_){if(!e->indices.empty())std::memcpy(out,e->indices.data(),e->indices.size()*sizeof(uint32_t));out+=e->indices.size();}
+        for(const Entry* e:prepared_){if(!e->directional.empty())std::memcpy(out,e->directional.data(),e->directional.size()*sizeof(uint32_t));out+=e->directional.size();}
+    }
+    // The 0.3.175 path (tests compare prepare()/write() with it).
     template<class Directional> bool indices(const std::vector<Owner>& active,uint64_t generation,Directional build,
                                              std::vector<uint32_t>& point,std::vector<uint32_t>& directional){
         point.clear();directional.clear();

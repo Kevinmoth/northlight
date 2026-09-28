@@ -425,7 +425,7 @@
                    !bindMeshPage(batch,terrainBoundPage)||!pointCheck(d->DrawIndexedPrimitive(D3DPT_TRIANGLELIST,0,batch.minVertex,batch.vertexCount,batch.start,batch.count),"cube terrain draw"))return false;
                 ++pointDraws;
             }
-            if(!liveTerrainIndices.empty()){
+            if(liveTerrainIndexCount){
                 float opaque[]={1,1,1,-1};
                 if(!pointCheck(d->SetPixelShaderConstantF(0,opaque,1),"cube live material")||
                    !pointCheck(d->SetTexture(0,nullptr),"cube live alpha")||

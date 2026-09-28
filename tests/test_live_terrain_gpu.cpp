@@ -5,6 +5,8 @@
 #include <memory>
 #include <vector>
 #include <cstdio>
+#include <new>
+#include <random>
 using HRESULT=int32_t;using UINT=uint32_t;using DWORD=uint32_t;
 constexpr HRESULT S_OK=0,S_FALSE=1,E_FAIL=-1,E_OUTOFMEMORY=-2;
 #define SUCCEEDED(x) ((x)>=0)
@@ -127,4 +129,65 @@ void longWalk(){
     }
     assert(d.driver.discards==1&&d.driver.queries>0);
 }
-int main(){allocator();partialAndOrdering();retirement(true);retirement(false);retirement(true,false);busyRolloverAndFailure();admissionAndBounds();longWalk();std::puts("live terrain GPU: geometry/order/LOD, incremental writes, fence-safe reuse, 500-frame bounded walk, busy/unsupported rollover, pressure/failure/reset passed");}
+// 0.3.176 (U1a/U1b): prepare()+write() against the 0.3.175 indices() concatenation, on twin caches
+// driven identically: new owners, retirements, order changes, repeated owners, generation changes,
+// arena rollovers, Lock/Unlock failures, owners without an entry, unrecorded lists and a throwing
+// directional build. Return values, counts, bytes, arena contents and counters must all match.
+struct Twin {IDirect3DDevice9 d;Cache cache;explicit Twin(size_t bytes):cache(bytes){}};
+Owner randomSnapshot(std::mt19937& rng){
+    auto s=std::make_shared<Snapshot>();const unsigned vertices=3+rng()%6,triangles=1+rng()%4;
+    for(unsigned i=0;i<vertices;++i)s->positions.push_back({float(rng()%1000),float(rng()%1000),float(rng()%1000)});
+    for(unsigned i=0;i<3*triangles;++i)s->indices.push_back(uint32_t(rng()%vertices));
+    return s;
+}
+void prepareMatchesIndices(){
+    size_t frames=0,prepared=0,missing=0,unrecorded=0,thrown=0,failedUpdates=0;unsigned rollovers=0;
+    for(unsigned run=0;run<24;++run){
+        std::mt19937 rng(176+run);const size_t arena=(run%3==0?40:120)*sizeof(Vertex);
+        Twin a(arena),b(arena);std::vector<Owner> pool;for(unsigned i=0;i<32;++i)pool.push_back(randomSnapshot(rng));
+        uint64_t generation=1;unsigned buildCalls=0,throwAt=0;
+        auto build=[&](const Snapshot& s,uint32_t offset,std::vector<uint32_t>& out){
+            if(throwAt&&++buildCalls==throwAt)throw std::bad_alloc();
+            for(size_t i=0;i+2<s.indices.size();i+=3)if((uint32_t(s.positions[s.indices[i]].x)+generation+i/3)%3)
+                out.insert(out.end(),{s.indices[i]+offset,s.indices[i+1]+offset,s.indices[i+2]+offset});
+        };
+        for(unsigned frame=0;frame<150;++frame,++frames){
+            for(auto& o:pool)if(rng()%12==0)o=randomSnapshot(rng); /* retire and replace */
+            std::vector<Owner> active;const unsigned n=rng()%14;
+            for(unsigned i=0;i<n;++i)active.push_back(pool[rng()%pool.size()]); /* random order, repeats */
+            if(rng()%8==0)++generation;
+            const bool failLock=rng()%29==0,failUnlock=rng()%31==0;
+            for(Twin* t:{&a,&b}){t->d.driver.failLock=failLock;t->d.driver.failUnlock=failUnlock;}
+            a.cache.beginFrame();b.cache.beginFrame();
+            const HRESULT ha=a.cache.update(&a.d,active,admit,convert),hb=b.cache.update(&b.d,active,admit,convert);
+            for(Twin* t:{&a,&b}){t->d.driver.failLock=t->d.driver.failUnlock=false;}
+            assert(ha==hb&&a.cache.uploadedBytes==b.cache.uploadedBytes&&a.cache.reusedVertices==b.cache.reusedVertices&&a.cache.rollovers==b.cache.rollovers);
+            assert(a.cache.newOwners==b.cache.newOwners&&a.cache.collectVisited==b.cache.collectVisited);
+            assert(!a.cache.vertices()==!b.cache.vertices());if(a.cache.vertices())assert(a.cache.vertices()->data==b.cache.vertices()->data);
+            if(ha!=S_OK){++failedUpdates;continue;}
+            // The renderer passes the list it updated; also a copy (unrecorded: looked up) and a stranger.
+            std::vector<Owner> other=active;const unsigned mode=rng()%10;
+            if(mode==0)other.insert(other.begin()+(other.empty()?0:rng()%other.size()),randomSnapshot(rng));
+            const auto& list=mode<3?other:active;missing+=mode==0;unrecorded+=mode>0&&mode<3;
+            throwAt=rng()%23==0?1+rng()%3:0;buildCalls=0;
+            size_t points=7,directionals=7;const bool okA=a.cache.prepare(list,generation,build,points,directionals);
+            const unsigned callsA=buildCalls;buildCalls=0;
+            std::vector<uint32_t> p={1,2},q={3};const bool okB=b.cache.indices(list,generation,build,p,q);
+            assert(callsA==buildCalls);thrown+=throwAt&&callsA>=throwAt;throwAt=0;
+            assert(okA==okB&&points==p.size()&&directionals==q.size());
+            assert(a.cache.directionalBuilds==b.cache.directionalBuilds&&a.cache.directionalTriangles==b.cache.directionalTriangles);
+            if(!okA)continue;
+            ++prepared;
+            std::vector<uint32_t> written(points+directionals+1,0xDEADBEEFu);a.cache.write(written.data());
+            assert(written.back()==0xDEADBEEFu);written.pop_back();
+            std::vector<uint32_t> joined=p;joined.insert(joined.end(),q.begin(),q.end());assert(written==joined);
+            verify(a.cache,list,p);draw(a.cache,p);draw(b.cache,p);
+            if(rng()%3){a.d.driver.completed=a.d.driver.submitted;b.d.driver.completed=b.d.driver.submitted;}
+        }
+        rollovers+=a.cache.rollovers;
+    }
+    assert(prepared>1000&&missing>50&&unrecorded>100&&thrown>5&&failedUpdates>20&&rollovers>0);
+    std::printf("prepare/write == indices(): frames=%zu prepared=%zu missingOwner=%zu unrecorded=%zu thrownBuilds=%zu failedUpdates=%zu rollovers=%u\n",
+        frames,prepared,missing,unrecorded,thrown,failedUpdates,rollovers);
+}
+int main(){allocator();partialAndOrdering();retirement(true);retirement(false);retirement(true,false);busyRolloverAndFailure();admissionAndBounds();longWalk();prepareMatchesIndices();std::puts("live terrain GPU: geometry/order/LOD, incremental writes, fence-safe reuse, 500-frame bounded walk, busy/unsupported rollover, pressure/failure/reset, prepare/write == indices() passed");}
