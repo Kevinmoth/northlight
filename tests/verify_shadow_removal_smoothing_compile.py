@@ -5,7 +5,8 @@
 PENDING until world-shader-build.json matches world_effects.hlsl. Then: TemporalLight is the only
 world shader whose bytecode changed from 0.3.158 (besides WorldComposite, which reads the
 horizon lift colour from c35.yzw, and SourceVisibilityPS with its wrap ring, since 0.3.163; and
-WorldLighting (baseline alpha) plus LocalDirect (daylight lamps), since 0.3.165), it stays within the SM3 limits (slots reported),
+WorldLighting (baseline alpha) plus LocalDirect (daylight lamps), since 0.3.165; WorldNormals' wide-sample
+threshold since 0.3.175), it stays within the SM3 limits (slots reported),
 it samples Scene (s0) and BaselineLighting (s12) besides its 0.3.158 samplers, and every .bin
 matches the manifest. Reads files only; no Wine, GPU or game."""
 import sys; from pathlib import Path; sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root
@@ -34,7 +35,7 @@ if manifest['source_sha256']!=source:
     sys.exit(1)
 shaders=manifest['shaders'];checks={}
 changed=sorted(k for k,v in shaders.items() if v['sha256']!=BEFORE.get(k))
-checks[f'only TemporalLight (and the WorldComposite) changed (changed: {changed})']=changed==['LocalDirect','SourceVisibilityPS','TemporalLight','WorldComposite','WorldLighting'] and sorted(shaders)==sorted(BEFORE)
+checks[f'only TemporalLight (and the WorldComposite) changed (changed: {changed})']=changed==['LocalDirect','SourceVisibilityPS','TemporalLight','WorldComposite','WorldLighting','WorldNormals'] and sorted(shaders)==sorted(BEFORE)
 t=shaders['TemporalLight']
 # 0.3.174 (r72 decisions-g1 §8): an exact budget of 509 (the ps_3_0 minimum 512 is the hard gate). Headroom is
 # exhausted: any later TemporalLight change must free slots first, or this fails loudly.

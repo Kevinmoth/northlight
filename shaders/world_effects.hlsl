@@ -289,7 +289,10 @@ float3 wideNeighbour(float2 uv,float2 dir,float pixels,float2 lo,float2 hi,float
     float2 inner=clamp(q-dir,lo,hi);
     float3 end=wide-viewPosition(inner,normalizedDepth(inner));
     float continuation=dot(a,end)*rsqrt(max(dot(a,a)*dot(end,end),1e-12));
-    return abs(z-centerZ)>max(.35,centerZ*.04)||min(planar,continuation)<.85?nearPos:wide;
+    // r76: .95 (about 18 degrees; was .85, 31): a base up to about .9 u high at the 1.5 u
+    // baseline passed .85 and tilted the ground normal about 15 degrees, a bright fin of
+    // under-removed native light along the screen axis from every rock, cart and post base.
+    return abs(z-centerZ)>max(.35,centerZ*.04)||min(planar,continuation)<.95?nearPos:wide;
 }
 // One axis of the surface tangent frame. A pair of neighbours is only
 // trusted when it continues through the centre (cosine >= .85): at the foot

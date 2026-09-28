@@ -387,10 +387,12 @@ def main():
             # verify_shadow_removal_smoothing_compile.py, so this haze test no longer pins it.
             # SourceVisibilityPS gains the wrap ring taps (test_solar_volume pins the source).
             # WorldLighting (baseline alpha) and LocalDirect (daylight sunlit factor) change on purpose.
-            if name not in ('WorldComposite', 'TemporalLight', 'SourceVisibilityPS', 'WorldLighting', 'LocalDirect'):
+            # 0.3.175 (r76): WorldNormals' wide-sample threshold .85 -> .95 (constants only, 417 slots).
+            if name not in ('WorldComposite', 'TemporalLight', 'SourceVisibilityPS', 'WorldLighting', 'LocalDirect', 'WorldNormals'):
                 assert info['sha256'] == BEFORE[name], name
                 unchanged.append(name)
-        assert sorted(unchanged) == sorted(k for k in BEFORE if k not in ('TemporalLight', 'SourceVisibilityPS', 'WorldLighting', 'LocalDirect'))
+        assert sorted(unchanged) == sorted(k for k in BEFORE if k not in ('TemporalLight', 'SourceVisibilityPS', 'WorldLighting', 'LocalDirect', 'WorldNormals'))
+        assert manifest['shaders']['WorldNormals']['static_instruction_slots'] == 417
         assert manifest['shaders']['WorldFog']['sha256'] == BEFORE['WorldFog'] and manifest['shaders']['WorldFog']['static_instruction_slots'] == 512
         assert SOURCE_VISIBILITY_SLOTS is not None, 'TODO(lead): pin SOURCE_VISIBILITY_SLOTS to the compiled count (%d)' % manifest['shaders']['SourceVisibilityPS']['static_instruction_slots']
         assert manifest['shaders']['SourceVisibilityPS']['static_instruction_slots'] == SOURCE_VISIBILITY_SLOTS <= 512
