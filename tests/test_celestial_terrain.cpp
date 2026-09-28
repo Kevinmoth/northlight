@@ -1,4 +1,10 @@
 #include "celestial_terrain.h"
+#include "world_mesh_pages.h"
+#include "shadow_terrain.h"
+#include <cstdint>
+#include <filesystem>
+#include <string>
+#include <vector>
 #include <cassert>
 #include <cstdio>
 #include <random>
@@ -14,7 +20,9 @@ static bool cornerReject(V lo,V hi,const float* m){
     }
     return std::any_of(outside,outside+6,[](bool v){return v;});
 }
-int main(){
+static void realPages(const std::string& root);
+static void syntheticRuns();
+int main(int argc,char** argv){
     using namespace NorthlightCelestialTerrain;
     std::mt19937 random(114);std::uniform_real_distribution<float> point(-6000,6000),extent(0,120);
     unsigned cases=0,retained=0;
@@ -50,4 +58,105 @@ int main(){
     }
     assert(retained>0);
     std::printf("PASS celestial terrain: %u perspective/ray/culling cases, %u retained random boxes; far mountains, behind camera, near-plane crossing and invalid input checked\n",cases,retained);
+    syntheticRuns();
+    if(argc>1)realPages(argv[1]);
+}
+// ---- 0.3.175 S1: merged mask draws ------------------------------------------------------------
+namespace P=NorthlightWorldMeshPages;
+struct Mask {unsigned size;std::vector<std::uint8_t> bits;std::uint64_t triangles=0,hash=0;explicit Mask(unsigned n):size(n),bits(std::size_t(n)*n,0){}
+    bool operator==(const Mask& o)const{return bits==o.bits&&triangles==o.triangles&&hash==o.hash;}};
+// CPU raster of one DrawIndexedPrimitive (triangle list): pixel centres inside the projected triangle
+// (all w > 0) are set to 1, as the mask PS writes 1 without depth or blending. Triangles with a vertex
+// behind the eye are clipped by the GPU; they still enter the order-independent triangle hash.
+static void drawRange(Mask& mask,const P::Page& page,const float* m,std::uint32_t minVertex,std::uint32_t vertexCount,std::uint32_t start,std::uint32_t count){
+    for(std::uint32_t t=0;t<count;++t){double x[3],y[3];bool front=true;std::uint64_t h=1469598103934665603ull;
+        for(unsigned k=0;k<3;++k){const std::uint32_t index=page.indices.at(std::size_t(start)+3*t+k);assert(index>=minVertex&&index<std::uint64_t(minVertex)+vertexCount); /* the DIP vertex range covers every index */
+            const auto& v=page.vertices.at(index).position;double q[4];project({v.x,v.y,v.z},m,q);front=front&&q[3]>1e-6;
+            x[k]=(q[0]/q[3]*.5+.5)*mask.size;y[k]=(-q[1]/q[3]*.5+.5)*mask.size;
+            std::uint32_t bits[3];std::memcpy(bits,&v,12);for(auto b:bits)h=(h^b)*1099511628211ull;}
+        ++mask.triangles;mask.hash+=h*0x9e3779b97f4a7c15ull; /* multiset of triangles */
+        if(!front)continue;
+        const double area=(x[1]-x[0])*(y[2]-y[0])-(x[2]-x[0])*(y[1]-y[0]);if(area==0)continue;
+        auto clamp=[&](double v){return int(std::min(double(mask.size),std::max(-1.,v)));};
+        const int x0=std::max(0,clamp(std::floor(std::min({x[0],x[1],x[2]})))),x1=std::min(int(mask.size)-1,clamp(std::ceil(std::max({x[0],x[1],x[2]}))));
+        const int y0=std::max(0,clamp(std::floor(std::min({y[0],y[1],y[2]})))),y1=std::min(int(mask.size)-1,clamp(std::ceil(std::max({y[0],y[1],y[2]}))));
+        for(int py=y0;py<=y1;++py)for(int px=x0;px<=x1;++px){const double cx=px+.5,cy=py+.5;
+            const double e0=(x[1]-x[0])*(cy-y[0])-(cx-x[0])*(y[1]-y[0]),e1=(x[2]-x[1])*(cy-y[1])-(cx-x[1])*(y[2]-y[1]),e2=(x[0]-x[2])*(cy-y[2])-(cx-x[2])*(y[0]-y[2]);
+            if(area>0?(e0>=0&&e1>=0&&e2>=0):(e0<=0&&e1<=0&&e2<=0))mask.bits[std::size_t(py)*mask.size+px]=1;}}
+}
+enum class Merge {Exact,IgnorePage,IgnoreGap};
+// The renderer's grouping (Exact) or a broken one (counterfactuals).
+template<class Accept> static NorthlightCelestialTerrain::RunStats draw(const P::Plan& plan,const std::vector<std::uint32_t>& list,Accept accept,const float* m,Merge merge,Mask& mask){
+    NorthlightCelestialTerrain::RunStats stats;
+    if(merge==Merge::Exact){NorthlightCelestialTerrain::forEachRun(plan.batches,list,P::PageIndexLimit,accept,[&](const NorthlightCelestialTerrain::Run& r){
+            drawRange(mask,plan.pages.at(r.page),m,r.minVertex,std::uint32_t(r.vertexEnd-r.minVertex),r.start,r.count);return true;},stats);return stats;}
+    NorthlightCelestialTerrain::Run run;bool open=false;
+    auto flush=[&]{if(open){++stats.runs;drawRange(mask,plan.pages.at(run.page),m,0,std::uint32_t(plan.pages.at(run.page).vertices.size()),run.start,run.count);}};
+    for(auto i:list){const auto& b=plan.batches[i];if(!accept(b))continue;++stats.accepted;
+        const bool page=merge==Merge::IgnorePage||b.page==run.page,contiguous=merge==Merge::IgnoreGap||run.start+3*run.count==b.start;
+        if(open&&page&&contiguous){run.count=merge==Merge::IgnoreGap?(b.start-run.start)/3+b.count:run.count+b.count;continue;}
+        flush();run.page=b.page;run.start=b.start;run.count=b.count;open=true;}
+    flush();return stats;
+}
+static void perBatch(const P::Plan& plan,const std::vector<std::uint32_t>& list,const NorthlightCelestialTerrain::Frustum& f,const float* m,Mask& mask,unsigned& accepted){
+    for(auto i:list){const auto& b=plan.batches[i];if(!b.terrain||f.reject(b.boundsLow,b.boundsHigh))continue;++accepted;drawRange(mask,plan.pages.at(b.page),m,b.minVertex,b.vertexCount,b.start,b.count);}
+}
+// Two pages whose index ranges touch (page 0 ends where page 1's batch starts): merging across the
+// page draws page 1's indices from page 0's vertices.
+static void syntheticRuns(){
+    P::Plan plan;plan.pages.resize(2);
+    for(unsigned pg=0;pg<2;++pg){auto& page=plan.pages[pg];for(unsigned v=0;v<6;++v){NorthlightGI::WorldVertex w{};w.position=NorthlightGI::Vec3(float(v%3)+pg*10.f,float(v/3),float(pg));page.vertices.push_back(w);}
+        for(std::uint32_t i:{0u,1u,3u,1u,4u,3u})page.indices.push_back(i);}
+    for(unsigned pg=0;pg<2;++pg)for(unsigned h=0;h<2;++h){P::Batch b;b.terrain=true;b.page=pg;b.start=pg?6u:3u*h;b.count=1;b.minVertex=0;b.vertexCount=6;
+        b.boundsLow=NorthlightGI::Vec3(-100,-100,-100);b.boundsHigh=NorthlightGI::Vec3(100,100,100);if(pg&&h)continue;plan.batches.push_back(b);}
+    plan.pages[0].indices.insert(plan.pages[0].indices.end(),{2u,5u,4u});plan.pages[1].indices.insert(plan.pages[1].indices.end(),{0u,1u,3u}); /* page 0's next triangle is not drawn */
+    const float m[16]={.02f,0,0,0, 0,.02f,0,0, 0,0,0,0, 0,0,.5f,1};const std::vector<std::uint32_t> list={0,1,2};auto all=[](const P::Batch&){return true;};
+    Mask exact(64),page(64);const auto e=draw(plan,list,all,m,Merge::Exact,exact);const auto c=draw(plan,list,all,m,Merge::IgnorePage,page);
+    assert(e.runs==2&&e.accepted==3&&c.runs==1&&!(exact==page)); /* the page-crossing counterfactual draws other geometry */
+    std::puts("PASS mask runs (synthetic): contiguous same-page batches merge, a page boundary ends a run (counterfactual differs)");
+}
+// Real world-cache terrain pages (Stormwind, Elwynn, Stranglethorn): per-batch submission against merged
+// runs for random mask frusta around the fixture: identical mask bits and triangle multisets; merging
+// across index gaps differs. Prints the merge ratio (accepted batches per DIP).
+static void realPages(const std::string& root){
+    using namespace NorthlightGI;std::string error;
+    struct Fixture{const char* name;Vec3 center;};std::mt19937 random(175);
+    std::uint64_t accepted=0,runs=0;unsigned frusta=0,gapDiffers=0,pageDiffers=0;
+    for(const auto& fixture:{Fixture{"Stormwind",{-8833,628,97}},Fixture{"Elwynn",{-9450,-200,65}},Fixture{"Stranglethorn",{-12400,180,30}}}){
+        const auto c=fixture.center;
+        int tx=int(std::floor((17066.6666667-c.y)/533.3333333)),ty=int(std::floor((17066.6666667-c.x)/533.3333333));
+        std::vector<std::string> nearFiles,farFiles;
+        for(int y=ty-2;y<=ty+2;++y)for(int x=tx-2;x<=tx+2;++x){auto p=root+"/Azeroth/"+std::to_string(x)+"_"+std::to_string(y)+".fg3";
+            if(!std::filesystem::exists(p))continue;farFiles.push_back(p);if(std::abs(x-tx)<=1&&std::abs(y-ty)<=1)nearFiles.push_back(p);}
+        if(nearFiles.empty()){std::printf("  %s: no world-cache tiles\n",fixture.name);continue;}
+        WorldScene local,far;
+        assert(loadInstancedScenes(nearFiles,root+"/models",c-Vec3(288,288,320),c+Vec3(288,288,320),local,error));
+        const float radius=NorthlightShadowTerrain::Radius;
+        assert(loadInstancedScenes(farFiles,root+"/models",c-Vec3(radius,radius,radius),c+Vec3(radius,radius,radius),far,error,1));
+        NorthlightWorldMesh::WorldMeshUploadPlan input;assert(NorthlightShadowTerrain::build(local,far,c,input,error));
+        P::Plan plan;assert(P::build(input,plan,error));
+        std::vector<std::uint32_t> list;for(std::uint32_t i=0;i<plan.batches.size();++i)if(plan.batches[i].terrain)list.push_back(i);
+        std::vector<std::uint32_t> everything(plan.batches.size());for(std::uint32_t i=0;i<everything.size();++i)everything[i]=i;
+        std::uniform_real_distribution<float> azimuth(0,6.2831853f),elevation(.004f,.35f),offset(-40,40),halo(0,1);
+        std::uint64_t fixtureAccepted=0,fixtureRuns=0;
+        for(unsigned trial=0;trial<24;++trial){
+            const float a=azimuth(random),e=elevation(random);float direction[3]={std::cos(e)*std::cos(a),std::cos(e)*std::sin(a),std::sin(e)};const float color[]={1,1,1};
+            NorthlightCelestialDisc::Disc disc;assert(NorthlightCelestialDisc::prepare(direction,color,1,.02f,disc));
+            const float camera[]={c.x+offset(random),c.y+offset(random),c.z+5+std::fabs(offset(random))*.2f};float m[16];
+            NorthlightCelestialTerrain::matrix(disc,camera,halo(random)<.5f?2.5f:10.f,512,m); /* the moon's and the sun's mask extent (celestial_glow.h) */const NorthlightCelestialTerrain::Frustum f(m);
+            auto accept=[&](const P::Batch& b){return b.terrain&&!f.reject(b.boundsLow,b.boundsHigh);};
+            Mask reference(512),merged(512),fromAll(512);unsigned perBatchAccepted=0;
+            perBatch(plan,list,f,m,reference,perBatchAccepted);
+            const auto r=draw(plan,list,accept,m,Merge::Exact,merged);
+            const auto everyBatch=draw(plan,everything,accept,m,Merge::Exact,fromAll); /* the fallback's batch set: the same runs */
+            assert(merged==reference&&fromAll==reference&&r.accepted==perBatchAccepted&&r.runs<=r.accepted&&everyBatch.runs==r.runs);
+            Mask gapMerged(512),pageMerged(512);draw(plan,list,accept,m,Merge::IgnoreGap,gapMerged);draw(plan,list,accept,m,Merge::IgnorePage,pageMerged);
+            gapDiffers+=!(gapMerged==reference);pageDiffers+=!(pageMerged==reference);
+            fixtureAccepted+=r.accepted;fixtureRuns+=r.runs;++frusta;}
+        accepted+=fixtureAccepted;runs+=fixtureRuns;
+        std::printf("  %s: %zu batches (%zu terrain) on %zu pages; 24 frusta: accepted %llu, DIPs %llu (%.1f batches per DIP)\n",fixture.name,plan.batches.size(),list.size(),plan.pages.size(),
+            (unsigned long long)fixtureAccepted,(unsigned long long)fixtureRuns,fixtureRuns?double(fixtureAccepted)/double(fixtureRuns):0.);}
+    assert(frusta>0&&gapDiffers>0); /* a page change almost never meets index contiguity on real pages: the synthetic case covers it */
+    std::printf("PASS mask runs (real pages): %u random frusta, merged == per-batch mask bits and triangle multisets, DIP ranges cover every index; merge ratio %.1f accepted batches per DIP (%llu -> %llu); counterfactuals differ (merging across gaps: %u frusta; across pages with contiguous indices: %u)\n",
+        frusta,runs?double(accepted)/double(runs):0.,(unsigned long long)accepted,(unsigned long long)runs,gapDiffers,pageDiffers);
 }

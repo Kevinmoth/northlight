@@ -24,7 +24,8 @@ class NorthlightCelestialDiscRenderer {
     IDirect3DVertexShader9* terrainVS=nullptr;IDirect3DPixelShader9* terrainPS=nullptr;
     bool terrainReady[2]={};uint64_t terrainGeneration[2]={};float terrainMatrix[2][16]={};
     std::function<uint64_t()> terrainEpoch;
-    std::function<bool(const float*)> terrainDraw;
+    std::function<bool(unsigned,const float*)> terrainDraw; /* (body, matrix) */
+    std::function<void(unsigned)> terrainReuse; /* body: the mask was reused (diagnostics) */
     // The mask is centered on the body, not the camera's look direction. Exact
     // camera/body/mesh keys allow reuse across camera rotation without lag.
     bool prepareTerrain(unsigned body,const NorthlightCelestialDisc::Disc& disc,const float* view){
@@ -34,7 +35,7 @@ class NorthlightCelestialDiscRenderer {
         const unsigned size=body?1024:2048;
         float matrix[16];NorthlightCelestialTerrain::matrix(disc,view+12,body?MoonMaskRadius:SunMaskRadius,size,matrix);
         if(terrainMask[body]&&terrainGeneration[body]==generation&&!std::memcmp(matrix,terrainMatrix[body],sizeof matrix)){
-            terrainReady[body]=true;return true;
+            terrainReady[body]=true;if(terrainReuse)terrainReuse(body);return true;
         }
         SavedState saved(d);if(!saved.ok)return false;
         if(!terrainVS&&FAILED(d->CreateVertexShader(kCelestialTerrainVSShader,&terrainVS)))return false;
@@ -63,7 +64,7 @@ class NorthlightCelestialDiscRenderer {
         d->SetFVF(D3DFVF_XYZ);
         for(unsigned k=0;k<4;++k)d->SetStreamSourceFreq(k,1);
         if(FAILED(d->SetVertexShader(terrainVS))||FAILED(d->SetPixelShader(terrainPS))||
-           FAILED(d->SetVertexShaderConstantF(0,matrix,4))||!terrainDraw(matrix))return false;
+           FAILED(d->SetVertexShaderConstantF(0,matrix,4))||!terrainDraw(body,matrix))return false;
         std::memcpy(terrainMatrix[body],matrix,sizeof matrix);terrainGeneration[body]=generation;
         terrainReady[body]=true;return true;
     }
@@ -152,7 +153,7 @@ class NorthlightCelestialDiscRenderer {
         return NorthlightCelestialGlow::normalizeOnScreen(c+13,NorthlightCelestialHalo::Samples);
     }
 public:
-    void setTerrainSource(std::function<uint64_t()> epoch,std::function<bool(const float*)> draw){terrainEpoch=std::move(epoch);terrainDraw=std::move(draw);}
+    void setTerrainSource(std::function<uint64_t()> epoch,std::function<bool(unsigned,const float*)> draw,std::function<void(unsigned)> reuse=nullptr){terrainEpoch=std::move(epoch);terrainDraw=std::move(draw);terrainReuse=std::move(reuse);}
     explicit NorthlightCelestialDiscRenderer(IDirect3DDevice9* device,std::string sourceRoot="world-cache/celestial"):d(device),root(std::move(sourceRoot)){}
     ~NorthlightCelestialDiscRenderer(){reset();}
     NorthlightCelestialDiscRenderer(const NorthlightCelestialDiscRenderer&)=delete;

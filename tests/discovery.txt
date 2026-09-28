@@ -16,6 +16,7 @@ test_capture_skip_wiring.py
 test_cascade_anchor.py
 test_celestial_native_suppress.py
 test_celestial_profiles.py
+test_celestial_terrain.py
 test_celestial_veil.py
 test_client_archive_order.py
 test_client_archives.py

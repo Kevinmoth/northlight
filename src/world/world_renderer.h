@@ -161,19 +161,34 @@ public:
         if(failed||activeMesh<0||batches.empty()||!NorthlightWorldContext::readMapAndCamera(map,camera)||uploadedMap!=map)return 0;
         return meshGeneration+1;
     }
-    bool drawCelestialTerrain(const float* matrix){
+    // 0.3.175 (S1): the mask draws this generation's terrain list (terrainBatchList, rebuilt at the
+    // mesh commit, never here) in merged runs (NorthlightCelestialTerrain::forEachRun: exact). A list
+    // of another generation falls back to the whole batch list, one run per batch as before.
+    bool drawCelestialTerrain(unsigned body,const float* matrix){
         if(!celestialTerrainGeneration())return false;
-        UINT page=UINT_MAX;unsigned draws=0;uint64_t triangles=0;
+        const int64_t started=NorthlightRenderThreadProbe::profiling()?QpcClock::now():0;
+        UINT page=UINT_MAX;NorthlightCelestialTerrain::RunStats runs;
         const NorthlightCelestialTerrain::Frustum frustum(matrix);
-        for(const auto& b:batches){
-            if(!b.terrain||frustum.reject(b.boundsLow,b.boundsHigh))continue;
-            if(!bindMeshPage(b,page)||FAILED(d->DrawIndexedPrimitive(D3DPT_TRIANGLELIST,0,b.minVertex,b.vertexCount,b.start,b.count)))return false;
-            ++draws;triangles+=b.count;
-        }
-        static DWORD lastLog=0;const DWORD now=GetTickCount();
-        if(NorthlightDiagnostics::enabled()&&(!lastLog||now-lastLog>=10000)){lastLog=now;logf("CELESTIAL terrain mask map=%s generation=%llu draws=%u triangles=%llu",uploadedMap.c_str(),(unsigned long long)meshGeneration,draws,(unsigned long long)triangles);}
+        auto accept=[&](const Batch& b){return b.terrain&&!frustum.reject(b.boundsLow,b.boundsHigh);};
+        auto emit=[&](const NorthlightCelestialTerrain::Run& r){Batch key;key.page=r.page;
+            return bindMeshPage(key,page)&&SUCCEEDED(d->DrawIndexedPrimitive(D3DPT_TRIANGLELIST,0,r.minVertex,UINT(r.vertexEnd-r.minVertex),r.start,r.count));};
+        const bool listed=terrainBatchListGeneration==meshGeneration&&terrainBatchListSize==batches.size();
+        bool ok;
+        if(listed)ok=NorthlightCelestialTerrain::forEachRun(batches,terrainBatchList,NorthlightWorldMeshPages::PageIndexLimit,accept,emit,runs);
+        else{ok=true;for(const auto& b:batches){if(!accept(b))continue;++runs.accepted;++runs.runs;runs.triangles+=b.count;
+            if(!bindMeshPage(b,page)||FAILED(d->DrawIndexedPrimitive(D3DPT_TRIANGLELIST,0,b.minVertex,b.vertexCount,b.start,b.count))){ok=false;break;}}}
+        if(!ok)return false;
+        auto& m=celestialMask;++m.redraws[body&1];m.accepted=runs.accepted;m.runs=runs.runs;m.triangles=runs.triangles;m.candidates=listed?terrainBatchList.size():batches.size();m.listed=listed;
+        if(started&&captureFrequency.QuadPart>0){m.ms=double(QpcClock::now()-started)*1000.0/double(captureFrequency.QuadPart);m.peakMs=std::max(m.peakMs,m.ms);}
+        const DWORD now=GetTickCount();
+        if(NorthlightDiagnostics::enabled()&&(!m.lastLog||now-m.lastLog>=10000)){m.lastLog=now;
+            logf("CELESTIAL terrain mask map=%s generation=%llu draws=%u triangles=%llu candidates=%zu accepted=%u runs=%u listed=%d redraws=%u,%u reuses=%u,%u ms=%.3f peakMs=%.3f",
+                uploadedMap.c_str(),(unsigned long long)meshGeneration,m.runs,(unsigned long long)m.triangles,m.candidates,m.accepted,m.runs,int(m.listed),
+                m.redraws[0],m.redraws[1],m.reuses[0],m.reuses[1],m.ms,m.peakMs);
+            m.redraws[0]=m.redraws[1]=m.reuses[0]=m.reuses[1]=0;m.peakMs=0;}
         return true;
     }
+    void noteCelestialTerrainReuse(unsigned body){++celestialMask.reuses[body&1];}
     unsigned workerFault()const noexcept {return workerFaultCode.load();}
     static const char* workerFaultMessage(unsigned code)noexcept {
         return code==1?"GI worker allocation failed":code==2?"GI worker exception":code==3?"GI worker unknown exception":"";
@@ -454,6 +469,16 @@ private:
         boundPage=batch.page;return true;
     }
     std::vector<Batch> batches;
+    // 0.3.175 (S1a): indices of this mesh generation's terrain batches, in batch order; rebuilt only
+    // at the mesh commit (rebuildTerrainLists), valid while terrainBatchListGeneration==meshGeneration.
+    std::vector<uint32_t> terrainBatchList;uint64_t terrainBatchListGeneration=UINT64_MAX;size_t terrainBatchListSize=0;
+    void rebuildTerrainLists(){
+        terrainBatchListGeneration=UINT64_MAX;terrainBatchList.clear();
+        try{for(size_t i=0;i<batches.size()&&i<UINT32_MAX;++i)if(batches[i].terrain)terrainBatchList.push_back(uint32_t(i));}catch(...){terrainBatchList.clear();return;} /* fallback: the whole batch list */
+        terrainBatchListSize=batches.size();terrainBatchListGeneration=meshGeneration;
+    }
+    // CELESTIAL terrain mask line (rate-limited): the last redraw, and per body (sun, moon) redraws/reuses since the line.
+    struct CelestialMaskStats {size_t candidates=0;unsigned accepted=0,runs=0,redraws[2]={},reuses[2]={};uint64_t triangles=0;bool listed=false;double ms=0,peakMs=0;DWORD lastLog=0;} celestialMask;
     NorthlightTerrainCandidates::Scratch<> directionalTerrainScratch; // bounded capacity only; eligibility is render-local
     std::shared_ptr<const std::set<std::pair<int,int>>> fixedTerrain; /* immutable, shared with the worker-prepared commit */
     const std::set<std::pair<int,int>>& fixedTerrainChunks()const{static const std::set<std::pair<int,int>> none;return fixedTerrain?*fixedTerrain:none;}
@@ -1243,7 +1268,7 @@ private:
       workerBusy=false;
     }
     bool check(HRESULT h,const char* s){if(SUCCEEDED(h))return true;if(!failed)logf("WORLD DISABLED: %s HRESULT=%08lx",s,(unsigned long)h);failed=true;return false;}
-    void clearMesh(){staticCasters.settle();dropStaticDirtyJobs();vertices=nullptr;indices=nullptr;for(auto& m:materials)drop(m);materials.clear();uploadedTextureBytes=0;batches.clear();uploadedAlphaCutoffs.clear();uploadedLocalShadowRecords.reset();uploaded.reset();}
+    void clearMesh(){staticCasters.settle();dropStaticDirtyJobs();vertices=nullptr;indices=nullptr;for(auto& m:materials)drop(m);materials.clear();uploadedTextureBytes=0;batches.clear();terrainBatchList.clear();terrainBatchListGeneration=UINT64_MAX;uploadedAlphaCutoffs.clear();uploadedLocalShadowRecords.reset();uploaded.reset();}
     bool target(UINT w,UINT h,D3DFORMAT fmt,IDirect3DTexture9** t,IDirect3DSurface9** s){return check(d->CreateTexture(w,h,1,D3DUSAGE_RENDERTARGET,fmt,D3DPOOL_DEFAULT,t,nullptr),"world render texture")&&check((*t)->GetSurfaceLevel(0,s),"world render surface");}
     bool resources(UINT w,UINT h,D3DFORMAT fmt){
         if(width==w&&height==h&&color)return true;
@@ -1452,7 +1477,7 @@ private:
                  if(committedFixed)retirementBacklog.retire(reaper,committedFixed,committedFixed->size()*48);
                  if(committedOwners)retirementBacklog.retire(reaper,committedOwners,committedOwners->placements*(sizeof(StaticShadow::Placement)+64));}
                 uploaded=next.bvh;uploadedMap=std::move(committedMap);
-                ++meshGeneration;
+                ++meshGeneration;rebuildTerrainLists();
                 if(NorthlightDiagnostics::enabled())logf("WORLD staged mesh committed: vertices=%u triangles=%zu materials=%zu textureUploads=%u stagingFrames=%u stagingMs=%lu",vertexCount,size_t(plan.triangleCount),materials.size(),next.textureUploads,next.frames,(unsigned long)(GetTickCount()-next.started));
                 retirePendingCpu();pendingMesh.reset();meshRetry.clear();
             }
