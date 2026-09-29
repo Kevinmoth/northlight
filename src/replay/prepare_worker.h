@@ -174,6 +174,9 @@ public:
         return true;
     }
     bool abandoned()const{return abandoned_;}
+    // After a watchdog: once the abandoned worker has settled (it touches nothing of its last frame), the
+    // caller may take it back into use. false: not abandoned, not settled, or no thread.
+    bool rearm(){if(!abandoned_||!thread_.joinable()||!settled())return false;abandoned_=false;return true;}
     void setWatchdogMs(double ms){watchdogMs_=ms;}
     bool open()const{return open_;}
     Process& process(){return process_;}

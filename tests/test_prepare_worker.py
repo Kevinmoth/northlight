@@ -65,6 +65,11 @@ checks.update({
     'if(prepareUnsettled()){try{prepareQuarantine.emplace_back(raw);}catch(...){} return;}' in w
     and 'if(prepareUnsettled())for(size_t i=fit;i<replays.size();++i)recycleReplay(replays[i].release());' in w
     and 'if(prepareUnsettled()){for(auto& p:replays)recycleReplay(p.release());for(auto& p:heldShadowReplays)recycleReplay(p.release());}' in w,
+ 'watchdog re-arm: only in endFrame, after the settled worker released its quarantine and caches; 10 s after the abandon, at most 4 a session; counted in the log and the fields':
+    (lambda e:e.index('prepareAbandonedCaches.reset();')<e.index('prepareWorker.rearm()'))(body(x,'    void prepareEndFrame(){'))
+    and 'if(prepareRearms<PrepareRearms&&GetTickCount()-prepareAbandonTick>=PrepareRearmAfterMs&&prepareWorker.rearm()){' in x
+    and 'static constexpr unsigned PrepareRearms=4;static constexpr DWORD PrepareRearmAfterMs=10000;' in x and x.count('prepareWorker.rearm()')==1
+    and '(re-arms %u of %u)' in x and 'prepareRearms=%u' in x,
  'diagnostics only with RenderProfile (the fields and every clock)':
     'if(NorthlightRenderThreadProbe::profiling())std::snprintf(prepareFields,' in x and 'prepareTimed=profileSampled();' in x,
  'the worker is destroyed (joined) before the replays, caches and quarantine it reads':

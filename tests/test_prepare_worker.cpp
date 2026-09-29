@@ -13,6 +13,7 @@
 //     are taken over inline with equal outputs.
 //   - The renderer's prepare block (fill, publish, join, consumption, quiesce, endFrame), pasted from
 //     world_shadow_experiment.inl, equals inline over random frames with delays and A/B windows.
+//   - The watchdog re-arm: a settled abandoned worker returns after 10 s, at most 4 times a session.
 //   - Counterfactuals that must fail: the carried state reset at the handover, unfiltered records
 //     published, declaration elements read through the live cache after an eviction, the camera taken
 //     at the join.
@@ -287,13 +288,19 @@ static void watchdog(World& world){
     bool ok=worker.begin(frame,*caches);assert(ok);for(std::size_t k=0;k<n;++k)worker.publish(p.records[k],p.index[k]);
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
     const auto start=std::chrono::steady_clock::now();const auto r=worker.stop();const double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
-    assert(r.timedOut&&r.done==0&&worker.abandoned()&&!worker.ready()&&!worker.begin(frame,*caches)&&ms<15);
+    assert(r.timedOut&&r.done==0&&worker.abandoned()&&!worker.ready()&&!worker.begin(frame,*caches)&&ms<15&&!worker.rearm()); /* not settled: no re-arm */
     assert(!worker.settled()); /* the record in flight is still being read: the caller keeps the records */
     std::vector<Output> out(n);auto fresh=std::make_unique<Caches>();prepare(p,0,n,*fresh,c.inverseView,c.camera,out);assert(equal(out,reference,n));
     for(unsigned i=0;i<2000&&!worker.settled();++i)std::this_thread::sleep_for(std::chrono::milliseconds(1));
     assert(worker.settled()); /* it finished that record, saw the stop and acknowledged: records and caches are free again */
-    stallAt=SIZE_MAX;(void)ok;
-    std::printf("watchdog: a 20 ms record returned stop() after %.2f ms, worker abandoned, frame prepared inline equal\n",ms);
+    stallAt=SIZE_MAX;
+    // Re-arm: the settled worker takes a new frame again; its outputs plus the join's tail equal inline.
+    bool rearmed=worker.rearm();assert(rearmed&&!worker.abandoned()&&worker.ready()&&!worker.rearm());(void)rearmed;
+    auto again=std::make_unique<Caches>();ok=worker.begin(frame,*again);assert(ok);for(std::size_t k=0;k<n;++k)worker.publish(p.records[k],p.index[k]);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));const auto r2=worker.stop();assert(!r2.timedOut&&r2.published==n);
+    std::vector<Output> after(n);for(std::size_t k=0;k<r2.done;++k)after[k]=worker.outputs()[k];prepare(p,r2.done,n,*again,c.inverseView,c.camera,after);
+    assert(equal(after,reference,n));(void)ok;
+    std::printf("watchdog: a 20 ms record returned stop() after %.2f ms, worker abandoned, frame prepared inline equal; settled, re-armed (not before), next frame equal (%u by the worker)\n",ms,r2.done);
 }
 // ---- The renderer side (world_shadow_experiment.inl's prepare block, pasted by test_prepare_worker.py):
 // captureModel's fill and publish, the join, the consumption in the selection, quiesce and endFrame, with
@@ -314,7 +321,7 @@ struct Renderer {
     std::unique_ptr<Caches> prepareCaches=std::make_unique<Caches>();
     std::unique_ptr<Caches> prepareAbandonedCaches,prepareCheckCaches;
     std::vector<std::unique_ptr<Rec>> prepareQuarantine;
-    NorthlightActorPrepare::Worker<Rec> prepareWorker;
+    NorthlightActorPrepare::Worker<Rec,Faulty> prepareWorker; /* passes through unless a test stalls or throws */
     explicit Renderer(NorthlightVertexDeclarations::Cache& d):declarationCache(d){prepareWorker.setWatchdogMs(2000);}
     void recycleReplay(Rec* raw){if(prepareUnsettled()){prepareQuarantine.emplace_back(raw);return;}delete raw;}
 /*PREPARE_BLOCK*/
@@ -359,12 +366,49 @@ static void integration(World& world,unsigned frames,unsigned maxGroups){
     std::printf("integration: %u frames, %zu selections (%zu draws) equal to inline; modes worker=%zu ab-inline=%zu inline=%zu; %zu draws by the worker, %zu by the join; %zu mid-frame quiesces; self-check mismatches 0\n",
         frames,selections,draws,modes[0],modes[1],modes[2],worker,joined,quiesced);
 }
+// The renderer's watchdog re-arm: 5 abandons (a stalled record), each settled; no re-arm before 10 s,
+// then the worker returns, at most 4 times; after the 5th abandon inline for the session. Every frame
+// equals inline.
+static void rearmCap(World& world){
+    std::mt19937 rng(1777);Renderer r(world.declarationCache);auto referenceCaches=std::make_unique<Caches>();
+    for(unsigned k=0;k<world.programs.size();++k)if(world.programs[k])r.actorPrograms[World::shader(k)]=world.programs[k];
+    r.prepareWorker.setWatchdogMs(5);NorthlightRenderThreadProbe::on=false;tickNow=1000;
+    auto frame=[&](bool stall){
+        std::vector<std::unique_ptr<Rec>> records;
+        do records=world.frame(rng,8);while(published(records).records.empty());
+        const Camera c=camera(rng);std::memcpy(r.context.inverseView,c.inverseView,64);std::memcpy(r.context.camera,c.camera,12);
+        for(std::size_t i=0;i<records.size();++i){auto rec=std::move(records[i]);rec->program.reset();rec->declared=false;rec->elementCount=0;
+            if(stall&&rec->shadowSelected&&rec->shadowSkinned&&stallAt.load()==SIZE_MAX)stallAt=i;
+            if(rec->shadowSelected&&rec->shadowSkinned)r.prepareFill(*rec);
+            r.replays.emplace_back(std::move(rec));r.preparePublish();}
+        if(stall)std::this_thread::sleep_for(std::chrono::milliseconds(2)); /* the worker is inside the stalled record */
+        r.prepareJoin();const std::string mode=r.prepareStats.mode;
+        std::size_t tests=0,reused=0;r.actorShadowDraws.clear();r.prepareStable(tests,reused);
+        const auto p=published(r.replays);const std::size_t n=p.records.size();std::vector<Output> reference(n);
+        prepare(p,0,n,*referenceCaches,c.inverseView,c.camera,reference);assert(r.actorShadowDraws.size()==n);
+        for(std::size_t k=0;k<n;++k){Output got;got.item=r.actorShadowDraws[k];got.tested=p.records[k]->boneKnown;got.after=reference[k].after;assert(NorthlightActorPrepare::same(got,reference[k]));}
+        r.prepareQuiesce();r.prepareEndFrame();for(auto& rec:r.replays)r.recycleReplay(rec.release());r.replays.clear();
+        stallAt=SIZE_MAX;return mode;};
+    for(unsigned cycle=0;cycle<5;++cycle){
+        std::string mode=frame(true);assert(mode=="watchdog"&&r.prepareWorker.abandoned());
+        mode=frame(false);assert(mode=="inline");
+        std::this_thread::sleep_for(std::chrono::milliseconds(40)); /* the stalled record ends: settled */
+        tickNow+=5000;mode=frame(false);assert(mode=="inline"&&r.prepareWorker.abandoned()); /* settled, but not 10 s yet */
+        assert(r.prepareQuarantine.empty()&&!r.prepareAbandonedCaches); /* released once settled */
+        tickNow+=5001;mode=frame(false);assert(mode=="inline"); /* this frame's end re-arms (within the budget) */
+        mode=frame(false);assert(mode==(cycle<4?"worker":"inline"));
+        assert(r.prepareRearms==std::min(cycle+1,4u));}
+    tickNow+=100000;for(unsigned i=0;i<3;++i)assert(frame(false)=="inline"); /* the cap holds */
+    assert(r.prepareRearms==4&&r.prepareWorker.abandoned()&&r.logs==9); /* 5 watchdog lines, 4 re-arm lines */
+    std::printf("watchdog re-arm: 5 abandons, re-armed 4 times (none before 10 s, none after the cap), every frame equal to inline\n");
+}
 int main(int argc,char** argv){
     assert(argc>2);World world(argv[1]);const bool tsan=std::string(argv[2])=="tsan";
     loopIdentity(world,tsan?40:600);handover(world,tsan?4:24);evictedDeclaration(world);
     threaded<NorthlightActorPrepare::Prepare>(world,tsan?10000:3000,tsan?3:12,false);
     threaded<Faulty>(world,tsan?2000:1500,tsan?3:12,true);
     integration(world,tsan?3000:2000,tsan?4:16);
+    rearmCap(world);
     watchdog(world);
     std::puts("PASS prepare worker: handover at every index, threaded worker and join, exception and watchdog takeover equal to inline; counterfactuals fail");
 }

@@ -65,8 +65,8 @@
         if(captureSampled){const double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
             // 0.3.177 (r83): the prepare worker's fields, RenderProfile only.
             char prepareFields[400]="";
-            if(NorthlightRenderThreadProbe::profiling())std::snprintf(prepareFields,sizeof prepareFields," prepareMode=%s published=%u workerRecords=%u joinInlineRecords=%u workerPrepareMs=%.3f joinWaitMs=%.3f joinInlineMs=%.3f wakes=%u notifyUs=%.1f handoffUs=%.1f prepareMismatch=%u cachesStaleClears=%u prepareResync=%u",
-                prepareStats.mode,prepareStats.published,prepareStats.workerRecords,prepareStats.joinInline,prepareStats.workerMs,prepareStats.joinWaitMs,prepareStats.joinInlineMs,prepareStats.wakes,prepareStats.notifyUs,prepareStats.handoffUs,prepareStats.mismatch,prepareStats.staleClears,prepareStats.resync);
+            if(NorthlightRenderThreadProbe::profiling())std::snprintf(prepareFields,sizeof prepareFields," prepareMode=%s published=%u workerRecords=%u joinInlineRecords=%u workerPrepareMs=%.3f joinWaitMs=%.3f joinInlineMs=%.3f wakes=%u notifyUs=%.1f handoffUs=%.1f prepareMismatch=%u cachesStaleClears=%u prepareResync=%u prepareRearms=%u",
+                prepareStats.mode,prepareStats.published,prepareStats.workerRecords,prepareStats.joinInline,prepareStats.workerMs,prepareStats.joinWaitMs,prepareStats.joinInlineMs,prepareStats.wakes,prepareStats.notifyUs,prepareStats.handoffUs,prepareStats.mismatch,prepareStats.staleClears,prepareStats.resync,prepareRearms);
             if(stable.actors+stable.rigidActors){deferLogf("MODEL shadow actors ranked=%zu kept=%zu toggles=%zu togglesSinceLog=%zu rankedFramesSinceLog=%u matched=%zu retained=%zu rigidActors=%zu rigidDraws=%zu rigidBytes=%zu attached=%zu attachedBytes=%zu orphans=%zu freeNearBody=%zu attachRadius=%.1f rigidHits=%u rigidMisses=%u rigidScannedVertices=%zu history=%zu cut=prefix margin=%.2f origin=%s rigidNew=%zu prepareMs=%.3f chooseMs=%.3f exemptActors=%zu exemptDraws=%zu exemptBytes=%zu cappedExempt=%zu stillRankedSmall=%zu exemptCapBindsSinceLog=%u rooted=%zu rootFallback=%zu rootRejected=%zu locked=%zu exemptNpcLike=%zu%s",
                 stable.actors,stable.actorsKept,stable.toggles,actorShadowToggles,actorShadowFrames,stable.matched,stable.retained,stable.rigidActors,stable.rigidDraws,stable.rigidBytes,stable.attached,stable.attachedBytes,stable.orphans,stable.rigidStuck,double(NorthlightActorShadowSelection::AttachRadius),prepareCaches->bones.hits,prepareCaches->bones.misses,prepareCaches->bones.scannedVertices,actorShadowHistory.size(),double(NorthlightActorShadowSelection::active().margin),NorthlightActorShadowSelection::FlickerFixes&&actorShadowOriginValid?"pivot":"camera",stable.rigidNew,actorShadowPrepareMs,actorShadowChooseMs,stable.exemptActors,stable.exemptDraws,stable.exemptBytes,stable.cappedExempt,stable.stillRankedSmall,actorShadowCapBinds,stable.rooted,stable.rootFallback,stable.rootRejected,stable.locked,stable.exemptNpcLike,prepareFields);actorShadowCapBinds=0;
                 actorShadowToggles=0;actorShadowFrames=0;}
@@ -96,7 +96,11 @@
     // RenderProfile diagnostics of the frame (appended to MODEL shadow actors); -1: not measured.
     struct PrepareStats {const char* mode="inline";std::uint32_t published=0,workerRecords=0,joinInline=0,wakes=0,mismatch=0,staleClears=0,resync=0;
         double workerMs=-1,joinWaitMs=-1,joinInlineMs=-1,notifyUs=-1,handoffUs=-1;} prepareStats;
-    double prepareHandoffUs=0;unsigned prepareFaults=0;bool prepareAbandonLogged=false;
+    double prepareHandoffUs=0;unsigned prepareFaults=0;
+    // Watchdog re-arm: a settled abandoned worker is taken back PrepareRearmAfterMs after its abandon, at
+    // most PrepareRearms times a session (a one-off scheduler stall must not cost the whole session).
+    static constexpr unsigned PrepareRearms=4;static constexpr DWORD PrepareRearmAfterMs=10000;
+    unsigned prepareRearms=0;DWORD prepareAbandonTick=0;
     bool prepareOffload()const{return prepareCores>=6&&quality.actorShadows&&selectionTuning().stableIdentity&&!prepareWorker.abandoned();}
     bool prepareUnsettled()const{return prepareWorker.abandoned()&&!prepareWorker.settled();}
     // The caches' owner opens them: a deferred clear (registerShader), then this frame's statistics.
@@ -127,14 +131,17 @@
         prepareWorker.publish(&p,replays.size()-1); /* false (arena full): the join's check resyncs inline */
         if(sample)prepareHandoffUs+=16*std::chrono::duration<double,std::micro>(std::chrono::steady_clock::now()-start).count();
     }
-    // The worker did not acknowledge within the watchdog: inline for the session. It may still be in one
-    // record: its caches are set aside and the replays it may read are quarantined until it settles.
+    // The worker did not acknowledge within the watchdog: inline until it is re-armed (prepareEndFrame).
+    // It may still be in one record: its caches are set aside and the replays it may read are quarantined
+    // until it settles.
     void prepareAbandon(){
         std::unique_ptr<NorthlightActorPrepare::Caches> fresh;try{fresh=std::make_unique<NorthlightActorPrepare::Caches>();}catch(...){}
         if(fresh){prepareAbandonedCaches=std::move(prepareCaches);prepareCaches=std::move(fresh);prepareCachesOpen();}
         else while(!prepareWorker.settled())NorthlightActorPrepare::pause(); /* no memory for new caches: wait for the old ones */
         prepareStats.mode="watchdog";
-        if(!prepareAbandonLogged){prepareAbandonLogged=true;logf("PREPARE worker watchdog: no acknowledgement within %.0f ms; actor prepare inline for this session",NorthlightActorPrepare::Worker<Replay>::WatchdogMs);}
+        prepareAbandonTick=GetTickCount();
+        logf("PREPARE worker watchdog: no acknowledgement within %.0f ms; actor prepare inline %s (re-arms %u of %u)",NorthlightActorPrepare::Worker<Replay>::WatchdogMs,
+            prepareRearms<PrepareRearms?"until the worker settles, at least 10 s":"for this session",prepareRearms,PrepareRearms);
     }
     // Stops an open worker frame; its outputs are discarded (endFrame, reset, releaseGPU, trimMemory).
     void prepareQuiesce(){
@@ -142,12 +149,14 @@
         if(prepareFrame!=PrepareFrame::None)prepareFrame=PrepareFrame::Joined;prepareOutputsReady=false;
     }
     // endFrame (after prepareQuiesce): the next frame starts closed; a settled abandoned worker frees
-    // what it held.
+    // what it held and, within the re-arm budget, returns to use.
     void prepareEndFrame(){
         prepareFrame=PrepareFrame::None;prepareOutputsReady=false;prepareOpened=false;prepareTimed=false;prepareCount=prepareSerial=0;prepareHandoffUs=0;prepareStats=PrepareStats{};
         if(prepareWorker.abandoned()&&prepareWorker.settled()){
             if(!prepareQuarantine.empty()){auto held=std::move(prepareQuarantine);prepareQuarantine.clear();for(auto& p:held)recycleReplay(p.release());}
-            prepareAbandonedCaches.reset();}
+            prepareAbandonedCaches.reset();
+            if(prepareRearms<PrepareRearms&&GetTickCount()-prepareAbandonTick>=PrepareRearmAfterMs&&prepareWorker.rearm()){
+                ++prepareRearms;logf("PREPARE worker re-armed after a watchdog (re-arms %u of %u)",prepareRearms,PrepareRearms);}}
     }
     // The join, the first statement of selectShadowReplays: stop the worker (at most its record in
     // flight; a sleeping one at once), prepare [done, published) inline with the frozen camera and the
