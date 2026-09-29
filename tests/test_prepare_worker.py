@@ -76,9 +76,14 @@ checks.update({
  'T1: registerShader retires erased programs; they are released only after the recycle, settled, with no quarantine':
     'retireProgram(std::move(old->second.program));' in register and 'retireProgram(std::move(program->second));actorPrograms.erase(program);' in register
     and w.count('retiredPrograms.clear()')+x.count('retiredPrograms.clear()')==1
-    and 'if(prepareUnsettled()||!prepareQuarantine.empty())return;\n        retiredPrograms.clear();' in x
+    and (lambda f:f.index('if(prepareUnsettled()||!prepareQuarantine.empty()){')<f.index('return;}')<f.index('retiredPrograms.clear();prepareQuarantinedDecls.clear();'))(body(x,'    void prepareFrameRelease(){'))
     and end.index('recycleReplay(')<end.index('prepareFrameRelease(); /* 0.3.179: after the recycle */')
     and 'if(replays.empty()&&heldShadowReplays.empty())prepareFrameRelease();' in release,
+ 'T2 (0.3.179): prepareFill reads the declaration through the frame arena (the per-record copy when full); the arena is reset only in prepareFrameRelease, swapped when unsettled':
+    'prepareDecls->find(p.decl,' in x and 'if(copy){p.declCopy=copy;p.declared=copy->declared;}' in x
+    and x.count('prepareDecls->reset()')==1 and 'prepareQuarantinedDecls.push_back(std::move(prepareDecls));' in body(x,'    void prepareFrameRelease(){')
+    and 'const NorthlightActorPrepare::DeclCopy* declCopy=nullptr;' in w and 'program=nullptr;declCopy=nullptr;' in w
+    and w.index('std::unique_ptr<NorthlightActorPrepare::DeclArena> prepareDecls=')<w.index('NorthlightActorPrepare::Worker<Replay> prepareWorker;'),
  'diagnostics only with RenderProfile (the fields and every clock)':
     'if(NorthlightRenderThreadProbe::profiling())std::snprintf(prepareFields,' in x and 'prepareTimed=profileSampled();' in x,
  'the worker is destroyed (joined) before the replays, caches and quarantine it reads':

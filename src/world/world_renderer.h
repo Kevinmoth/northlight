@@ -570,11 +570,16 @@ private:
         // program is the capture metadata's, not a handle; a program retired while a frame may point at it
         // lives in retiredPrograms until that frame is recycled and the worker has settled.
         const NorthlightActorDeformation::Program* program=nullptr;
+        // 0.3.179 (T2): the frame's declaration copy (prepareDecls); null: the per-record copy below (the
+        // arena was full) or not declared.
+        const NorthlightActorPrepare::DeclCopy* declCopy=nullptr;
         std::array<D3DVERTEXELEMENT9,MAXD3DDECLLENGTH+1> elements{};UINT elementCount=0;bool declared=false;
+        const D3DVERTEXELEMENT9* declarationElements()const{return declCopy?declCopy->elements:elements.data();}
+        UINT declarationCount()const{return declCopy?declCopy->count:elementCount;}
         uint32_t staticProofMask=0;uint64_t staticProofRevision=0;std::string staticProofModel;
         V staticProofLow,staticProofHigh;
         D3DPRIMITIVETYPE type;INT base;UINT min,vertices,start,count;bool indexed;
-        void releaseResources(bool retainSnapshot=false){NorthlightReplayCaptureConstants::reset(*this);program=nullptr;declared=false;elementCount=0;drop(shader);drop(originalShader);pointBounds={};boundsWork={};boundsPrepared.reset();drop(decl);drop(index);drop(texture);for(auto& s:stream)drop(s);shared.reset();if(!retainSnapshot)snapshot=NorthlightDrawSnapshot::Mesh{};}
+        void releaseResources(bool retainSnapshot=false){NorthlightReplayCaptureConstants::reset(*this);program=nullptr;declCopy=nullptr;declared=false;elementCount=0;drop(shader);drop(originalShader);pointBounds={};boundsWork={};boundsPrepared.reset();drop(decl);drop(index);drop(texture);for(auto& s:stream)drop(s);shared.reset();if(!retainSnapshot)snapshot=NorthlightDrawSnapshot::Mesh{};}
         ~Replay(){releaseResources();}
     };
     std::vector<std::unique_ptr<Replay>> replays,freeReplays,heldShadowReplays;
@@ -596,6 +601,10 @@ private:
     // so it is destroyed (its thread joined) first. After a watchdog the abandoned worker keeps its caches
     // and the replays of its frame (quarantined, never recycled) until it settles.
     std::unique_ptr<NorthlightActorPrepare::Caches> prepareAbandonedCaches,prepareCheckCaches;
+    // 0.3.179 (T2): this frame's declaration copies (null: allocation failed, per-record copies), and the
+    // arenas an abandoned worker's frame may still read.
+    std::unique_ptr<NorthlightActorPrepare::DeclArena> prepareDecls=std::make_unique<NorthlightActorPrepare::DeclArena>();
+    std::vector<std::unique_ptr<NorthlightActorPrepare::DeclArena>> prepareQuarantinedDecls;
     std::vector<std::unique_ptr<Replay>> prepareQuarantine;
     NorthlightActorPrepare::Worker<Replay> prepareWorker;
     NorthlightShadowFate::Tracker shadowFate;unsigned otherBlendRejected=0,otherBudgetRejected=0,otherProjectionRejected=0;

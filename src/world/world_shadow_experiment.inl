@@ -193,8 +193,12 @@
     // 0.3.179: end of endFrame, after the recycle: what the frame's replays pointed at may go once the
     // worker has settled (else at a later frame's end).
     void prepareFrameRelease(){
-        if(prepareUnsettled()||!prepareQuarantine.empty())return;
-        retiredPrograms.clear();
+        if(prepareUnsettled()||!prepareQuarantine.empty()){ /* T2: a fresh arena; the old one stays with the quarantine */
+            if(prepareDecls&&prepareDecls->used()){try{prepareQuarantinedDecls.push_back(std::move(prepareDecls));}catch(...){new std::unique_ptr<NorthlightActorPrepare::DeclArena>(std::move(prepareDecls));}
+                try{prepareDecls=std::make_unique<NorthlightActorPrepare::DeclArena>();}catch(...){}} /* none: per-record copies */
+            return;}
+        retiredPrograms.clear();prepareQuarantinedDecls.clear();
+        if(prepareDecls)prepareDecls->reset();else try{prepareDecls=std::make_unique<NorthlightActorPrepare::DeclArena>();}catch(...){}
     }
     // 0.3.177 (r83): the prepare inputs of a selected skinned draw, at capture (just before it joins
     // replays): its program (0.3.179: the capture metadata's) and a copy of its declaration; declared:
@@ -203,9 +207,14 @@
         const bool sample=prepareTimed&&prepareFrame==PrepareFrame::Worker&&!(prepareSerial&15u); /* handoffUs: 1 in 16 */
         const auto start=sample?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
         p.program=metadata.program.get(); /* 0.3.179 (T1): the capture metadata's (the program map's object): no lookup, no reference */
-        const D3DVERTEXELEMENT9* elements=nullptr;UINT count=0;
-        p.declared=p.program&&declarationCache.get(p.decl,elements,count)&&count<=p.elements.size();
-        p.elementCount=p.declared?count:0;if(p.declared)std::copy(elements,elements+count,p.elements.begin());
+        p.declCopy=nullptr;p.elementCount=0;
+        // 0.3.179 (T2): the frame's copy of the declaration, read once a frame; the per-record copy when full.
+        const NorthlightActorPrepare::DeclCopy* copy=p.program&&prepareDecls?prepareDecls->find(p.decl,[this](IDirect3DVertexDeclaration9* decl,const D3DVERTEXELEMENT9*& elements,UINT& count){
+            return declarationCache.get(decl,elements,count);}):nullptr;
+        if(copy){p.declCopy=copy;p.declared=copy->declared;}
+        else{const D3DVERTEXELEMENT9* elements=nullptr;UINT count=0;
+            p.declared=p.program&&declarationCache.get(p.decl,elements,count)&&count<=p.elements.size();
+            p.elementCount=p.declared?count:0;if(p.declared)std::copy(elements,elements+count,p.elements.begin());}
         if(sample)prepareHandoffUs+=16*std::chrono::duration<double,std::micro>(std::chrono::steady_clock::now()-start).count();
     }
     // One prepared draw into the selection: its draw, and (0.3.176 S2) the rigid bone it tested.

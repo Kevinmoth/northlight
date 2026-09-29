@@ -39,9 +39,21 @@ struct Rec {
     unsigned constantGroup=0;IDirect3DVertexShader9* originalShader=nullptr;IDirect3DVertexDeclaration9* decl=nullptr;
     std::shared_ptr<const Mesh> shared;Mesh snapshot;const float* constants=nullptr;std::vector<float> storage;
     const Program* program=nullptr; /* 0.3.179 (T1): the capture metadata's program */
+    const NorthlightActorPrepare::DeclCopy* declCopy=nullptr; /* 0.3.179 (T2): the frame's copy; null: the per-record copy */
     std::array<D3DVERTEXELEMENT9,MAXD3DDECLLENGTH+1> elements{};UINT elementCount=0;bool declared=false;
     bool shadowSelected=true,shadowSkinned=true,boneKnown=false;float bone=NAN;
     const Mesh& mesh()const{return shared?*shared:snapshot;}
+    const D3DVERTEXELEMENT9* declarationElements()const{return declCopy?declCopy->elements:elements.data();}
+    UINT declarationCount()const{return declCopy?declCopy->count:elementCount;}
+};
+// The 0.3.178 record layout: a program handle and a per-record declaration copy.
+struct RecR83 {
+    unsigned constantGroup=0;IDirect3DVertexShader9* originalShader=nullptr;IDirect3DVertexDeclaration9* decl=nullptr;
+    std::shared_ptr<const Mesh> shared;Mesh snapshot;const float* constants=nullptr;
+    std::shared_ptr<const Program> program;std::array<D3DVERTEXELEMENT9,MAXD3DDECLLENGTH+1> elements{};UINT elementCount=0;bool declared=false;
+    const Mesh& mesh()const{return shared?*shared:snapshot;}
+    const D3DVERTEXELEMENT9* declarationElements()const{return elements.data();}
+    UINT declarationCount()const{return elementCount;}
 };
 struct FakeDecl final:IDirect3DVertexDeclaration9 {
     unsigned refs=1;std::vector<D3DVERTEXELEMENT9> layout;
@@ -63,7 +75,8 @@ static std::shared_ptr<Mesh> mesh(std::mt19937& rng,unsigned vertices,unsigned b
 }
 struct World {
     std::vector<std::shared_ptr<const Program>> programs; /* per shader slot; null: not an actor program */
-    std::vector<FakeDecl> decls=std::vector<FakeDecl>(2);
+    std::vector<FakeDecl> decls=std::vector<FakeDecl>(2),many=std::vector<FakeDecl>(200); /* many: more than an arena holds */
+    NorthlightActorPrepare::DeclArena arena;bool manyDecls=false;
     NorthlightVertexDeclarations::Cache declarationCache;std::vector<std::shared_ptr<Mesh>> pool;
     static IDirect3DVertexShader9* shader(unsigned k){return reinterpret_cast<IDirect3DVertexShader9*>(std::uintptr_t(0x1000+32*k));}
     explicit World(const char* fourBone){
@@ -72,21 +85,30 @@ struct World {
         programs.push_back(std::make_shared<const Program>(CLIENT_PROGRAM(OneBoneVs3)));programs.push_back(nullptr);
         assert(NorthlightReplayBounds::SkinEnvelope::supports(*programs[3])&&programs[3]->paletteBase==31);
         decls[0].layout=gameLayout;decls[1].layout={{0,0,2,0,0,0},{0xff,0,17,0,0,0}}; /* no BLENDINDICES */
+        for(unsigned i=0;i<many.size();++i)many[i].layout=i%3?gameLayout:decls[1].layout;
         std::mt19937 rng(177);for(unsigned i=0;i<48;++i)pool.push_back(mesh(rng,3+rng()%24,rng()%6,rng()%4==0));
     }
-    // The capture-side fill (the renderer's prepareFill): the program and a copy of the declaration.
+    std::shared_ptr<const Program> handle(const Rec& r)const{return programs[(reinterpret_cast<std::uintptr_t>(r.originalShader)-0x1000)/32];}
+    // The capture-side fill (the renderer's prepareFill): the program, the frame's declaration copy or,
+    // when the arena is full, a per-record copy.
     void fill(Rec& r){
-        r.program=programs[(reinterpret_cast<std::uintptr_t>(r.originalShader)-0x1000)/32].get();
-        const D3DVERTEXELEMENT9* e=nullptr;UINT n=0;r.declared=r.program&&declarationCache.get(r.decl,e,n);
-        if(r.declared){std::copy(e,e+n,r.elements.begin());r.elementCount=n;}else r.elementCount=0;
+        r.program=handle(r).get();r.declCopy=nullptr;r.elementCount=0;
+        const auto* copy=r.program?arena.find(r.decl,[this](IDirect3DVertexDeclaration9* d,const D3DVERTEXELEMENT9*& e,UINT& n){return declarationCache.get(d,e,n);}):nullptr;
+        if(copy){r.declCopy=copy;r.declared=copy->declared;return;}
+        const D3DVERTEXELEMENT9* e=nullptr;UINT n=0;r.declared=r.program&&declarationCache.get(r.decl,e,n)&&n<=r.elements.size();
+        if(r.declared){std::copy(e,e+n,r.elements.begin());r.elementCount=n;}
     }
+    // The same record in the 0.3.178 layout (fill: a handle and a copy through the live cache).
+    RecR83 r83(const Rec& r){RecR83 o;o.constantGroup=r.constantGroup;o.originalShader=r.originalShader;o.decl=r.decl;o.shared=r.shared;o.snapshot=r.snapshot;o.constants=r.constants;
+        o.program=handle(r);const D3DVERTEXELEMENT9* e=nullptr;UINT n=0;o.declared=o.program&&declarationCache.get(o.decl,e,n)&&n<=o.elements.size();
+        o.elementCount=o.declared?n:0;if(o.declared)std::copy(e,e+n,o.elements.begin());return o;}
     // A capture frame: constant groups of 1-8 draws in replays order; some neither selected nor skinned.
     std::vector<std::unique_ptr<Rec>> frame(std::mt19937& rng,unsigned groups){
-        std::vector<std::unique_ptr<Rec>> out;
+        std::vector<std::unique_ptr<Rec>> out;arena.reset(); /* per frame, as the renderer */
         for(unsigned g=0;g<groups;++g){const unsigned draws=1+rng()%8;const unsigned groupShader=rng()%10<6?rng()%2:rng()%6;
             std::vector<float>* bank=nullptr;
             for(unsigned k=0;k<draws;++k){auto r=std::make_unique<Rec>();r->constantGroup=g+1;
-                r->originalShader=shader(rng()%5?groupShader:rng()%6);r->decl=&decls[rng()%10?0:1];
+                r->originalShader=shader(rng()%5?groupShader:rng()%6);r->decl=manyDecls&&rng()%2?static_cast<IDirect3DVertexDeclaration9*>(&many[rng()%many.size()]):&decls[rng()%10?0:1];
                 if(rng()%4){r->shared=pool[rng()%pool.size()];}else r->snapshot=*mesh(rng,3+rng()%24,rng()%6,rng()%3==0);
                 if(!bank||rng()%6==0){r->storage.resize(1024);for(auto& v:r->storage)v=float(int(rng()%2001)-1000)*.001f;
                     r->storage[0]=3;r->storage[1]=1;for(unsigned b=0;b<8;++b){const unsigned row=31+3*b;r->storage[4*row]=1;r->storage[4*(row+1)+1]=1;r->storage[4*(row+2)+2]=1;
@@ -241,6 +263,46 @@ static void loopIdentity(World& world,unsigned frames){
     }
     std::printf("loop identity: prepareRecord == the 0.3.176 loop over %u frames, %zu draws (%zu rigid bones tested)\n",frames,draws,tested);
 }
+// 0.3.179 (T2): the record layouts side by side over the same frames: the arena (with the per-record copy
+// when more than 128 declarations overflow it) and the program pointer against the 0.3.178 handle and
+// per-record copy through the live cache. Bit-equal.
+static void layouts(World& world,unsigned frames){
+    std::mt19937 rng(1792);auto a=std::make_unique<Caches>(),b=std::make_unique<Caches>();std::size_t records=0,fromArena=0,overflow=0;
+    for(unsigned f=0;f<frames;++f){world.manyDecls=f%4==0;
+        auto replays=world.frame(rng,world.manyDecls?140:4+rng()%20);const auto p=published(replays);const Camera c=camera(rng);
+        std::vector<RecR83> old;old.reserve(p.records.size());for(const Rec* rec:p.records)old.push_back(world.r83(*rec));
+        NorthlightActorPrepare::State s1,s2;Output o1,o2;
+        for(std::size_t k=0;k<p.records.size();++k){
+            NorthlightActorPrepare::prepareRecord(s1,*p.records[k],p.index[k],*a,c.inverseView,c.camera,o1);
+            NorthlightActorPrepare::prepareRecord(s2,old[k],p.index[k],*b,c.inverseView,c.camera,o2);
+            assert(NorthlightActorPrepare::same(o1,o2));++records;fromArena+=p.records[k]->declCopy!=nullptr;overflow+=p.records[k]->program&&!p.records[k]->declCopy;}}
+    world.manyDecls=false;assert(fromArena>1000&&overflow>50);
+    std::printf("record layouts: %zu records bit-equal in the 0.3.179 (arena %zu, per-record copy on overflow %zu) and 0.3.178 layouts\n",records,fromArena,overflow);
+}
+// Counterfactual (T2): a cross-frame declaration cache keyed by pointer alone goes stale when the
+// declaration is freed and another layout is allocated at its address (the fixture reuses the object);
+// the per-frame arena reads the new layout.
+static void staleDeclaration(World& world){
+    std::mt19937 rng(1793);FakeDecl reused;reused.layout=gameLayout;NorthlightActorPrepare::DeclArena perFrame,crossFrame;
+    auto get=[](IDirect3DVertexDeclaration9* d,const D3DVERTEXELEMENT9*& e,UINT& n){auto* f=static_cast<FakeDecl*>(d);e=f->layout.data();n=UINT(f->layout.size());return true;};
+    std::size_t frames=0,stale=0;
+    for(unsigned q=0;q<40;++q){
+        for(int step=0;step<2;++step){ /* step 0: the first layout; step 1: another object at the same address */
+            reused.layout=step?std::vector<D3DVERTEXELEMENT9>{{0,0,2,0,0,0},{0xff,0,17,0,0,0}}:gameLayout;perFrame.reset();
+            auto replays=world.frame(rng,6);const Camera c=camera(rng);std::vector<Rec> arena,cross,fresh;
+            for(const auto& rec:replays)if(rec->shadowSelected&&rec->shadowSkinned){
+                Rec base;base.constantGroup=rec->constantGroup;base.originalShader=rec->originalShader;base.decl=&reused;base.shared=rec->shared;base.snapshot=rec->snapshot;base.constants=rec->constants;base.program=world.handle(*rec).get();
+                Rec x=base,y=base,z=base;
+                if(base.program){const auto* e=perFrame.find(base.decl,get);x.declCopy=e;x.declared=e->declared;const auto* g=crossFrame.find(base.decl,get);y.declCopy=g;y.declared=g->declared;
+                    const D3DVERTEXELEMENT9* el=nullptr;UINT n=0;z.declared=get(base.decl,el,n);z.elementCount=n;std::copy(el,el+n,z.elements.begin());}
+                arena.push_back(std::move(x));cross.push_back(std::move(y));fresh.push_back(std::move(z));}
+            auto run=[&](std::vector<Rec>& v){std::vector<Output> out(v.size());NorthlightActorPrepare::State st;auto cc=std::make_unique<Caches>();
+                for(std::size_t k=0;k<v.size();++k)NorthlightActorPrepare::prepareRecord(st,v[k],k,*cc,c.inverseView,c.camera,out[k]);return out;};
+            const auto A=run(arena),B=run(cross),R=run(fresh);
+            assert(equal(A,R,R.size()));if(step){++frames;stale+=!equal(B,R,R.size());}}
+        crossFrame.reset();}
+    assert(stale>frames/2);std::printf("stale declaration: a cross-frame pointer-keyed copy differs in %zu of %zu reused-address frames; the per-frame arena is equal\n",stale,frames);
+}
 // Test processes: a throw on one index, or a stall (the watchdog).
 static std::atomic<std::size_t> throwAt{SIZE_MAX},stallAt{SIZE_MAX};
 struct Faulty {template<class R> void operator()(State& s,const R& p,std::size_t index,Caches& c,const NorthlightActorPrepare::Frame& f,Output& out)const{
@@ -314,6 +376,8 @@ struct Renderer {
     std::unordered_map<IDirect3DVertexShader9*,std::shared_ptr<const Program>> actorPrograms;
     struct CaptureShader {std::shared_ptr<const Program> program;};std::unordered_map<IDirect3DVertexShader9*,CaptureShader> captureShaders;
     std::vector<std::shared_ptr<const Program>> retiredPrograms;
+    std::unique_ptr<NorthlightActorPrepare::DeclArena> prepareDecls=std::make_unique<NorthlightActorPrepare::DeclArena>();
+    std::vector<std::unique_ptr<NorthlightActorPrepare::DeclArena>> prepareQuarantinedDecls;
 /*RETIRE_PROGRAM*/
     NorthlightVertexDeclarations::Cache& declarationCache;
     struct {float inverseView[16]={},camera[3]={};} context;
@@ -350,7 +414,7 @@ static void integration(World& world,unsigned frames,unsigned maxGroups){
         NorthlightRenderThreadProbe::on=rng()%3==0;r.sampled=NorthlightRenderThreadProbe::on&&rng()%2;tickNow=DWORD(rng()%100000);
         const bool trim=rng()%12==0;const std::size_t trimAt=records.empty()?0:rng()%records.size();
         for(std::size_t i=0;i<records.size();++i){auto rec=std::move(records[i]);
-            rec->program=nullptr;rec->declared=false;rec->elementCount=0; /* the renderer's fill below */
+            rec->program=nullptr;rec->declCopy=nullptr;rec->declared=false;rec->elementCount=0; /* the renderer's fill below */
             if(rng()%4==0)delay(rng);
             if(rec->shadowSelected&&rec->shadowSkinned)r.prepareFill(*rec,r.captureShaders[rec->originalShader]);
             r.replays.emplace_back(std::move(rec));r.preparePublish();
@@ -387,7 +451,7 @@ static void rearmCap(World& world){
         std::vector<std::unique_ptr<Rec>> records;
         do records=world.frame(rng,8);while(published(records).records.empty());
         const Camera c=camera(rng);std::memcpy(r.context.inverseView,c.inverseView,64);std::memcpy(r.context.camera,c.camera,12);
-        for(std::size_t i=0;i<records.size();++i){auto rec=std::move(records[i]);rec->program=nullptr;rec->declared=false;rec->elementCount=0;
+        for(std::size_t i=0;i<records.size();++i){auto rec=std::move(records[i]);rec->program=nullptr;rec->declCopy=nullptr;rec->declared=false;rec->elementCount=0;
             if(stall&&rec->shadowSelected&&rec->shadowSkinned&&stallAt.load()==SIZE_MAX)stallAt=i;
             if(rec->shadowSelected&&rec->shadowSkinned)r.prepareFill(*rec,r.captureShaders[rec->originalShader]);
             r.replays.emplace_back(std::move(rec));r.preparePublish();}
@@ -423,7 +487,7 @@ static void programLifetime(World& world,bool counterfactual){
     std::vector<std::unique_ptr<Rec>> records;do records=world.frame(rng,10);while(published(records).records.size()<4);
     const Camera c=camera(rng);std::memcpy(r.context.inverseView,c.inverseView,64);std::memcpy(r.context.camera,c.camera,12);
     IDirect3DVertexShader9* retired=nullptr;
-    for(std::size_t i=0;i<records.size();++i){auto rec=std::move(records[i]);rec->program=nullptr;rec->declared=false;rec->elementCount=0;
+    for(std::size_t i=0;i<records.size();++i){auto rec=std::move(records[i]);rec->program=nullptr;rec->declCopy=nullptr;rec->declared=false;rec->elementCount=0;
         if(rec->shadowSelected&&rec->shadowSkinned){if(stallAt.load()==SIZE_MAX&&r.captureShaders[rec->originalShader].program){stallAt=i;retired=rec->originalShader;}
             r.prepareFill(*rec,r.captureShaders[rec->originalShader]);}
         r.replays.emplace_back(std::move(rec));r.preparePublish();}
@@ -444,7 +508,7 @@ static void programLifetime(World& world,bool counterfactual){
 int main(int argc,char** argv){
     assert(argc>2);World world(argv[1]);const bool tsan=std::string(argv[2])=="tsan";
     if(std::string(argv[2])=="lifetime-counterfactual"){programLifetime(world,true);return 0;}
-    loopIdentity(world,tsan?40:600);handover(world,tsan?4:24);evictedDeclaration(world);
+    loopIdentity(world,tsan?40:600);layouts(world,tsan?20:200);staleDeclaration(world);handover(world,tsan?4:24);evictedDeclaration(world);
     threaded<NorthlightActorPrepare::Prepare>(world,tsan?10000:3000,tsan?3:12,false);
     threaded<Faulty>(world,tsan?2000:1500,tsan?3:12,true);
     integration(world,tsan?3000:2000,tsan?4:16);

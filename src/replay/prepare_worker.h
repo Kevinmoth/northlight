@@ -15,6 +15,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <cstring>
+#include <algorithm>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -38,13 +39,39 @@ struct Output {Draw item;bool tested=false;State after;};
 // record) with constantGroup, originalShader, decl, mesh(), shared, constants and, filled at capture,
 // program (the program handle, null: not an actor program), elements/elementCount (a copy of the
 // declaration) and declared (program && the declaration was read).
+// 0.3.179 (T2): a frame's declarations, each read once through the declaration cache into an entry that
+// is never changed afterwards. Keyed by the declaration pointer alone: every record holds a reference to
+// its declaration for the whole frame, so the pointer cannot be reused within the frame, and the arena
+// is reset per frame (after the recycle, once the prepare worker has settled). Full (more than Capacity
+// distinct declarations): the caller keeps the per-record copy.
+struct DeclCopy {const void* key=nullptr;UINT count=0;bool declared=false;D3DVERTEXELEMENT9 elements[MAXD3DDECLLENGTH+1]={};};
+class DeclArena {
+public:
+    static constexpr unsigned Capacity=128;
+private:
+    std::unique_ptr<DeclCopy[]> entries_{new DeclCopy[Capacity]};unsigned used_=0;const DeclCopy* last_=nullptr;
+public:
+    void reset(){used_=0;last_=nullptr;}
+    unsigned used()const{return used_;}
+    // get(key,elements,count): the declaration cache's read. declared: it succeeded and the elements fit.
+    template<class Decl,class Get> const DeclCopy* find(Decl* key,Get&& get){
+        if(last_&&last_->key==key)return last_;
+        for(unsigned i=0;i<used_;++i)if(entries_[i].key==key)return last_=&entries_[i];
+        if(used_==Capacity)return nullptr;
+        DeclCopy& e=entries_[used_];const D3DVERTEXELEMENT9* elements=nullptr;UINT count=0;
+        e.key=key;e.declared=get(key,elements,count)&&count<=MAXD3DDECLLENGTH+1;e.count=e.declared?count:0;
+        if(e.declared)std::copy(elements,elements+count,e.elements);
+        ++used_;return last_=&e;
+    }
+};
 // The record's program: a handle (tests of the 0.3.177 layout) or the raw pointer (0.3.179 T1).
 inline const NorthlightActorDeformation::Program* programOf(const std::shared_ptr<const NorthlightActorDeformation::Program>& p){return p.get();}
 inline const NorthlightActorDeformation::Program* programOf(const NorthlightActorDeformation::Program* p){return p;}
+// Record: see prepareRecord; its declaration through declarationElements()/declarationCount().
 template<class Record> void prepareRecord(State& s,const Record& p,std::size_t index,Caches& caches,const float* inverseView,const float* camera,Output& out){
     Draw& item=out.item;item=Draw{};item.index=index;item.bytes=p.mesh().byteSize();item.group=p.constantGroup;
     const NorthlightActorDeformation::Program* program=programOf(p.program);const bool declared=p.declared&&program;
-    const D3DVERTEXELEMENT9* elements=declared?p.elements.data():nullptr;const UINT count=declared?p.elementCount:0;
+    const D3DVERTEXELEMENT9* elements=declared?p.declarationElements():nullptr;const UINT count=declared?p.declarationCount():0;
     const void* shader=p.originalShader;const void* decl=p.decl;
     if(p.constantGroup==s.previousGroup&&shader==s.previousShader&&decl==s.previousDecl){
         item.known=s.previousKnown;item.distanceSquared=s.previousDistance;std::memcpy(item.at,s.previousAt,sizeof item.at);++s.distanceReused;
