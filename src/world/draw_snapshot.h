@@ -565,7 +565,7 @@ public:
         const bool batch=metadata_&&cacheable&&version_;
         NorthlightCaptureMetadata::Request requests[5];NorthlightCaptureMetadata::Info metadata[5];
         Ref<IDirect3DIndexBuffer9> boundIndices;D3DINDEXBUFFER_DESC indexDescription={};
-        bool allKnown=batch;
+        bool metadataKnown=batch;
         for(UINT stream=0;stream<4;++stream){if(!extent[stream])continue;if(why)why->stream=stream;UINT frequency=0;
             HRESULT hr=device->GetStreamSource(stream,vertices[stream].out(),&offsets[stream],&strides[stream]);
             if(FAILED(hr)||!vertices[stream].p||strides[stream]<extent[stream]||strides[stream]>4096)return fail(why,Error::Stream,hr);
@@ -578,10 +578,10 @@ public:
             metadata_(requests,metadata,5);++metadataBatches_;
             for(UINT s=0;s<4;++s){if(!extent[s])continue;if(why)why->stream=s;
                 if(metadata[s].known&&metadata[s].identity){descriptions[s].Size=metadata[s].size;descriptions[s].Usage=metadata[s].usage;++metadataHits_;}
-                else {allKnown=false;++metadataFallbacks_;HRESULT hr=vertices[s]->GetDesc(&descriptions[s]);if(FAILED(hr))return fail(why,Error::Stream,hr);}}
+                else {metadataKnown=false;++metadataFallbacks_;HRESULT hr=vertices[s]->GetDesc(&descriptions[s]);if(FAILED(hr))return fail(why,Error::Stream,hr);}}
             if(draw.indexed){
                 if(metadata[4].known&&metadata[4].identity){indexDescription.Size=metadata[4].size;indexDescription.Usage=metadata[4].usage;indexDescription.Format=metadata[4].format;++metadataHits_;}
-                else {allKnown=false;++metadataFallbacks_;HRESULT hr=boundIndices->GetDesc(&indexDescription);if(FAILED(hr))return fail(why,Error::IndexBuffer,hr);}}
+                else {metadataKnown=false;++metadataFallbacks_;HRESULT hr=boundIndices->GetDesc(&indexDescription);if(FAILED(hr))return fail(why,Error::IndexBuffer,hr);}}
         }
         for(UINT s=0;s<4;++s)if(extent[s])mesh.dynamic|=(descriptions[s].Usage&D3DUSAGE_DYNAMIC)!=0;
         UINT low=draw.start,high=0;
@@ -597,7 +597,7 @@ public:
                 const std::uint64_t token=known?metadata[4].identity:identity_(ib.p,true);
                 key=makeKey(vertices,extent,draw,declaration,strides,offsets,descriptions,token,desc.Size,unsigned(desc.Format),ok,batch?metadata:nullptr);
                 key.version[4]=known?metadata[4].revision:(version_?version_(ib.p,true):0);if(!key.version[4])key.tracked=0;cacheable=ok&&token!=0&&(!mesh.dynamic||key.tracked);
-                if(cacheable){bool served=false;if(!serve(key,vertices,ib.p,extent,shared,why,served))return false;if(served){fastCacheHits_+=allKnown&&key.tracked;output=std::move(mesh);return true;}}}
+                if(cacheable){bool served=false;if(!serve(key,vertices,ib.p,extent,shared,why,served))return false;if(served){fastCacheHits_+=metadataKnown&&key.tracked;output=std::move(mesh);return true;}}}
             cacheIbBegin=begin;cacheIbBytes=bytes;
             if(!admit(why))return false;
             if(!reserve(std::size_t(bytes),why))return false;
@@ -609,7 +609,7 @@ public:
         }else{
             // DYNAMIC resources may be cached only with complete write tracking.
             if(cacheable){bool ok=true;key=makeKey(vertices,extent,draw,declaration,strides,offsets,descriptions,0,0,0,ok,batch?metadata:nullptr);cacheable=ok&&(!mesh.dynamic||key.tracked);
-                if(cacheable){bool served=false;if(!serve(key,vertices,nullptr,extent,shared,why,served))return false;if(served){fastCacheHits_+=allKnown&&key.tracked;output=std::move(mesh);return true;}}}
+                if(cacheable){bool served=false;if(!serve(key,vertices,nullptr,extent,shared,why,served))return false;if(served){fastCacheHits_+=metadataKnown&&key.tracked;output=std::move(mesh);return true;}}}
             if(!admit(why))return false;if(std::uint64_t(low)+n>std::uint64_t(UINT(-1))+1)return fail(why,Error::VertexRange);high=low+n-1;}
         std::int64_t first=std::int64_t(low)+(draw.indexed?draw.base:0),last=std::int64_t(high)+(draw.indexed?draw.base:0);
         if(first<0||last<first||last>UINT(-1))return fail(why,Error::VertexRange);

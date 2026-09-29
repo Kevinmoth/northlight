@@ -258,9 +258,17 @@ static void race(bool block){
     if(!block)m.constantEpoch.invalidate();
     run(second,&first,true);
 }
+// A detached ClockSource (no clock yet): never valid, nothing bound through null (UBSan), a plain fetch
+// with no certificate and no epoch test counted, as the 0.3.179 path with a null Reader.
+static void detached(){
+    Mirror m;Stats stats;SelfCheck check;Packet p,q;
+    assert(captureBlocks(p,static_cast<const Packet*>(nullptr),ClockSource<Mirror>{},[&]{return m.fetch(p);},[&](unsigned f,unsigned c,float* out){return m.fetchFloats(f,c,out);},&stats,true,check));
+    assert(captureBlocks(q,&p,ClockSource<Mirror>{},[&]{return m.fetch(q);},[&](unsigned f,unsigned c,float* out){return m.fetchFloats(f,c,out);},&stats,true,check));
+    assert(!p.constantStamp.valid&&!q.constantStamp.valid&&q.constants==q.constantStorage&&!stats.tests&&!stats.hits&&!stats.blockTests);
+}
 int main(int argc,char** argv){
     if(argc>1){const std::string mode=argv[1];race(mode=="c2-race-block");std::puts("race not detected");return 0;}
-    sources();
+    detached();sources();
     edges();std::mt19937 random(127);Source source;Stats stats;
     size_t frames=100,draws=300,legacyBytes=0,accepted=0;
     for(size_t frame=0;frame<frames;++frame){

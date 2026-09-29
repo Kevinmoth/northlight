@@ -158,8 +158,9 @@ template<class Replay,class Source,class Fetch,class FetchFloats> bool captureBl
     namespace E=NorthlightConstantEpoch;
     reset(p);
     const bool valid=source.valid();
-    [[maybe_unused]] const E::Stamp before=ValidateEvery?source.snapshot():E::Stamp{};
-    const E::Stamp& now=source.live();
+    [[maybe_unused]] const E::Stamp before=ValidateEvery&&valid?source.snapshot():E::Stamp{};
+    static const E::Stamp detached{}; /* a source without a clock: never bind live() through null */
+    const E::Stamp& now=source.attached()?source.live():detached;
     if(stats&&source.attached())++stats->tests;
     const auto& u=p.constantUsage;
     const bool usable=valid&&previous&&previous->constantStamp.valid&&compatible(*previous,p);
