@@ -22,7 +22,9 @@ int main(){
         if(g>0){if(!nonzero)first=second;last=second;++nonzero;}
         maxStep=std::max(maxStep,std::fabs(g-previous));previous=g;
     }
-    assert(nonzero>0&&maxStep<.0001f);
+    // 0.3.177: the moon now rises 19.35 degrees/h at the horizon, so the fill fades faster (steepest
+    // step about 1.01e-4 per game second); a 1e-4-per-second change of a <= .1 gain is invisible.
+    assert(nonzero>0&&maxStep<.00012f);
     assert(at(0)==0&&at(86399)==0&&at(12*3600)==0);
     assert(std::fabs(at(kSunsetSeconds)-MaximumGain)<1e-6f);
     previous=0;

@@ -31,10 +31,6 @@ inline constexpr double kAzimuthRadians=kPi/4;
 struct Body {double elevation=0;float direction[3]={};};
 struct Result {Body sun,moon;bool valid=false;};
 inline double elevationDegrees(double z){return std::asin(std::clamp(z,-1.,1.))*180/kPi;}
-inline double ease(double u){return .5-.5*std::cos(kPi*std::clamp(u,0.,1.));}
-inline double segment(double t,double begin,double end,double from,double to){
-    return from+(to-from)*ease((t-begin)/(end-begin));
-}
 inline double solarElevation(double day){
     double polar=kNativeSunLowPolar;
     if(day>=kNativeSunStartDay&&day<=kNativeSunEndDay){
@@ -45,16 +41,22 @@ inline double solarElevation(double day){
     return 90-polar*180/kPi;
 }
 // The renderer-owned moon keeps one stable nocturnal arc and the existing
-// 43-degree crest, rather than the native moon's independently cycling orbit.
-// All four full-length cosine segments have continuous position and velocity.
+// 43-degree crest at 00:00, rather than the native moon's independently cycling
+// orbit. 0.3.177: four quarter-sines with a day-side hold; continuous position
+// and velocity; horizon rates 19.4 (rise) and 10.9 (set) degrees/h. The former
+// cosine eases stalled near the horizon (the moon took 44 min after sunset to
+// reach full light and dimmed 78 min before sunrise). The day side mirrors the
+// set and rise quarters, so the velocity matches across both horizons; it
+// holds at -43 between them. Velocity is zero only at the crest and the hold ends.
 inline double lunarElevation(double seconds){
     double t=seconds;if(t<kMoonriseSeconds)t+=kDaySeconds;
-    const double set=kDaySeconds+kMoonsetSeconds;
-    if(t<=kMoonPeakSeconds)return segment(t,kMoonriseSeconds,kMoonPeakSeconds,0,kMoonPeakDegrees);
-    if(t<=set)return segment(t,kMoonPeakSeconds,set,kMoonPeakDegrees,0);
-    const double bottom=(set+kMoonriseSeconds+kDaySeconds)*.5;
-    if(t<=bottom)return segment(t,set,bottom,0,-kMoonPeakDegrees);
-    return segment(t,bottom,kMoonriseSeconds+kDaySeconds,-kMoonPeakDegrees,0);
+    const double rise=kMoonPeakSeconds-kMoonriseSeconds,set=kDaySeconds+kMoonsetSeconds,fall=set-kMoonPeakSeconds;
+    const double quarter=kPi/2,climb=kMoonriseSeconds+kDaySeconds-rise;
+    if(t<=kMoonPeakSeconds)return kMoonPeakDegrees*std::sin(quarter*(t-kMoonriseSeconds)/rise);
+    if(t<=set)return kMoonPeakDegrees*std::cos(quarter*(t-kMoonPeakSeconds)/fall);
+    if(t<=set+fall)return -kMoonPeakDegrees*std::sin(quarter*(t-set)/fall);
+    if(t<climb)return -kMoonPeakDegrees;
+    return -kMoonPeakDegrees*std::cos(quarter*(t-climb)/rise);
 }
 inline Body body(double elevation){
     Body b;b.elevation=elevation;

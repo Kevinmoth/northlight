@@ -42,6 +42,25 @@ int main(){
  }
  for(unsigned i=0;i<50000;++i){const float d=float(((i*7919u)%86400u)/86400.);auto a=evaluate(d);(void)evaluate(.5);auto b=evaluate(d);near(a.sun.elevation,b.sun.elevation);near(a.moon.elevation,b.moon.elevation);}
  double last=at(2*3600).moon.elevation;for(int t=1;t<=300;++t){double current=at(2*3600+t).moon.elevation;assert(current<last&&last-current<.006);last=current;}
+ // 0.3.177 quarter-sine moon: horizon rates, velocity continuity at every joint, the day-side hold,
+ // and the short dusk/dawn windows in which neither body gives full light (both below 4.59 degrees).
+ auto moon=[](double t){return at(t).moon.elevation;};
+ auto rate=[&](double t){return (moon(t+1)-moon(t-1))*.5;}; // degrees per second, central difference
+ const double riseSpan=kMoonPeakSeconds-kMoonriseSeconds,fallSpan=kDaySeconds+kMoonsetSeconds-kMoonPeakSeconds;
+ near(rate(kMoonriseSeconds-1)*3600,19.35,.05);near(rate(kMoonriseSeconds+1)*3600,19.35,.05);
+ near(rate(kMoonsetSeconds-1)*3600,-10.94,.05);near(rate(kMoonsetSeconds+1)*3600,-10.94,.05);
+ const double holdStart=kMoonsetSeconds+fallSpan,holdEnd=kMoonriseSeconds-riseSpan; // 12:21:03, 17:01:03
+ near(holdStart,12*3600+21*60+3,1);near(holdEnd,17*3600+1*60+3,1);
+ for(double joint:{kMoonriseSeconds,kMoonsetSeconds,holdStart,holdEnd,0.})assert(std::fabs(rate(joint-1)-rate(joint+1))<1e-5);
+ for(double t=holdStart+1;t<holdEnd;t+=97)assert(moon(t)==-43);
+ const double full=elevationDegrees(.08);unsigned dusk=0,dawn=0;
+ for(int t=18*3600;t<23*3600;++t)if(at(t).sun.elevation<full&&moon(t)<full)++dusk;
+ for(int t=3*3600;t<8*3600;++t)if(at(t).sun.elevation<full&&moon(t)<full)++dawn;
+ // The native sun sets at about 10.1 degrees/h (4.59 degrees 27 min before sunset) and rises at
+ // 14.8 (18.6 min): dusk 27.3+14.3 min, dawn 18.6+25.2 min (the cosine-ease moon: about 71 and 97).
+ assert(dusk<=42*60&&dawn<=46*60);
+ std::printf("PASS quarter-sine moon: rise %.3f / set %.3f deg/h, hold -43 from %.0f to %.0f s, dusk %.1f / dawn %.1f min without full light\n",
+  rate(kMoonriseSeconds+1)*3600,rate(kMoonsetSeconds+1)*3600,holdStart,holdEnd,dusk/60.,dawn/60.);
  for(double bad:{-1.,1.,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()})assert(!evaluate(bad).valid);
  // Held clock samples remain smoothed for both lights/rays at native speeds.
  for(double start:{6*3600.+15*60,19*3600.+40*60,21*3600.,5*3600.})for(unsigned fps:{30u,60u,144u}){
