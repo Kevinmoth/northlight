@@ -31,7 +31,7 @@ inline bool allKnown(const bool* known,unsigned count){
 
 struct DeviceMirror {
     static constexpr unsigned Streams=16,Textures=16,RenderStates=256,SamplerTypes=16,VsFloat=256,PsFloat=224,Ints=16,Bools=16,Targets=4;
-    std::recursive_mutex gate;
+    MirrorGate gate; /* 0.3.180 (D0): the recursive mutex plus the owner thread and the census */
     NorthlightConstantEpoch::Clock constantEpoch;
     bool enabled=true,recording=false;
     std::size_t rawDepth=0; // Gate-protected; suspends caching across private extension work.
@@ -132,21 +132,21 @@ public:
     MirrorStateBlock(IDirect3DStateBlock9* block,IDirect3DDevice9* device,DeviceMirror* m)
         :real(block),owner(device),mirror(m){owner->AddRef();}
     ~MirrorStateBlock(){
-        {std::lock_guard<std::recursive_mutex> lock(mirror->gate);real->Release();}
+        {MirrorGuard lock(mirror->gate,MirrorSite::StateBlock);real->Release();}
         owner->Release(); // May destroy the owner and gate: never under its lock.
     }
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id,void** out) override {
         if(!out)return E_POINTER;
         if(id==__uuidof(IUnknown)||id==__uuidof(IDirect3DStateBlock9)){*out=this;AddRef();return S_OK;}
-        std::lock_guard<std::recursive_mutex> lock(mirror->gate);
+        MirrorGuard lock(mirror->gate,MirrorSite::StateBlock);
         HRESULT hr=real->QueryInterface(id,out);if(SUCCEEDED(hr)&&*out)mirror->disable("state-block-interface");return hr;
     }
     ULONG STDMETHODCALLTYPE AddRef() override{return InterlockedIncrement(&refs);}
     ULONG STDMETHODCALLTYPE Release() override{auto n=InterlockedDecrement(&refs);if(!n)delete this;return n;}
     HRESULT STDMETHODCALLTYPE GetDevice(IDirect3DDevice9** out) override{if(!out)return D3DERR_INVALIDCALL;*out=owner;owner->AddRef();return D3D_OK;}
-    HRESULT STDMETHODCALLTYPE Capture() override{std::lock_guard<std::recursive_mutex> lock(mirror->gate);return real->Capture();}
+    HRESULT STDMETHODCALLTYPE Capture() override{MirrorGuard lock(mirror->gate,MirrorSite::StateBlock);return real->Capture();}
     HRESULT STDMETHODCALLTYPE Apply() override{
-        std::lock_guard<std::recursive_mutex> lock(mirror->gate);
+        MirrorGuard lock(mirror->gate,MirrorSite::StateBlock);
         // Also invalidate failures: a backend may have changed part of the state.
         HRESULT hr=real->Apply();mirror->invalidate();return hr;
     }
@@ -459,11 +459,11 @@ public:
     class RawScope {
         friend class ExtensionDevice;
         ExtensionDevice* device;
-        std::unique_lock<std::recursive_mutex> lock;
+        MirrorGuard lock; // 0.3.180 (D0): a member, released after the destructor body as before
         RawScope* previous;
     public:
         explicit RawScope(ExtensionDevice& owner)
-            :device(&owner),lock(owner.m->gate),previous(currentRaw){
+            :device(&owner),lock(owner.m->gate,MirrorSite::Raw),previous(currentRaw){
             owner.m->invalidate();++owner.m->rawDepth;++owner.m->rawScopes;
             currentRaw=this;
         }

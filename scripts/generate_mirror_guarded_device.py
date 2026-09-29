@@ -19,7 +19,7 @@ def generate():
         overridden = set(re.findall(r'STDMETHODCALLTYPE (\w+)\([^\n]*?override', mirror))
         assert guarded == overridden and len(guarded) == 41, (overridden - guarded, len(guarded))
         methods = [line for line in methods if re.search(r'STDMETHODCALLTYPE (\w+)\(', line).group(1) not in guarded]
-    lines += [line.replace('{ return real->', '{ Guard lock(m->gate);return MirrorDevice::') for line in methods]
+    lines += [line.replace('{ return real->', '{ MirrorGuard lock(m->gate,MirrorSite::Device);return MirrorDevice::') for line in methods]
     lines.append('};')
     (northlight_paths.GENERATED/'mirror_guarded_device.h').write_text('\n'.join(lines)+'\n')
 

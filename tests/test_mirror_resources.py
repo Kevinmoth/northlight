@@ -5,6 +5,7 @@ import sys; from pathlib import Path; sys.path.insert(0, str(Path(__file__).reso
 import northlight_paths as fp
 from pathlib import Path
 import hashlib,json,re,subprocess,tempfile
+fp.use_source_modules()
 ROOT=Path(__file__).resolve().parent
 SDK=fp.windows_headers()/'d3d9.h'
 NAMES=['IDirect3DResource9','IDirect3DBaseTexture9','IDirect3DSurface9','IDirect3DTexture9','IDirect3DCubeTexture9','IDirect3DVolumeTexture9','IDirect3DVolume9','IDirect3DVertexShader9','IDirect3DPixelShader9','IDirect3DVertexDeclaration9','IDirect3DQuery9']
@@ -40,7 +41,7 @@ using namespace NorthlightMirrorResources;
 static unsigned devicesDestroyed=0;
 struct Device final:IDirect3DDevice9 {
  std::atomic<unsigned> refs{1};bool selfDelete=false,disabled=false;unsigned disables=0;
- std::recursive_mutex gate;Registry registry;
+ MirrorGate gate;Registry registry;
  Device(IDirect3DDevice9* raw=nullptr):registry(this,gate,&stop,this,raw?raw:this){}
  static void stop(void* c,const char*){auto& d=*static_cast<Device*>(c);d.disabled=true;++d.disables;}
  HRESULT QueryInterface(REFIID id,void** out)override{if(!out)return E_POINTER;*out=nullptr;if(id!=iid_IUnknown&&id!=iid_IDirect3DDevice9)return E_NOINTERFACE;*out=this;AddRef();return S_OK;}
@@ -151,11 +152,34 @@ static void shapeUnwrap(){
  pbt->Release();ps0->Release();pt->Release();pc->Release();pv->Release();pvol->Release();pvs->Release();pps->Release();pd->Release();pq->Release();
  assert(a.registry.size()==0&&b.registry.size()==0&&a.refs==1&&b.refs==1);
 }
+// 0.3.180 (D0): the gate census over the registry and resource proxies. A device call (an outer guard)
+// that wraps, unwraps and walks GetSurfaceLevel makes exactly one real acquisition; the proxies' own
+// calls outside a device call count as registry/resource; a std::thread's resource calls count as
+// foreign with the first {tid,site}; the owner never does. The last Release on the owner thread
+// destroys the device (and its gate) after the guard's scope (ASan).
+static void census(){
+ Device d;MirrorGate& g=d.gate;g.counting=true;assert(g.ownerTid==MirrorGuard::threadId());
+ Resource<IDirect3DTexture9> texture(d);texture.type=D3DRTYPE_TEXTURE;Resource<IDirect3DSurface9> surface(d);surface.type=D3DRTYPE_SURFACE;texture.surface=&surface;surface.container=&texture;
+ IDirect3DTexture9* t=&texture;IDirect3DSurface9* s=nullptr;
+ {MirrorGuard call(g);d.registry.wrap(&t);assert(d.registry.unwrap(t)==&texture);assert(t->GetSurfaceLevel(0,&s)==S_OK&&s!=&surface);DWORD size=0;s->GetPrivateData(1,nullptr,&size);}
+ assert(g.takeAcquired(MirrorSite::Device)==1);for(unsigned k=1;k<MirrorGate::Sites;++k)assert(!g.takeAcquired(MirrorSite(k)));
+ IDirect3DDevice9* owner=nullptr;assert(s->GetDevice(&owner)==S_OK);owner->Release();s->AddRef();s->Release();
+ assert(g.takeAcquired(MirrorSite::Resource)==1&&g.takeAcquired(MirrorSite::Registry)==2&&!g.takeAcquired(MirrorSite::Device));
+ for(unsigned k=0;k<MirrorGate::Sites;++k)assert(!g.foreign[k]);
+ std::uint32_t tid=0;std::thread other([&]{tid=MirrorGuard::threadId();IDirect3DDevice9* o=nullptr;s->GetDevice(&o);o->Release();DWORD size=0;s->GetPrivateData(1,nullptr,&size);s->AddRef();s->Release();});other.join();
+ assert(g.foreign[unsigned(MirrorSite::Resource)]==2&&g.foreign[unsigned(MirrorSite::Registry)]==2&&g.firstReady&&g.firstTid==tid&&g.firstSite==unsigned(MirrorSite::Resource));
+ for(unsigned k=0;k<MirrorGate::Sites;++k)assert(!g.takeAcquired(MirrorSite(k)));
+ s->Release();t->Release();assert(d.registry.size()==0);
+ // Owner-thread final release: the proxy's Release destroys the self-deleting device after its guard closed.
+ unsigned before=devicesDestroyed;auto* e=new Device;e->selfDelete=true;Resource<IDirect3DVertexShader9> raw(*e);IDirect3DVertexShader9* p=&raw;e->registry.wrap(&p);e->Release();assert(devicesDestroyed==before);
+ p->Release();assert(raw.refs==0&&devicesDestroyed==before+1&&!MirrorGuard::heldByThisThread(g));
+}
 int main(){
+ census();
  shapeUnwrap();
  lifetime<IDirect3DSurface9>(D3DRTYPE_SURFACE);lifetime<IDirect3DTexture9>(D3DRTYPE_TEXTURE);lifetime<IDirect3DCubeTexture9>(D3DRTYPE_CUBETEXTURE);lifetime<IDirect3DVolumeTexture9>(D3DRTYPE_VOLUMETEXTURE);lifetime<IDirect3DVolume9>();lifetime<IDirect3DVertexShader9>();lifetime<IDirect3DPixelShader9>();lifetime<IDirect3DVertexDeclaration9>();lifetime<IDirect3DQuery9>();
  containment();escapes();rawLookup();failures();threads();foreignInputs();ownerLifetime();
- std::puts("PASS rawOf map-only lookup (miss 0 while active, pass-through after escape); O(1) shape unwrap for nine proxy classes incl. base-texture views, foreign-registry and raw inputs keep the map path; nine resource types, COM identity/refcounts, child/container wrapping, foreign device escape, allocation failures, raw input disables, 8000 concurrent wraps, 4000 foreign unwraps, 64 pointer reuse cycles, final owner/gate lifetime");
+ std::puts("PASS gate census: one real acquisition per wrapping device call, registry/resource classes, foreign resource calls with the first {tid,site}, owner-thread final release destroys the device after its guard; rawOf map-only lookup (miss 0 while active, pass-through after escape); O(1) shape unwrap for nine proxy classes incl. base-texture views, foreign-registry and raw inputs keep the map path; nine resource types, COM identity/refcounts, child/container wrapping, foreign device escape, allocation failures, raw input disables, 8000 concurrent wraps, 4000 foreign unwraps, 64 pointer reuse cycles, final owner/gate lifetime");
 }
 '''
 def main():
@@ -164,9 +188,15 @@ def main():
     report={'status':'running','source_sha256':hashes,'runs':[],'game_launched':False,'wine_launched':False,'limitations':['Fake COM backend; does not validate full device integration or real driver behavior.','GetPrivateData conservatively disables mirror because arbitrary GUID contents may contain an interface.']}
     with tempfile.TemporaryDirectory(prefix='northlight-resource-mirror-') as tmp:
         tmp=Path(tmp);(tmp/'d3d9.h').write_text(stub());(tmp/'test.cpp').write_text(HARNESS)
-        for label,flags in [('O2',['-O2']),('ASan+UBSan',['-O1','-g','-fsanitize=address,undefined','-fno-sanitize-recover=all'])]:
+        for label,flags in [('O2',['-O2']),('ASan+UBSan',['-O1','-g','-fsanitize=address,undefined','-fno-sanitize-recover=all']),('TSan',['-O1','-g','-fsanitize=thread'])]:
             binary=tmp/label.replace('+','-');command=['clang++','-std=c++17','-pthread',*flags,'-Wno-inconsistent-missing-override','-I'+str(tmp),*fp.test_include_flags(),str(tmp/'test.cpp'),'-o',str(binary)]
             subprocess.run(command,check=True);run=subprocess.run([str(binary)],capture_output=True,text=True,check=True);report['runs'].append({'build':label,'stdout':run.stdout,'stderr':run.stderr,'status':'pass'})
+    assert all('ThreadSanitizer' not in run['stderr'] for run in report['runs'])
+    # 0.3.180 (D0): the forwarders are regenerated MirrorGuard sites (restored byte for byte afterwards).
+    import generate_mirror_resource_forwarders
+    generated=fp.GENERATED/'mirror_resource_forwarders.h';before=generated.read_text();generate_mirror_resource_forwarders.generate();regenerated=generated.read_text();generated.write_text(before)
+    assert regenerated==before,'mirror_resource_forwarders.h is stale: run scripts/generate_mirror_resource_forwarders.py'
+    assert 'lock_guard' not in before and before.count('MirrorGuard lock(gate,MirrorSite::Resource);')>=100 and '#include "mirror_guard.h"' in before
     assert hashes=={f:hashlib.sha256(fp.tracked(f).read_bytes()).hexdigest() for f in files}
     report['status']='pass';out=fp.output_dir();destination=out/'resource-mirror-validation.json';destination.write_text(json.dumps(report,indent=2)+'\n');print(json.dumps(report,indent=2))
 if __name__=='__main__':main()

@@ -27,7 +27,7 @@ template<class T> struct Factory;
 class Registry {
     IDirect3DDevice9* owner_;
     IDirect3DDevice9* rawDevice_;
-    std::recursive_mutex& gate_;
+    MirrorGate& gate_;
     void(*disable_)(void*,const char*);
     void* context_;
     std::unordered_map<void*,Record*> raw_,exposed_;
@@ -57,19 +57,19 @@ class Registry {
         return nullptr;
     }
 public:
-    Registry(IDirect3DDevice9* owner,std::recursive_mutex& gate,void(*disable)(void*,const char*),void* context,IDirect3DDevice9* rawDevice=nullptr)
+    Registry(IDirect3DDevice9* owner,MirrorGate& gate,void(*disable)(void*,const char*),void* context,IDirect3DDevice9* rawDevice=nullptr)
         :owner_(owner),rawDevice_(rawDevice),gate_(gate),disable_(disable),context_(context){}
     Registry(const Registry&)=delete;
     Registry& operator=(const Registry&)=delete;
-    std::recursive_mutex& gate()const{return gate_;}
+    MirrorGate& gate()const{return gate_;}
     IDirect3DDevice9* owner()const{return owner_;}
     void disable(const char* why)noexcept{disable_(context_,why);}
     static void unsafe(void* context,const char* why){static_cast<Registry*>(context)->disable(why);}
-    size_t size()const{std::lock_guard<std::recursive_mutex> lock(gate_);return raw_.size();}
+    size_t size()const{MirrorGuard lock(gate_,MirrorSite::Registry);return raw_.size();}
     unsigned shapes()const{return shapeCount_;}
     template<class T> T* unwrap(T* object)noexcept{
         if(!object)return nullptr;
-        MirrorGuard lock(gate_);
+        MirrorGuard lock(gate_,MirrorSite::Registry);
         if(Record* record=shaped(static_cast<IUnknown*>(object)))return static_cast<T*>(record->raw);
         auto found=exposed_.find(object);
         if(found==exposed_.end()){
@@ -88,7 +88,7 @@ public:
     // escape (the game may then hold raw objects) is a miss returned unchanged.
     std::uintptr_t rawOf(std::uintptr_t exposed,bool passThroughMiss=false)const noexcept{
         if(!exposed)return 0;
-        std::lock_guard<std::recursive_mutex> lock(gate_);
+        MirrorGuard lock(gate_,MirrorSite::Registry);
         auto found=exposed_.find(reinterpret_cast<void*>(exposed));
         if(found==exposed_.end())return passThroughMiss?exposed:0;
         return reinterpret_cast<std::uintptr_t>(found->second->raw);
@@ -107,12 +107,12 @@ public:
         const bool same=SUCCEEDED(a)&&SUCCEEDED(b)&&expected&&expected==actual;
         if(expected)expected->Release();if(actual)actual->Release();return same;
     }
-    ULONG addRef(Record& record){std::lock_guard<std::recursive_mutex> lock(gate_);return ++record.refs;}
+    ULONG addRef(Record& record){MirrorGuard lock(gate_,MirrorSite::Registry);return ++record.refs;}
     ULONG release(Record& record){
         IDirect3DDevice9* owner=nullptr;
         ULONG remaining;
         {
-            std::lock_guard<std::recursive_mutex> lock(gate_);
+            MirrorGuard lock(gate_,MirrorSite::Registry);
             remaining=--record.refs;
             if(!remaining){
                 raw_.erase(record.raw);exposed_.erase(record.exposed);
@@ -123,8 +123,8 @@ public:
                 raw->Release();
             }
         }
-        // This can destroy Device, this registry and its mutex. No further
-        // access to any of those objects (including a lock destructor) follows.
+        // This can destroy Device, this registry and its gate. No further access
+        // to any of those objects (including the guard's destructor) follows.
         if(owner)owner->Release();
         return remaining;
     }
@@ -142,7 +142,7 @@ template<class T,class Forward> class Proxy:public Forward,public Record {
 public:
     Proxy(T* p,Registry& r):Forward(p,r.gate(),&Registry::unsafe,&r),Record(r,p){this->exposed=static_cast<T*>(this);}
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id,void** out)override{
-        std::lock_guard<std::recursive_mutex> lock(this->registry.gate());
+        MirrorGuard lock(this->registry.gate(),MirrorSite::Resource);
         if(!out)return E_POINTER;
         if(supported<T>(id)){*out=static_cast<T*>(this);++this->refs;return S_OK;}
         // Preserve optional/driver interfaces, but never return one while
@@ -154,7 +154,7 @@ public:
     ULONG STDMETHODCALLTYPE AddRef()override{return this->registry.addRef(*this);}
     ULONG STDMETHODCALLTYPE Release()override{return this->registry.release(*this);}
     HRESULT STDMETHODCALLTYPE GetDevice(IDirect3DDevice9** out)override{
-        std::lock_guard<std::recursive_mutex> lock(this->registry.gate());
+        MirrorGuard lock(this->registry.gate(),MirrorSite::Resource);
         if(!out)return D3DERR_INVALIDCALL;
         *out=this->registry.owner();(*out)->AddRef();return D3D_OK;
     }
@@ -163,7 +163,7 @@ template<class T,class Forward> class ChildProxy:public Proxy<T,Forward> {
 public:
     using Proxy<T,Forward>::Proxy;
     HRESULT STDMETHODCALLTYPE GetContainer(REFIID id,void** out)override{
-        std::lock_guard<std::recursive_mutex> lock(this->registry.gate());
+        MirrorGuard lock(this->registry.gate(),MirrorSite::Resource);
         HRESULT hr=this->real->GetContainer(id,out);
         if(SUCCEEDED(hr))this->registry.wrapInterface(id,out);
         return hr;
@@ -173,7 +173,7 @@ class TextureProxy final:public Proxy<IDirect3DTexture9,ForwardIDirect3DTexture9
 public:
     using Proxy::Proxy;
     HRESULT STDMETHODCALLTYPE GetSurfaceLevel(UINT level,IDirect3DSurface9** out)override{
-        std::lock_guard<std::recursive_mutex> lock(this->registry.gate());
+        MirrorGuard lock(this->registry.gate(),MirrorSite::Resource);
         HRESULT hr=this->real->GetSurfaceLevel(level,out);if(SUCCEEDED(hr))this->registry.wrap(out);return hr;
     }
 };
@@ -181,7 +181,7 @@ class CubeProxy final:public Proxy<IDirect3DCubeTexture9,ForwardIDirect3DCubeTex
 public:
     using Proxy::Proxy;
     HRESULT STDMETHODCALLTYPE GetCubeMapSurface(D3DCUBEMAP_FACES face,UINT level,IDirect3DSurface9** out)override{
-        std::lock_guard<std::recursive_mutex> lock(this->registry.gate());
+        MirrorGuard lock(this->registry.gate(),MirrorSite::Resource);
         HRESULT hr=this->real->GetCubeMapSurface(face,level,out);if(SUCCEEDED(hr))this->registry.wrap(out);return hr;
     }
 };
@@ -189,7 +189,7 @@ class VolumeTextureProxy final:public Proxy<IDirect3DVolumeTexture9,ForwardIDire
 public:
     using Proxy::Proxy;
     HRESULT STDMETHODCALLTYPE GetVolumeLevel(UINT level,IDirect3DVolume9** out)override{
-        std::lock_guard<std::recursive_mutex> lock(this->registry.gate());
+        MirrorGuard lock(this->registry.gate(),MirrorSite::Resource);
         HRESULT hr=this->real->GetVolumeLevel(level,out);if(SUCCEEDED(hr))this->registry.wrap(out);return hr;
     }
 };
@@ -213,7 +213,7 @@ NORTHLIGHT_RESOURCE_FACTORY(IDirect3DQuery9,QueryProxy)
 
 template<class T> void Registry::wrap(T** out)noexcept{
     if(!out||!*out)return;
-    std::lock_guard<std::recursive_mutex> lock(gate_);
+    MirrorGuard lock(gate_,MirrorSite::Registry);
     T* raw=*out;
     // Already exposed results retain their existing owned reference.
     if(exposed_.find(raw)!=exposed_.end())return;
@@ -240,7 +240,7 @@ template<class T> void Registry::wrap(T** out)noexcept{
 }
 inline void Registry::wrap(IDirect3DBaseTexture9** out)noexcept{
     if(!out||!*out)return;
-    std::lock_guard<std::recursive_mutex> lock(gate_);
+    MirrorGuard lock(gate_,MirrorSite::Registry);
     switch((*out)->GetType()){
     case D3DRTYPE_TEXTURE:{auto* p=static_cast<IDirect3DTexture9*>(*out);wrap(&p);*out=p;break;}
     case D3DRTYPE_CUBETEXTURE:{auto* p=static_cast<IDirect3DCubeTexture9*>(*out);wrap(&p);*out=p;break;}
@@ -250,7 +250,7 @@ inline void Registry::wrap(IDirect3DBaseTexture9** out)noexcept{
 }
 inline void Registry::wrap(IDirect3DResource9** out)noexcept{
     if(!out||!*out)return;
-    std::lock_guard<std::recursive_mutex> lock(gate_);
+    MirrorGuard lock(gate_,MirrorSite::Registry);
     switch((*out)->GetType()){
     case D3DRTYPE_SURFACE:{auto* p=static_cast<IDirect3DSurface9*>(*out);wrap(&p);*out=p;break;}
     case D3DRTYPE_TEXTURE:case D3DRTYPE_CUBETEXTURE:case D3DRTYPE_VOLUMETEXTURE:{auto* p=static_cast<IDirect3DBaseTexture9*>(*out);wrap(&p);*out=p;break;}
@@ -259,7 +259,7 @@ inline void Registry::wrap(IDirect3DResource9** out)noexcept{
 }
 inline void Registry::wrap(IUnknown** out)noexcept{
     if(!out||!*out)return;
-    std::lock_guard<std::recursive_mutex> lock(gate_);
+    MirrorGuard lock(gate_,MirrorSite::Registry);
     if(exposed_.find(*out)!=exposed_.end())return;
     auto existing=raw_.find(*out);
     if(existing!=raw_.end()){auto* raw=*out;++existing->second->refs;*out=existing->second->exposed;raw->Release();return;}
@@ -286,7 +286,7 @@ inline void Registry::wrap(IUnknown** out)noexcept{
 }
 inline void Registry::wrapInterface(REFIID id,void** out)noexcept{
     if(!out||!*out)return;
-    std::lock_guard<std::recursive_mutex> lock(gate_);
+    MirrorGuard lock(gate_,MirrorSite::Registry);
 #define NORTHLIGHT_WRAP_INTERFACE(T) if(id==__uuidof(T)){T* p=static_cast<T*>(*out);wrap(&p);*out=p;return;}
     NORTHLIGHT_WRAP_INTERFACE(IUnknown)
     NORTHLIGHT_WRAP_INTERFACE(IDirect3DResource9)

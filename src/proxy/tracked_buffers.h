@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <type_traits>
 #include "capture_buffer_metadata.h"
+#include "mirror_guard.h"
 
 // Only client-created buffers are wrapped. The real device always receives
 // real resources. Unknown/unwrapped resources return revision 0 (no fast cache).
@@ -115,8 +116,11 @@ inline void invalidateAll(){
 template<class T,class Forward> class Buffer final:public Forward {
     LONG refs=1;IDirect3DDevice9* owner;Record record;
     void(*unsafeAccess)(IDirect3DDevice9*,const char*)=nullptr;
+    // 0.3.180 (D0): the owner device's gate, for the thread census only (buffers take no gate). The
+    // buffer holds a device reference, so the gate outlives every call that reports to it.
+    MirrorGate* census=nullptr;
 public:
-    Buffer(T* real,IDirect3DDevice9* device,bool index,void(*unsafe)(IDirect3DDevice9*,const char*)=nullptr):Forward(real),owner(device),unsafeAccess(unsafe){
+    Buffer(T* real,IDirect3DDevice9* device,bool index,void(*unsafe)(IDirect3DDevice9*,const char*)=nullptr,MirrorGate* gate=nullptr):Forward(real),owner(device),unsafeAccess(unsafe),census(gate){
         record.raw=real;record.exposed=static_cast<T*>(this);record.object=this;record.index=index;
         record.revision=clock.fetch_add(1);
         // Descriptor and identity are immutable for this resource lifetime.
@@ -150,6 +154,7 @@ public:
     ULONG STDMETHODCALLTYPE AddRef() override{return InterlockedIncrement(&refs);}
     ULONG STDMETHODCALLTYPE Release() override{
         // Serialize the final reference with GetStreamSource/GetIndices lookup.
+        if(census)census->noteBuffer();
         ULONG count;
         {std::lock_guard<std::mutex> guard(mutex);count=InterlockedDecrement(&refs);
          if(!count){records.erase(record.raw);records.erase(record.exposed);}}
@@ -172,6 +177,7 @@ public:
     HRESULT STDMETHODCALLTYPE Lock(UINT offset,UINT size,void** data,DWORD flags) override{
         // Mark before entering the driver. Even failed writes conservatively
         // invalidate the old generation. READONLY never advances a generation.
+        if(census)census->noteBuffer();
         const bool wasUnsafe=record.revision.load()==0;
         if(!(flags&D3DLOCK_READONLY))record.revision=clock.fetch_add(1);
         record.locks.fetch_add(1);
@@ -185,14 +191,15 @@ public:
         return hr;
     }
     HRESULT STDMETHODCALLTYPE Unlock() override{
+        if(census)census->noteBuffer();
         HRESULT hr=this->real->Unlock();
         if(SUCCEEDED(hr)&&record.locks.load())record.locks.fetch_sub(1);
         else record.revision=0; // tracking is unsafe until a subsequent successful write
         return hr;
     }
 };
-template<class T,class Forward> void wrap(T** out,IDirect3DDevice9* owner,bool index,void(*unsafe)(IDirect3DDevice9*,const char*)=nullptr) noexcept{
+template<class T,class Forward> void wrap(T** out,IDirect3DDevice9* owner,bool index,void(*unsafe)(IDirect3DDevice9*,const char*)=nullptr,MirrorGate* census=nullptr) noexcept{
     if(!out||!*out)return;
-    try{*out=new Buffer<T,Forward>(*out,owner,index,unsafe);}catch(...){/* original resource remains valid, untracked */}
+    try{*out=new Buffer<T,Forward>(*out,owner,index,unsafe,census);}catch(...){/* original resource remains valid, untracked */}
 }
 }

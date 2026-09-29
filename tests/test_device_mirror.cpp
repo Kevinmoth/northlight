@@ -499,7 +499,7 @@ static void rawScopeConcurrency(){
   // The scope owns the gate; foreign threads have no TLS bypass authority.
   // Independently probe the actual mutex from that thread, avoiding a speed-
   // dependent expectation that its setter has already reached the lock.
-  std::thread probe([&]{assert(!m.gate.try_lock());});probe.join();
+  std::thread probe([&]{assert(!m.gate.mutex.try_lock());});probe.join();
   assert(!finished&&b.calls==calls);assert(SUCCEEDED(ext.SetRenderState(40,55)));
  }
  foreign.join();assert(finished&&m.rawDepth==0&&m.rawCalls==1);
@@ -766,13 +766,52 @@ static void knownScan(){
 }
 // One real acquisition per nested call chain; foreign threads still block.
 static void singleGate(){
- std::recursive_mutex a,other;
+ MirrorGate a,other;
  {MirrorGuard outer(a);assert(MirrorGuard::heldByThisThread(a));{MirrorGuard inner(a);{MirrorGuard b(other);assert(MirrorGuard::heldByThisThread(other));{MirrorGuard again(a);assert(MirrorGuard::heldByThisThread(a));}assert(MirrorGuard::heldByThisThread(other));}assert(MirrorGuard::heldByThisThread(a));}
-  std::thread probe([&]{assert(!a.try_lock());assert(!MirrorGuard::heldByThisThread(a));assert(other.try_lock());other.unlock();});probe.join();}
- assert(!MirrorGuard::heldByThisThread(a));std::thread free([&]{assert(a.try_lock());a.unlock();});free.join();
+  std::thread probe([&]{assert(!a.mutex.try_lock());assert(!MirrorGuard::heldByThisThread(a));assert(other.mutex.try_lock());other.mutex.unlock();});probe.join();}
+ assert(!MirrorGuard::heldByThisThread(a));std::thread free([&]{assert(a.mutex.try_lock());a.mutex.unlock();});free.join();
  try{MirrorGuard guard(a);throw std::runtime_error("unwind");}catch(const std::runtime_error&){}
- assert(!MirrorGuard::heldByThisThread(a));std::thread after([&]{assert(a.try_lock());a.unlock();});after.join();
+ assert(!MirrorGuard::heldByThisThread(a));std::thread after([&]{assert(a.mutex.try_lock());a.mutex.unlock();});after.join();
  std::puts("PASS single gate: nested same-mutex guards skip re-locking, interleaved mutexes restore ownership, exceptions unwind, other threads still excluded.");
 }
 
-int main(){knownScan();assert(!liveObjects);singleGate();writeThroughLearning();assert(!liveObjects);writeThroughImplicitState();assert(!liveObjects);writeThroughDifferential();assert(!liveObjects);rawScopeDispatchArguments();assert(!liveObjects);rawScopeBanksAndReentry();assert(!liveObjects);rawScopeRestoreAndControls();assert(!liveObjects);rawScopeConcurrency();assert(!liveObjects);rawScopeShadowWorkload();assert(!liveObjects);constantCertificates();assert(!liveObjects);auditCoverageAndSchedule();assert(!liveObjects);static_assert(!std::is_copy_constructible<DeviceMirror>::value,"mirror cannot copy mutex/state");bindingsAndScalars();assert(!liveObjects);constantBanks();assert(!liveObjects);constantCapabilities();assert(!liveObjects);recordingFailures();assert(!liveObjects);savedStateIntegration();assert(!liveObjects);crowdedWorkload();assert(!liveObjects);stateBlocks();assert(!liveObjects);implicitAndDisabled();assert(!liveObjects);auditChecks();assert(!liveObjects);auditEveryField();assert(!liveObjects);concurrency();assert(!liveObjects);std::puts("PASS actual device_mirror.h: authoritative cached queries; COM refs; normalized/failed setters; partial exact-bit banks; ALL/partial/recorded stateblocks including failed Apply; UP and Reset failures; target/FVF implicit changes; two proxies; disabled raw bypass; 30000 randomized banks; 8 threads x5000 iterations, serialized backend calls (80072 with learned write-through, 120008 read-through).");}
+// 0.3.180 (D0): the gate census. Nested sites under an outer guard (a Device method) make exactly one
+// real acquisition, RawScope and state blocks included; owner calls are never foreign; a std::thread's
+// device, state-block and raw-scope calls count per class, the first recorded as {tid,site}, and the
+// report fires once per class. Built with NORTHLIGHT_GATE_CENSUS_BY_HELD=1 (keyed on held_ instead of
+// the thread id), the foreign calls are missed and this must fail.
+static unsigned censusReports[MirrorGate::Sites];
+static void gateCensus(){
+ Backend b;DeviceMirror m;MirrorDevice game(&b,&m);ExtensionDevice ext(&b,&m);MirrorGate& g=m.gate;
+ assert(g.ownerTid==MirrorGuard::threadId());
+ g.report=[](void*,unsigned site,std::uint32_t)noexcept{++censusReports[site];};g.counting=true;
+ auto taken=[&](MirrorSite s){return g.takeAcquired(s);};
+ {MirrorGuard outer(g);DWORD v=0;assert(SUCCEEDED(game.SetRenderState(40,1))&&SUCCEEDED(ext.GetRenderState(40,&v))&&v==1);float f[4];assert(SUCCEEDED(ext.GetVertexShaderConstantF(0,f,1)));
+  {ExtensionDevice::RawScope scope(ext);assert(SUCCEEDED(ext.SetRenderState(40,2)));assert(MirrorGuard::heldByThisThread(g));}
+  assert(MirrorGuard::heldByThisThread(g));}
+ assert(!MirrorGuard::heldByThisThread(g)&&taken(MirrorSite::Device)==1&&taken(MirrorSite::Raw)==0);
+ {ExtensionDevice::RawScope scope(ext);assert(SUCCEEDED(ext.SetRenderState(40,3)));DWORD v=0;assert(SUCCEEDED(game.GetRenderState(40,&v))&&v==3);}
+ assert(taken(MirrorSite::Raw)==1&&taken(MirrorSite::Device)==0);
+ IDirect3DStateBlock9* block=nullptr;assert(SUCCEEDED(game.CreateStateBlock(D3DSBT_ALL,&block)));assert(taken(MirrorSite::Device)==1&&taken(MirrorSite::StateBlock)==0);
+ assert(SUCCEEDED(block->Capture())&&SUCCEEDED(block->Apply()));assert(taken(MirrorSite::StateBlock)==2&&taken(MirrorSite::Device)==0);
+ {MirrorGuard outer(g);assert(SUCCEEDED(block->Capture()));}assert(taken(MirrorSite::Device)==1&&taken(MirrorSite::StateBlock)==0);
+ for(unsigned s=0;s<MirrorGate::Sites;++s)assert(!g.foreign[s]&&!censusReports[s]);assert(!g.firstReady);
+ std::uint32_t foreignTid=0;
+ for(unsigned round=0;round<2;++round){std::thread other([&]{foreignTid=MirrorGuard::threadId();DWORD v=0;assert(SUCCEEDED(game.GetRenderState(40,&v)));
+   assert(SUCCEEDED(block->Capture()));{ExtensionDevice::RawScope scope(ext);assert(SUCCEEDED(ext.SetRenderState(41,1)));}});other.join();}
+ assert(foreignTid&&foreignTid!=g.ownerTid);
+ assert(g.foreign[unsigned(MirrorSite::Device)]==2&&g.foreign[unsigned(MirrorSite::StateBlock)]==2&&g.foreign[unsigned(MirrorSite::Raw)]==2);
+ assert(censusReports[unsigned(MirrorSite::Device)]==1&&censusReports[unsigned(MirrorSite::StateBlock)]==1&&censusReports[unsigned(MirrorSite::Raw)]==1);
+ assert(g.firstReady&&g.firstTid!=g.ownerTid&&g.firstSite==unsigned(MirrorSite::Device));
+ for(unsigned s=0;s<MirrorGate::Sites;++s)assert(!g.takeAcquired(MirrorSite(s))); // foreign entries are not owner acquisitions
+ g.noteBuffer();assert(!g.foreign[unsigned(MirrorSite::Buffer)]);
+ {std::thread other([&]{g.noteBuffer();});other.join();}assert(g.foreign[unsigned(MirrorSite::Buffer)]==1&&censusReports[unsigned(MirrorSite::Buffer)]==1);
+ g.noteFirst(g.presentTid);assert(g.presentTid==g.ownerTid);
+ block->Release();assert(taken(MirrorSite::StateBlock)==1);
+ std::puts("PASS gate census: one real acquisition per nested chain (device, RawScope, state blocks); owner calls never foreign; foreign device/state-block/raw/buffer entries counted per class, first {tid,site} recorded, one report per class.");
+}
+// A foreign thread's calls wait for, and never overlap, the owner's: TSan target together with concurrency().
+int main(int argc,char** argv){
+ if(argc>1&&!std::strcmp(argv[1],"census")){gateCensus();return 0;}
+ if(argc>1&&!std::strcmp(argv[1],"threads")){singleGate();gateCensus();rawScopeConcurrency();concurrency();std::puts("PASS threads");return 0;}
+ gateCensus();assert(!liveObjects);knownScan();assert(!liveObjects);singleGate();writeThroughLearning();assert(!liveObjects);writeThroughImplicitState();assert(!liveObjects);writeThroughDifferential();assert(!liveObjects);rawScopeDispatchArguments();assert(!liveObjects);rawScopeBanksAndReentry();assert(!liveObjects);rawScopeRestoreAndControls();assert(!liveObjects);rawScopeConcurrency();assert(!liveObjects);rawScopeShadowWorkload();assert(!liveObjects);constantCertificates();assert(!liveObjects);auditCoverageAndSchedule();assert(!liveObjects);static_assert(!std::is_copy_constructible<DeviceMirror>::value,"mirror cannot copy mutex/state");bindingsAndScalars();assert(!liveObjects);constantBanks();assert(!liveObjects);constantCapabilities();assert(!liveObjects);recordingFailures();assert(!liveObjects);savedStateIntegration();assert(!liveObjects);crowdedWorkload();assert(!liveObjects);stateBlocks();assert(!liveObjects);implicitAndDisabled();assert(!liveObjects);auditChecks();assert(!liveObjects);auditEveryField();assert(!liveObjects);concurrency();assert(!liveObjects);std::puts("PASS actual device_mirror.h: authoritative cached queries; COM refs; normalized/failed setters; partial exact-bit banks; ALL/partial/recorded stateblocks including failed Apply; UP and Reset failures; target/FVF implicit changes; two proxies; disabled raw bypass; 30000 randomized banks; 8 threads x5000 iterations, serialized backend calls (80072 with learned write-through, 120008 read-through).");}
