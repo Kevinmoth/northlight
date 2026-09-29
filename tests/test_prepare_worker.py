@@ -96,8 +96,13 @@ checks.update({
     and 'handoffUs=%.1f handoffRawUs=%.1f pairNs=%.1f handoffSamples=%u handoffWarmUs=%.1f' in x,
  'diagnostics only with RenderProfile (the fields and every clock)':
     'if(NorthlightRenderThreadProbe::profiling())std::snprintf(prepareFields,' in x and 'prepareTimed=profileSampled();' in x,
- 'the worker is destroyed (joined) before the replays, caches and quarantine it reads':
-    w.index('std::vector<std::unique_ptr<Replay>> replays,')<w.index('std::unique_ptr<NorthlightActorPrepare::Caches> prepareCaches=')<w.index('std::vector<std::unique_ptr<Replay>> prepareQuarantine;')<w.index('NorthlightActorPrepare::Worker<Replay> prepareWorker;'),
+ 'the worker is joined first in ~WorldRenderer and destroyed before the replays, caches, arenas, quarantine, actorPrograms, captureShaders and retiredPrograms it reads':
+    w.count('NorthlightActorPrepare::Worker<Replay> prepareWorker;')==1
+    and all(w.index(member)<w.index('NorthlightActorPrepare::Worker<Replay> prepareWorker;') for member in ('std::vector<std::unique_ptr<Replay>> replays,',
+        'std::unique_ptr<NorthlightActorPrepare::Caches> prepareCaches=','std::unique_ptr<NorthlightActorPrepare::DeclArena> prepareDecls=','std::vector<std::unique_ptr<Replay>> prepareQuarantine;',
+        'std::shared_ptr<const NorthlightActorDeformation::Program>> actorPrograms;','std::unordered_map<IDirect3DVertexShader9*,CaptureShader> captureShaders;',
+        'std::vector<std::shared_ptr<const NorthlightActorDeformation::Program>> retiredPrograms;'))
+    and body(w,'    ~WorldRenderer(){').split('{',1)[1].lstrip().startswith('prepareWorker.join();'),
 })
 for name,ok in checks.items():print(('PASS ' if ok else 'FAIL ')+name)
 assert all(checks.values())
@@ -119,4 +124,7 @@ with tempfile.TemporaryDirectory(prefix='northlight-prepare-worker-') as tmp:
             bad=subprocess.run([str(exe),four,'lifetime-counterfactual'],capture_output=True,text=True)
             assert bad.returncode!=0 and 'heap-use-after-free' in bad.stderr,('the freed-program counterfactual must fail under ASan',bad.returncode,bad.stderr[-2000:])
             print('[asan] counterfactual: a program freed at the re-register: heap-use-after-free, as expected',flush=True)
+            bad=subprocess.run([str(exe),four,'shutdown-counterfactual'],capture_output=True,text=True) # 0.3.179: no join at destruction
+            assert bad.returncode!=0 and 'heap-use-after-free' in bad.stderr,('the shutdown-order counterfactual must fail under ASan',bad.returncode,bad.stderr[-2000:])
+            print('[asan] counterfactual: destruction without the join: heap-use-after-free, as expected',flush=True)
 print('PASS prepare worker: model, threads and counterfactuals')

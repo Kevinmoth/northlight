@@ -597,16 +597,15 @@ private:
     size_t pooledSnapshotBytes=0;
     NorthlightDrawSnapshot::Frame replaySnapshots;
     std::unique_ptr<NorthlightActorPrepare::Caches> prepareCaches=std::make_unique<NorthlightActorPrepare::Caches>(); /* sampled vertex inputs and rigid bones (0.3.177: one owner at a time) */
-    // 0.3.177 (r83): the prepare worker (world_shadow_experiment.inl). Declared after replays and the caches,
-    // so it is destroyed (its thread joined) first. After a watchdog the abandoned worker keeps its caches
-    // and the replays of its frame (quarantined, never recycled) until it settles.
+    // 0.3.177 (r83): the prepare worker's state (world_shadow_experiment.inl; the worker itself is declared
+    // after retiredPrograms). After a watchdog the abandoned worker keeps its caches and the replays of its
+    // frame (quarantined, never recycled) until it settles.
     std::unique_ptr<NorthlightActorPrepare::Caches> prepareAbandonedCaches,prepareCheckCaches;
     // 0.3.179 (T2): this frame's declaration copies (null: allocation failed, per-record copies), and the
     // arenas an abandoned worker's frame may still read.
     std::unique_ptr<NorthlightActorPrepare::DeclArena> prepareDecls=std::make_unique<NorthlightActorPrepare::DeclArena>();
     std::vector<std::unique_ptr<NorthlightActorPrepare::DeclArena>> prepareQuarantinedDecls;
     std::vector<std::unique_ptr<Replay>> prepareQuarantine;
-    NorthlightActorPrepare::Worker<Replay> prepareWorker;
     NorthlightShadowFate::Tracker shadowFate;unsigned otherBlendRejected=0,otherBudgetRejected=0,otherProjectionRejected=0;
     NorthlightActorShadowSelection::History actorShadowHistory;
     std::vector<NorthlightActorShadowSelection::Draw> actorShadowDraws;
@@ -684,6 +683,10 @@ private:
         if(!program)return;
         try{retiredPrograms.push_back(std::move(program));}catch(...){new std::shared_ptr<const NorthlightActorDeformation::Program>(std::move(program));} /* no memory: leak it, never free it early */
     }
+    // 0.3.177 (r83): the prepare worker. Declared after everything its records point at (replays, caches,
+    // declaration arenas, quarantine, and since 0.3.179 actorPrograms, captureShaders and retiredPrograms),
+    // so it is destroyed first; ~WorldRenderer also joins it explicitly before anything else.
+    NorthlightActorPrepare::Worker<Replay> prepareWorker;
     // Game terrain pixel shaders with their own shadow term neutralised
     // (patch_terrain_shadow.h); nullptr records a shader the patch rejected.
     // Bound only for terrain draws while the extension's shadows are active.
@@ -1670,7 +1673,8 @@ public:
         staticStream=std::make_unique<StaticShadow::Streamer>(root+"world-cache");
         staticCasters.setAdmission([this](size_t bytes){return admitStaticAllocation(bytes);});
         worker=std::thread([this]{work();});}
-    ~WorldRenderer(){{std::lock_guard<std::mutex> lock(mutex);stopping=true;}wake.notify_one();if(worker.joinable())worker.join();releaseGPU();for(auto& p:captureShaders)drop(p.second.replacement);for(auto& p:terrainShadowShaders)drop(p.second);}
+    ~WorldRenderer(){prepareWorker.join(); /* 0.3.179: first: an abandoned worker may still be inside a record */
+        {std::lock_guard<std::mutex> lock(mutex);stopping=true;}wake.notify_one();if(worker.joinable())worker.join();releaseGPU();for(auto& p:captureShaders)drop(p.second.replacement);for(auto& p:terrainShadowShaders)drop(p.second);}
     void releaseGPU(){replayBoundsAbandon();releaseReplayProbe();staticCasters.settle();rigidMemoryClear();prepareQuiesce();neutralShadowMaps=false;prepareCaches->sampled.clear();prepareCaches->bones.clear();prepareCachesStale=false;if(replays.empty()&&heldShadowReplays.empty())prepareFrameRelease(); /* 0.3.179: no replay left to point at them */actorShadowHistory.clear();actorShadowOriginValid=false;replayBoundsMetadata.clear();replayBoundsCache.clear();declarationCache.clear();uploadedStaticOwners.reset();staticOwnerGeneration=UINT64_MAX;staticCasters.reset();staticMatcher.clear();staticScene.reset();staticRetryTick=0;stateBlocks.clear();uploadedTerrain.clear();liveTerrainIndexCount=liveDirectionalIndexCount=0;fixedTerrain.reset();fixedTerrainBits.reset();liveTerrainGeneration=0;drop(regionalFogTexture);drop(neutralAO);uploadedFogField.reset();releasePointGPU();probeActivation.reset();drop(baselineSurface);drop(baselineLight);releaseReplayGPU();liveTerrainGPU.clear();drop(liveIndicesGPU);liveIndexBytes=0;pendingMesh.reset();clearMesh();retiredMaterials.clear();releaseMeshPool();uploadedMap.clear();for(auto& t:shadow)drop(t);for(auto& s:shadowSurface)drop(s);for(auto& t:shadowCache)drop(t);for(auto& s:shadowCacheSurface)drop(s);drop(shadowCacheDepth);drop(shadowVerifySurface);drop(shadowVerify);for(auto& r:shadowVerifyRead)drop(r);drop(shadowScratch);drop(shadowScratchSurface);drop(unionPS);invalidateShadowCache();for(auto& t:probe)drop(t);drop(shadowDepth);drop(lightSurface);drop(fogSurface);drop(fogBlurredSurface);drop(colorSurface);drop(light);drop(fog);drop(fogBlurred);drop(color);drop(lightingPS);drop(giPS);drop(fogPS);drop(fogBlurPS);drop(localDirectPS);drop(temporalPS);drop(localFogPS);drop(normalsPS);drop(normalBuffer);drop(normalSurface);drop(sourceVisPS);for(int a=0;a<2;++a)for(int b=0;b<2;++b){drop(sourceVis[a][b]);drop(sourceVisSurface[a][b]);}sourceVisValid=false;for(int i=0;i<2;++i){drop(temporalLight[i]);drop(temporalLightSurface[i]);drop(temporalDepth[i]);drop(temporalDepthSurface[i]);}temporalValid=false;drop(finalPS);drop(shadowPS);drop(replayPS);drop(shadowVS);drop(cachedShadowVS);drop(cachedShadowPS);drop(cachedFastPS);drop(cachedOpaqueFastPS);drop(cachedOpaquePS);drop(shadowDecl);width=height=0;uploadedSerial=0;}
     // Explicit enable/retry only, called after the wrapper's clearFrame(). This
     // never calls endFrame(), so packet capture and cleanup run exactly once.

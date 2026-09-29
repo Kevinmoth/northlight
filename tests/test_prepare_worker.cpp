@@ -415,6 +415,10 @@ namespace NorthlightRenderThreadProbe {static bool on=false;inline bool profilin
 struct Renderer {
     using Replay=Rec;
     std::vector<std::unique_ptr<Rec>> replays;
+    // Declared before the program maps (0.3.179's original order): only the explicit join in ~Renderer,
+    // as in ~WorldRenderer, keeps an abandoned worker from outliving them (shutdownOrder()).
+    NorthlightActorPrepare::Worker<Rec,Faulty> prepareWorker; /* passes through unless a test stalls or throws */
+    bool joinFirst=true;~Renderer(){if(joinFirst)prepareWorker.join();}
     std::unordered_map<IDirect3DVertexShader9*,std::shared_ptr<const Program>> actorPrograms;
     struct CaptureShader {std::shared_ptr<const Program> program;};std::unordered_map<IDirect3DVertexShader9*,CaptureShader> captureShaders;
     std::vector<std::shared_ptr<const Program>> retiredPrograms;
@@ -431,7 +435,6 @@ struct Renderer {
     std::unique_ptr<Caches> prepareCaches=std::make_unique<Caches>();
     std::unique_ptr<Caches> prepareAbandonedCaches,prepareCheckCaches;
     std::vector<std::unique_ptr<Rec>> prepareQuarantine;
-    NorthlightActorPrepare::Worker<Rec,Faulty> prepareWorker; /* passes through unless a test stalls or throws */
     explicit Renderer(NorthlightVertexDeclarations::Cache& d):declarationCache(d){prepareWorker.setWatchdogMs(2000);}
     void recycleReplay(Rec* raw){if(prepareUnsettled()){prepareQuarantine.emplace_back(raw);return;}delete raw;}
     // registerShader's program part: the erased entries' programs are retired (0.3.179 T1), or (the
@@ -551,9 +554,28 @@ static void programLifetime(World& world,bool counterfactual){
     assert(r.retiredPrograms.empty()&&r.prepareQuarantine.empty());
     std::printf("program lifetime: a program re-registered mid-frame stays alive for the frame's records and the abandoned worker's record, released once settled\n");
 }
+// 0.3.179: destruction with an abandoned, unsettled worker still inside a record whose program only the
+// renderer's maps own. The explicit join (first in ~WorldRenderer, and in the harness) waits for that
+// record; counterfactual (no join, the worker declared before the maps): ASan reports the use-after-free.
+static void shutdownOrder(World& world,bool counterfactual){
+    std::mt19937 rng(1796);auto r=std::make_unique<Renderer>(world.declarationCache);r->joinFirst=!counterfactual;
+    for(unsigned k=0;k<world.programs.size();++k)if(world.programs[k]){auto own=std::make_shared<const Program>(*world.programs[k]);r->actorPrograms[World::shader(k)]=r->captureShaders[World::shader(k)].program=own;}
+    r->prepareWorker.setWatchdogMs(5);NorthlightRenderThreadProbe::on=false;
+    std::vector<std::unique_ptr<Rec>> records;do records=world.frame(rng,10);while(published(records).records.size()<4);
+    const Camera c=camera(rng);std::memcpy(r->context.inverseView,c.inverseView,64);std::memcpy(r->context.camera,c.camera,12);
+    for(std::size_t i=0;i<records.size();++i){auto rec=std::move(records[i]);rec->program=nullptr;rec->declCopy=nullptr;rec->declared=false;rec->elementCount=0;
+        if(rec->shadowSelected&&rec->shadowSkinned){if(stallAt.load()==SIZE_MAX&&r->captureShaders[rec->originalShader].program)stallAt=i;r->prepareFill(*rec,r->captureShaders[rec->originalShader]);}
+        r->replays.emplace_back(std::move(rec));r->preparePublish();}
+    std::this_thread::sleep_for(std::chrono::milliseconds(2)); /* the worker is inside the stalled record, before it reads the program */
+    r->prepareJoin();assert(std::string(r->prepareStats.mode)=="watchdog"&&r->prepareUnsettled());
+    r.reset(); /* the process exits */
+    stallAt=SIZE_MAX;
+    std::printf("shutdown order: destroyed with an abandoned worker inside a record; the join waited for it\n");
+}
 int main(int argc,char** argv){
     assert(argc>2);World world(argv[1]);const bool tsan=std::string(argv[2])=="tsan";
     if(std::string(argv[2])=="lifetime-counterfactual"){programLifetime(world,true);return 0;}
+    if(std::string(argv[2])=="shutdown-counterfactual"){shutdownOrder(world,true);return 0;}
     handoffMeter();
     loopIdentity(world,tsan?40:600);layouts(world,tsan?20:200);staleDeclaration(world);handover(world,tsan?4:24);evictedDeclaration(world);
     threaded<NorthlightActorPrepare::Prepare>(world,tsan?10000:3000,tsan?3:12,false);
@@ -562,6 +584,7 @@ int main(int argc,char** argv){
     integration(world,tsan?3000:2000,tsan?4:16);
     rearmCap(world);
     programLifetime(world,false);
+    shutdownOrder(world,false);
     watchdog(world);
     std::puts("PASS prepare worker: handover at every index, threaded worker and join, exception and watchdog takeover equal to inline; counterfactuals fail");
 }

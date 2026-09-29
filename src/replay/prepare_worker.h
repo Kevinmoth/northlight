@@ -165,7 +165,7 @@ private:
     std::mutex mutex_;std::condition_variable wake_;bool blocked_=false,shutdown_=false; /* under mutex_ */
     std::thread thread_;
     Frame frame_;Caches* caches_=nullptr;Process process_;
-    std::uint64_t serial_=0;bool open_=false,abandoned_=false;double watchdogMs_=WatchdogMs;std::uint32_t wakeBatch_=WakeBatch; /* render thread */
+    std::uint64_t serial_=0;bool open_=false,abandoned_=false,joined_=false;double watchdogMs_=WatchdogMs;std::uint32_t wakeBatch_=WakeBatch; /* render thread */
     // Producer-side counters of the open frame (render thread).
     std::uint32_t wakes_=0;double notifyUs_=0;
     void notify(){
@@ -220,10 +220,13 @@ private:
 public:
     Worker():slots_(new Slot[Capacity]),out_(new Output[Capacity]){}
     Worker(const Worker&)=delete;Worker& operator=(const Worker&)=delete;
-    ~Worker(){{std::lock_guard<std::mutex> lock(mutex_);shutdown_=true;}wake_.notify_all();if(thread_.joinable())thread_.join();}
+    ~Worker(){join();}
+    // Shutdown: the thread finishes what it is doing (at most the rest of an open frame, or an abandoned
+    // worker's record in flight) and exits. Afterwards nothing is read: settled, no new frame.
+    void join(){{std::lock_guard<std::mutex> lock(mutex_);shutdown_=true;}wake_.notify_all();if(thread_.joinable())thread_.join();open_=false;joined_=true;}
     // false: no thread (creation failed) or abandoned after a watchdog: the caller runs inline.
     bool ready(){
-        if(abandoned_)return false;
+        if(abandoned_||joined_)return false;
         if(!thread_.joinable()){try{thread_=std::thread([this]{loop();});}catch(...){abandoned_=true;return false;}}
         return true;
     }
@@ -277,7 +280,7 @@ public:
         return r;
     }
     // The last stopped frame is acknowledged: the worker touches none of its records any more.
-    bool settled()const{return !open_&&(serial_==0||word_.load(std::memory_order_acquire)==word(serial_,Stopped));}
+    bool settled()const{return joined_||(!open_&&(serial_==0||word_.load(std::memory_order_acquire)==word(serial_,Stopped)));}
     const Output* outputs()const{return out_.get();}
     Output* outputs(){return out_.get();}
     const Frame& frame()const{return frame_;}
