@@ -590,6 +590,12 @@ private:
     size_t pooledSnapshotBytes=0;
     NorthlightDrawSnapshot::Frame replaySnapshots;
     std::unique_ptr<NorthlightActorPrepare::Caches> prepareCaches=std::make_unique<NorthlightActorPrepare::Caches>(); /* sampled vertex inputs and rigid bones (0.3.177: one owner at a time) */
+    // 0.3.177 (r83): the prepare worker (world_shadow_experiment.inl). Declared after replays and the caches,
+    // so it is destroyed (its thread joined) first. After a watchdog the abandoned worker keeps its caches
+    // and the replays of its frame (quarantined, never recycled) until it settles.
+    std::unique_ptr<NorthlightActorPrepare::Caches> prepareAbandonedCaches,prepareCheckCaches;
+    std::vector<std::unique_ptr<Replay>> prepareQuarantine;
+    NorthlightActorPrepare::Worker<Replay> prepareWorker;
     NorthlightShadowFate::Tracker shadowFate;unsigned otherBlendRejected=0,otherBudgetRejected=0,otherProjectionRejected=0;
     NorthlightActorShadowSelection::History actorShadowHistory;
     std::vector<NorthlightActorShadowSelection::Draw> actorShadowDraws;
@@ -643,6 +649,7 @@ private:
         auto p=std::move(freeReplays.back());freeReplays.pop_back();pooledSnapshotBytes-=p->snapshot.capacityBytes();return p;
     }
     void recycleReplay(Replay* raw){
+        if(prepareUnsettled()){try{prepareQuarantine.emplace_back(raw);}catch(...){} return;} /* 0.3.177: an abandoned worker may read it; on failure it leaks */
         std::unique_ptr<Replay> p(raw);size_t capacity=p->snapshot.capacityBytes();
         bool keep=capacity<=replayPoolLimit()-std::min(replayPoolLimit(),pooledSnapshotBytes);p->releaseResources(keep);
         if(keep)pooledSnapshotBytes+=capacity;
@@ -1645,7 +1652,7 @@ public:
         staticCasters.setAdmission([this](size_t bytes){return admitStaticAllocation(bytes);});
         worker=std::thread([this]{work();});}
     ~WorldRenderer(){{std::lock_guard<std::mutex> lock(mutex);stopping=true;}wake.notify_one();if(worker.joinable())worker.join();releaseGPU();for(auto& p:captureShaders)drop(p.second.replacement);for(auto& p:terrainShadowShaders)drop(p.second);}
-    void releaseGPU(){replayBoundsAbandon();releaseReplayProbe();staticCasters.settle();rigidMemoryClear();neutralShadowMaps=false;prepareCaches->sampled.clear();prepareCaches->bones.clear();actorShadowHistory.clear();actorShadowOriginValid=false;replayBoundsMetadata.clear();replayBoundsCache.clear();declarationCache.clear();uploadedStaticOwners.reset();staticOwnerGeneration=UINT64_MAX;staticCasters.reset();staticMatcher.clear();staticScene.reset();staticRetryTick=0;stateBlocks.clear();uploadedTerrain.clear();liveTerrainIndexCount=liveDirectionalIndexCount=0;fixedTerrain.reset();fixedTerrainBits.reset();liveTerrainGeneration=0;drop(regionalFogTexture);drop(neutralAO);uploadedFogField.reset();releasePointGPU();probeActivation.reset();drop(baselineSurface);drop(baselineLight);releaseReplayGPU();liveTerrainGPU.clear();drop(liveIndicesGPU);liveIndexBytes=0;pendingMesh.reset();clearMesh();retiredMaterials.clear();releaseMeshPool();uploadedMap.clear();for(auto& t:shadow)drop(t);for(auto& s:shadowSurface)drop(s);for(auto& t:shadowCache)drop(t);for(auto& s:shadowCacheSurface)drop(s);drop(shadowCacheDepth);drop(shadowVerifySurface);drop(shadowVerify);for(auto& r:shadowVerifyRead)drop(r);drop(shadowScratch);drop(shadowScratchSurface);drop(unionPS);invalidateShadowCache();for(auto& t:probe)drop(t);drop(shadowDepth);drop(lightSurface);drop(fogSurface);drop(fogBlurredSurface);drop(colorSurface);drop(light);drop(fog);drop(fogBlurred);drop(color);drop(lightingPS);drop(giPS);drop(fogPS);drop(fogBlurPS);drop(localDirectPS);drop(temporalPS);drop(localFogPS);drop(normalsPS);drop(normalBuffer);drop(normalSurface);drop(sourceVisPS);for(int a=0;a<2;++a)for(int b=0;b<2;++b){drop(sourceVis[a][b]);drop(sourceVisSurface[a][b]);}sourceVisValid=false;for(int i=0;i<2;++i){drop(temporalLight[i]);drop(temporalLightSurface[i]);drop(temporalDepth[i]);drop(temporalDepthSurface[i]);}temporalValid=false;drop(finalPS);drop(shadowPS);drop(replayPS);drop(shadowVS);drop(cachedShadowVS);drop(cachedShadowPS);drop(cachedFastPS);drop(cachedOpaqueFastPS);drop(cachedOpaquePS);drop(shadowDecl);width=height=0;uploadedSerial=0;}
+    void releaseGPU(){replayBoundsAbandon();releaseReplayProbe();staticCasters.settle();rigidMemoryClear();prepareQuiesce();neutralShadowMaps=false;prepareCaches->sampled.clear();prepareCaches->bones.clear();prepareCachesStale=false;actorShadowHistory.clear();actorShadowOriginValid=false;replayBoundsMetadata.clear();replayBoundsCache.clear();declarationCache.clear();uploadedStaticOwners.reset();staticOwnerGeneration=UINT64_MAX;staticCasters.reset();staticMatcher.clear();staticScene.reset();staticRetryTick=0;stateBlocks.clear();uploadedTerrain.clear();liveTerrainIndexCount=liveDirectionalIndexCount=0;fixedTerrain.reset();fixedTerrainBits.reset();liveTerrainGeneration=0;drop(regionalFogTexture);drop(neutralAO);uploadedFogField.reset();releasePointGPU();probeActivation.reset();drop(baselineSurface);drop(baselineLight);releaseReplayGPU();liveTerrainGPU.clear();drop(liveIndicesGPU);liveIndexBytes=0;pendingMesh.reset();clearMesh();retiredMaterials.clear();releaseMeshPool();uploadedMap.clear();for(auto& t:shadow)drop(t);for(auto& s:shadowSurface)drop(s);for(auto& t:shadowCache)drop(t);for(auto& s:shadowCacheSurface)drop(s);drop(shadowCacheDepth);drop(shadowVerifySurface);drop(shadowVerify);for(auto& r:shadowVerifyRead)drop(r);drop(shadowScratch);drop(shadowScratchSurface);drop(unionPS);invalidateShadowCache();for(auto& t:probe)drop(t);drop(shadowDepth);drop(lightSurface);drop(fogSurface);drop(fogBlurredSurface);drop(colorSurface);drop(light);drop(fog);drop(fogBlurred);drop(color);drop(lightingPS);drop(giPS);drop(fogPS);drop(fogBlurPS);drop(localDirectPS);drop(temporalPS);drop(localFogPS);drop(normalsPS);drop(normalBuffer);drop(normalSurface);drop(sourceVisPS);for(int a=0;a<2;++a)for(int b=0;b<2;++b){drop(sourceVis[a][b]);drop(sourceVisSurface[a][b]);}sourceVisValid=false;for(int i=0;i<2;++i){drop(temporalLight[i]);drop(temporalLightSurface[i]);drop(temporalDepth[i]);drop(temporalDepthSurface[i]);}temporalValid=false;drop(finalPS);drop(shadowPS);drop(replayPS);drop(shadowVS);drop(cachedShadowVS);drop(cachedShadowPS);drop(cachedFastPS);drop(cachedOpaqueFastPS);drop(cachedOpaquePS);drop(shadowDecl);width=height=0;uploadedSerial=0;}
     // Explicit enable/retry only, called after the wrapper's clearFrame(). This
     // never calls endFrame(), so packet capture and cleanup run exactly once.
     void recover(){meshRetry.clear();if(!failed)return;releaseGPU();failed=false;valid=false;streamingReports=0;logf("WORLD explicit recovery requested");}
@@ -1674,6 +1681,7 @@ public:
     void flushDeferredLogs(){for(const auto& line:deferredLines)logf("%s",line.c_str());deferredLines.clear();}
     void endFrame(bool retainPool=true){
         flushDeferredLogs(); /* 0.3.176 (U0/S0): after every bucketed span of the frame */
+        prepareQuiesce();prepareEndFrame(); /* 0.3.177: before the replays are recycled */
         replayBoundsAbandon(); /* render() joined it; packets are recycled below */
         paletteFrameValid=false;staticPivotReady=false;rigidMemory.clearDrawn(); /* 0.3.173: drawn marks are per capture frame */
         if(!valid||failed||workerFault())stateBlocks.clear();
@@ -1744,7 +1752,9 @@ public:
             for(auto& unused:freeReplays){pooledSnapshotBytes-=unused->snapshot.capacityBytes();unused->snapshot=NorthlightDrawSnapshot::Mesh{};}
             for(auto& p:replays)recycleReplay(p.release());replays.clear();
             for(auto& p:heldShadowReplays)recycleReplay(p.release());heldShadowReplays.clear();
-        }else{replays.clear();heldShadowReplays.clear();freeReplays.clear();pooledSnapshotBytes=0;}
+        }else{
+            if(prepareUnsettled()){for(auto& p:replays)recycleReplay(p.release());for(auto& p:heldShadowReplays)recycleReplay(p.release());} /* 0.3.177: quarantined */
+            replays.clear();heldShadowReplays.clear();freeReplays.clear();pooledSnapshotBytes=0;}
         terrainBoundsCache.clearFrame();liveTerrainChunks.clear();frameTerrain.clear();frameTerrainVertices=frameTerrainIndices=0;pointLiveBatches.clear();pointReady=false;
         /* The snapshot frame advances on capture frames only. With the version provider set here every
            untracked hit revalidates anyway; without it the serial&15==frame&15 slice, counted in all
@@ -1997,7 +2007,8 @@ public:
         auto begin=std::begin(kWorldShaderSignatures),end=std::end(kWorldShaderSignatures);
         auto it=std::lower_bound(begin,end,hash,[](const WorldShaderSignature& a,uint64_t h){return a.hash<h;});
         auto old=captureShaders.find(shader);if(old!=captureShaders.end()){drop(old->second.replacement);captureShaders.erase(old);}
-        if(actorPrograms.count(shader)){prepareCaches->sampled.clear();prepareCaches->bones.clear();}actorPrograms.erase(shader);actorUVPrograms.erase(shader);
+        if(actorPrograms.count(shader))prepareCachesStale=true; /* 0.3.177: cleared by their owner at its next open (captured replays hold their handles) */
+        actorPrograms.erase(shader);actorUVPrograms.erase(shader);
         if(it==end||it->hash!=hash)return;
         unsigned kind=contains(kTerrainVS,hash)?1:it->projectionKind;
         if(kind==1)return; // Terrain uses an immediate position snapshot, including SM1.
@@ -2117,6 +2128,7 @@ public:
                  for(unsigned s=0;s<4&&ok;++s){std::uint64_t next=std::uint64_t(running[s])+((p->mesh().streams[s].bytes.size()+15)&~std::size_t(15));ok=next<=replayVertexBytes[s];}
                  if(!ok||(runningIndices+p->mesh().indices.size())*4>replayIndexBytes)break;
                  for(unsigned s=0;s<4;++s)running[s]=UINT(running[s]+((p->mesh().streams[s].bytes.size()+15)&~std::size_t(15)));runningIndices+=p->mesh().indices.size();}
+             if(prepareUnsettled())for(size_t i=fit;i<replays.size();++i)recycleReplay(replays[i].release()); /* 0.3.177: quarantined */
              replays.resize(fit);if(!layout(fit))return false;
          }}
         for(unsigned s=0;s<4;++s){if(!totals[s])continue;
@@ -2411,7 +2423,7 @@ public:
         if(sample){++acceptedTriangleBins[triangleBin];if(priority)++acceptedSkinnedTriangleBins[triangleBin];smallShadowGI+=smallShadow;}
         p->fateSlot=fate.slot;fate.slot=-1; /* the selection records this draw's outcome */
         if(p->shadowSelected&&p->shadowSkinned)prepareFill(*p); /* 0.3.177: the stable selection's inputs */
-        replays.emplace_back(p.release());if(detailed)++capturePhaseAccepted;
+        replays.emplace_back(p.release());preparePublish();if(detailed)++capturePhaseAccepted;
     }
 
     // One directional replay draw in the 0.3.142 order: geometry, pose constants,

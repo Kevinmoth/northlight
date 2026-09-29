@@ -29,6 +29,7 @@ text=fixture+r'''
 #include "world_gi.h"
 using V=NorthlightGI::Vec3;
 namespace NorthlightReplayBounds {struct Bounds {float low[3]={},high[3]={};bool valid=false;};struct WorkInfo {};struct Prepared {};}
+namespace NorthlightActorDeformation {struct Program {};} /* 0.3.177: the Replay's program handle */
 using BOOL=int;constexpr DWORD D3DTADDRESS_WRAP=1;
 struct ModelRef:IRef{unsigned refs=1,releases=0;unsigned AddRef()override{return ++refs;}unsigned Release()override{++releases;return --refs;}};
 using IDirect3DVertexShader9=ModelRef;using IDirect3DBaseTexture9=ModelRef;
@@ -36,6 +37,7 @@ template<class T>void drop(T*& pointer){if(pointer){pointer->Release();pointer=n
 class WorldRenderer {public:
 '''+replay+r'''
  std::vector<std::unique_ptr<Replay>> replays,freeReplays;size_t pooledSnapshotBytes=0;
+ std::vector<std::unique_ptr<Replay>> prepareQuarantine;bool prepareUnsettled()const{return false;} /* 0.3.177: no abandoned prepare worker */
  size_t replayPoolLimit()const{return 48u*1024u*1024u;} /* memory guard: full cap outside pressure */
 '''+methods+r'''
 };

@@ -4,10 +4,10 @@
         return NorthlightActorShadowSelection::atCadence(NorthlightActorShadowSelection::active(),
             effects.shadows&&NorthlightQuality::captureSkipPossible(quality,true)?quality.nearShadowInterval:1);}
     void selectShadowReplays(){
+        prepareJoin(); /* 0.3.177 (r83): first; every render-thread cache use of the frame follows it */
         if(shadowSelectionDone)return;shadowSelectionDone=true;
         auto finishFate=[this]{finishShadowFate();};struct FateGuard {decltype(finishFate)& finish;~FateGuard(){finish();}} fateGuard{finishFate};
         const auto start=captureSampled?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
-        prepareCaches->sampled.beginFrame();
         const size_t captured=replays.size(),budget=size_t(actorShadowBudgetMiB)*1048576;
         size_t actorBytes=0,actors=0,small=0,distanceTests=0,distanceReused=0;
         for(const auto& p:replays){small+=!p->shadowSelected;
@@ -63,8 +63,12 @@
             logf("SHADOW experiment selection allocation failed; current captured shadows retained");return;
         }
         if(captureSampled){const double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
-            if(stable.actors+stable.rigidActors){deferLogf("MODEL shadow actors ranked=%zu kept=%zu toggles=%zu togglesSinceLog=%zu rankedFramesSinceLog=%u matched=%zu retained=%zu rigidActors=%zu rigidDraws=%zu rigidBytes=%zu attached=%zu attachedBytes=%zu orphans=%zu freeNearBody=%zu attachRadius=%.1f rigidHits=%u rigidMisses=%u rigidScannedVertices=%zu history=%zu cut=prefix margin=%.2f origin=%s rigidNew=%zu prepareMs=%.3f chooseMs=%.3f exemptActors=%zu exemptDraws=%zu exemptBytes=%zu cappedExempt=%zu stillRankedSmall=%zu exemptCapBindsSinceLog=%u rooted=%zu rootFallback=%zu rootRejected=%zu locked=%zu exemptNpcLike=%zu",
-                stable.actors,stable.actorsKept,stable.toggles,actorShadowToggles,actorShadowFrames,stable.matched,stable.retained,stable.rigidActors,stable.rigidDraws,stable.rigidBytes,stable.attached,stable.attachedBytes,stable.orphans,stable.rigidStuck,double(NorthlightActorShadowSelection::AttachRadius),prepareCaches->bones.hits,prepareCaches->bones.misses,prepareCaches->bones.scannedVertices,actorShadowHistory.size(),double(NorthlightActorShadowSelection::active().margin),NorthlightActorShadowSelection::FlickerFixes&&actorShadowOriginValid?"pivot":"camera",stable.rigidNew,actorShadowPrepareMs,actorShadowChooseMs,stable.exemptActors,stable.exemptDraws,stable.exemptBytes,stable.cappedExempt,stable.stillRankedSmall,actorShadowCapBinds,stable.rooted,stable.rootFallback,stable.rootRejected,stable.locked,stable.exemptNpcLike);actorShadowCapBinds=0;
+            // 0.3.177 (r83): the prepare worker's fields, RenderProfile only.
+            char prepareFields[400]="";
+            if(NorthlightRenderThreadProbe::profiling())std::snprintf(prepareFields,sizeof prepareFields," prepareMode=%s published=%u workerRecords=%u joinInlineRecords=%u workerPrepareMs=%.3f joinWaitMs=%.3f joinInlineMs=%.3f wakes=%u notifyUs=%.1f handoffUs=%.1f prepareMismatch=%u cachesStaleClears=%u prepareResync=%u",
+                prepareStats.mode,prepareStats.published,prepareStats.workerRecords,prepareStats.joinInline,prepareStats.workerMs,prepareStats.joinWaitMs,prepareStats.joinInlineMs,prepareStats.wakes,prepareStats.notifyUs,prepareStats.handoffUs,prepareStats.mismatch,prepareStats.staleClears,prepareStats.resync);
+            if(stable.actors+stable.rigidActors){deferLogf("MODEL shadow actors ranked=%zu kept=%zu toggles=%zu togglesSinceLog=%zu rankedFramesSinceLog=%u matched=%zu retained=%zu rigidActors=%zu rigidDraws=%zu rigidBytes=%zu attached=%zu attachedBytes=%zu orphans=%zu freeNearBody=%zu attachRadius=%.1f rigidHits=%u rigidMisses=%u rigidScannedVertices=%zu history=%zu cut=prefix margin=%.2f origin=%s rigidNew=%zu prepareMs=%.3f chooseMs=%.3f exemptActors=%zu exemptDraws=%zu exemptBytes=%zu cappedExempt=%zu stillRankedSmall=%zu exemptCapBindsSinceLog=%u rooted=%zu rootFallback=%zu rootRejected=%zu locked=%zu exemptNpcLike=%zu%s",
+                stable.actors,stable.actorsKept,stable.toggles,actorShadowToggles,actorShadowFrames,stable.matched,stable.retained,stable.rigidActors,stable.rigidDraws,stable.rigidBytes,stable.attached,stable.attachedBytes,stable.orphans,stable.rigidStuck,double(NorthlightActorShadowSelection::AttachRadius),prepareCaches->bones.hits,prepareCaches->bones.misses,prepareCaches->bones.scannedVertices,actorShadowHistory.size(),double(NorthlightActorShadowSelection::active().margin),NorthlightActorShadowSelection::FlickerFixes&&actorShadowOriginValid?"pivot":"camera",stable.rigidNew,actorShadowPrepareMs,actorShadowChooseMs,stable.exemptActors,stable.exemptDraws,stable.exemptBytes,stable.cappedExempt,stable.stillRankedSmall,actorShadowCapBinds,stable.rooted,stable.rootFallback,stable.rootRejected,stable.locked,stable.exemptNpcLike,prepareFields);actorShadowCapBinds=0;
                 actorShadowToggles=0;actorShadowFrames=0;}
             deferLogf("MODEL shadow selection captured=%zu selected=%zu smallGIExcluded=%zu actorCandidates=%zu actorKept=%zu actorDropped=%zu actorBytes=%zu keptActorBytes=%zu droppedActorBytes=%zu budgetBytes=%zu unknownDistance=%zu distanceTests=%zu distanceReused=%zu selectionMs=%.3f inputCacheHits=%u inputCacheMisses=%u scope=captured-actors distance=sampled-pose-vertex captureBudgetMiB=%u budgetTransitionsSinceLog=%u ranking=%d radius=%u radiusDropped=%zu radiusDroppedDraws=%zu radiusDroppedBytes=%zu radiusTogglesSinceLog=%zu radiusFlickerSinceLog=%zu radiusRekeyedSinceLog=%zu radiusCharacters=%zu radiusSelf=%zu radiusCompanions=%zu radiusInsideBytes=%zu radiusNoPivot=%zu",
                 captured,replays.size(),small,actors,result.kept+stable.rigidDraws,result.dropped,actorBytes,result.keptBytes+stable.rigidBytes,result.droppedBytes,budget,result.unknown,distanceTests,distanceReused,ms,prepareCaches->sampled.hits,prepareCaches->sampled.misses,captureBudgetMiB,actorShadowTransitions,int(ranked&&stable.actors+stable.rigidActors>0),
@@ -78,21 +82,132 @@
         // ShadowFateDiagnostics=1 only: 0.2-0.5 ms per sampled window otherwise.
         shadowFate.beginFrame(actorShadowBudgetMiB>0&&shadowFateDiagnostics);
     }
+    // ---- 0.3.177 (r83 a1-prepare): the stable selection's prepare on a worker while the game draws.
+    // A frame opens at its first selected skinned capture: the camera is frozen and the caches pass to
+    // the worker. Each such draw is published right after it joins replays; the join (the first statement
+    // of selectShadowReplays) stops the worker and prepares the rest inline from the last output's state,
+    // and the caches return. Inline instead (the 0.3.176 path through the same prepareRecord): fewer than
+    // 6 cores, no thread, ActorShadows=0, a legacy tuning, after a watchdog, and the RenderProfile A/B
+    // inline windows (every other 10 s).
+    enum class PrepareFrame : unsigned char {None,Worker,Inline,Joined};
+    PrepareFrame prepareFrame=PrepareFrame::None;bool prepareOutputsReady=false,prepareOpened=false,prepareTimed=false;std::uint32_t prepareCount=0,prepareSerial=0;
+    const unsigned prepareCores=std::thread::hardware_concurrency();
+    std::atomic<bool> prepareCachesStale{false}; /* registerShader(): the owner clears the caches at its next open */
+    // RenderProfile diagnostics of the frame (appended to MODEL shadow actors); -1: not measured.
+    struct PrepareStats {const char* mode="inline";std::uint32_t published=0,workerRecords=0,joinInline=0,wakes=0,mismatch=0,staleClears=0,resync=0;
+        double workerMs=-1,joinWaitMs=-1,joinInlineMs=-1,notifyUs=-1,handoffUs=-1;} prepareStats;
+    double prepareHandoffUs=0;unsigned prepareFaults=0;bool prepareAbandonLogged=false;
+    bool prepareOffload()const{return prepareCores>=6&&quality.actorShadows&&selectionTuning().stableIdentity&&!prepareWorker.abandoned();}
+    bool prepareUnsettled()const{return prepareWorker.abandoned()&&!prepareWorker.settled();}
+    // The caches' owner opens them: a deferred clear (registerShader), then this frame's statistics.
+    void prepareCachesOpen(){
+        prepareOpened=true;
+        if(prepareCachesStale.exchange(false)){prepareCaches->sampled.clear();prepareCaches->bones.clear();++prepareStats.staleClears;}
+        prepareCaches->sampled.beginFrame();prepareCaches->bones.beginFrame();
+    }
+    // The frame's first selected skinned capture: worker or inline.
+    void prepareOpen(){
+        prepareTimed=profileSampled();prepareFrame=PrepareFrame::Inline;
+        const bool abInline=NorthlightRenderThreadProbe::profiling()&&(GetTickCount()/10000u)%2u==1u;
+        if(!prepareOffload()){prepareStats.mode="inline";return;}
+        if(abInline){prepareStats.mode="ab-inline";return;}
+        NorthlightActorPrepare::Frame frame;std::memcpy(frame.inverseView,context.inverseView,sizeof frame.inverseView);std::memcpy(frame.camera,context.camera,sizeof frame.camera);
+        frame.timed=prepareTimed;prepareCachesOpen();
+        if(prepareWorker.begin(frame,*prepareCaches)){prepareFrame=PrepareFrame::Worker;prepareStats.mode="worker";}
+        else prepareStats.mode="inline";
+    }
+    // captureModel, right after a draw joined replays: publish it if selected and skinned.
+    void preparePublish(){
+        if(prepareFrame==PrepareFrame::Joined)return; /* captured after the selection: never selected */
+        const Replay& p=*replays.back();if(!p.shadowSelected||!p.shadowSkinned)return;
+        if(prepareFrame==PrepareFrame::None)prepareOpen();
+        if(prepareFrame!=PrepareFrame::Worker)return;
+        const bool sample=prepareTimed&&!(prepareSerial++&15u);
+        const auto start=sample?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
+        prepareWorker.publish(&p,replays.size()-1); /* false (arena full): the join's check resyncs inline */
+        if(sample)prepareHandoffUs+=16*std::chrono::duration<double,std::micro>(std::chrono::steady_clock::now()-start).count();
+    }
+    // The worker did not acknowledge within the watchdog: inline for the session. It may still be in one
+    // record: its caches are set aside and the replays it may read are quarantined until it settles.
+    void prepareAbandon(){
+        std::unique_ptr<NorthlightActorPrepare::Caches> fresh;try{fresh=std::make_unique<NorthlightActorPrepare::Caches>();}catch(...){}
+        if(fresh){prepareAbandonedCaches=std::move(prepareCaches);prepareCaches=std::move(fresh);prepareCachesOpen();}
+        else while(!prepareWorker.settled())NorthlightActorPrepare::pause(); /* no memory for new caches: wait for the old ones */
+        prepareStats.mode="watchdog";
+        if(!prepareAbandonLogged){prepareAbandonLogged=true;logf("PREPARE worker watchdog: no acknowledgement within %.0f ms; actor prepare inline for this session",NorthlightActorPrepare::Worker<Replay>::WatchdogMs);}
+    }
+    // Stops an open worker frame; its outputs are discarded (endFrame, reset, releaseGPU, trimMemory).
+    void prepareQuiesce(){
+        if(prepareFrame==PrepareFrame::Worker){const auto r=prepareWorker.stop();if(r.timedOut)prepareAbandon();}
+        if(prepareFrame!=PrepareFrame::None)prepareFrame=PrepareFrame::Joined;prepareOutputsReady=false;
+    }
+    // endFrame (after prepareQuiesce): the next frame starts closed; a settled abandoned worker frees
+    // what it held.
+    void prepareEndFrame(){
+        prepareFrame=PrepareFrame::None;prepareOutputsReady=false;prepareOpened=false;prepareTimed=false;prepareCount=prepareSerial=0;prepareHandoffUs=0;prepareStats=PrepareStats{};
+        if(prepareWorker.abandoned()&&prepareWorker.settled()){
+            if(!prepareQuarantine.empty()){auto held=std::move(prepareQuarantine);prepareQuarantine.clear();for(auto& p:held)recycleReplay(p.release());}
+            prepareAbandonedCaches.reset();}
+    }
+    // The join, the first statement of selectShadowReplays: stop the worker (at most its record in
+    // flight; a sleeping one at once), prepare [done, published) inline with the frozen camera and the
+    // returned caches, from the state the last output carries.
+    void prepareJoin(){
+        if(prepareFrame!=PrepareFrame::Worker){if(!prepareOpened)prepareCachesOpen();prepareFrame=PrepareFrame::Joined;return;}
+        prepareFrame=PrepareFrame::Joined;
+        const auto r=prepareWorker.stop();
+        prepareStats.published=r.published;prepareStats.wakes=prepareWorker.wakes();
+        if(prepareTimed){prepareStats.joinWaitMs=r.waitMs;prepareStats.notifyUs=prepareWorker.notifyUs();prepareStats.workerMs=prepareWorker.busyMs();prepareStats.handoffUs=prepareHandoffUs;}
+        if(r.timedOut){prepareAbandon();return;} /* the selection prepares inline with the new caches */
+        if(r.failed&&prepareFaults++<4)logf("PREPARE worker record failed (exception); the join prepared it inline");
+        const auto started=prepareTimed?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
+        try{
+            auto* outputs=prepareWorker.outputs();const auto& frame=prepareWorker.frame();
+            for(std::uint32_t k=r.done;k<r.published;++k){NorthlightActorPrepare::State state=k?outputs[k-1].after:NorthlightActorPrepare::State{};
+                NorthlightActorPrepare::prepareRecord(state,*prepareWorker.record(k),prepareWorker.index(k),*prepareCaches,frame.inverseView,frame.camera,outputs[k]);}
+            prepareCount=r.published;prepareOutputsReady=true;
+        }catch(...){prepareOutputsReady=false;} /* the selection prepares inline */
+        prepareStats.workerRecords=r.done;prepareStats.joinInline=r.published-r.done;
+        if(prepareTimed){prepareStats.joinInlineMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();prepareSelfCheck();}
+    }
+    // RenderProfile sample frames: every 16th output recomputed inline (scratch caches, the carried state
+    // of the output before it) and compared bit for bit; the frozen camera compared with the context.
+    void prepareSelfCheck(){
+        if(!prepareOutputsReady)return;
+        if(!prepareCheckCaches)try{prepareCheckCaches=std::make_unique<NorthlightActorPrepare::Caches>();}catch(...){return;}
+        const auto* outputs=prepareWorker.outputs();const auto& frame=prepareWorker.frame();
+        if(std::memcmp(frame.inverseView,context.inverseView,sizeof frame.inverseView)||std::memcmp(frame.camera,context.camera,sizeof frame.camera))++prepareStats.mismatch;
+        for(std::uint32_t k=0;k<prepareCount;k+=16){NorthlightActorPrepare::State state=k?outputs[k-1].after:NorthlightActorPrepare::State{};NorthlightActorPrepare::Output check;
+            NorthlightActorPrepare::prepareRecord(state,*prepareWorker.record(k),prepareWorker.index(k),*prepareCheckCaches,frame.inverseView,frame.camera,check);
+            prepareStats.mismatch+=!NorthlightActorPrepare::same(check,outputs[k]);}
+    }
     // 0.3.177 (r83): the prepare inputs of a selected skinned draw, at capture (just before it joins
     // replays): its program handle and a copy of its declaration; declared: program && the declaration
     // was read (the stable selection's declared()).
     void prepareFill(Replay& p){
+        const bool sample=prepareTimed&&prepareFrame==PrepareFrame::Worker&&!(prepareSerial&15u); /* handoffUs: 1 in 16 */
+        const auto start=sample?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
         auto program=actorPrograms.find(p.originalShader);p.program=program!=actorPrograms.end()?program->second:nullptr;
         const D3DVERTEXELEMENT9* elements=nullptr;UINT count=0;
         p.declared=p.program&&declarationCache.get(p.decl,elements,count)&&count<=p.elements.size();
         p.elementCount=p.declared?count:0;if(p.declared)std::copy(elements,elements+count,p.elements.begin());
+        if(sample)prepareHandoffUs+=16*std::chrono::duration<double,std::micro>(std::chrono::steady_clock::now()-start).count();
     }
     // One prepared draw into the selection: its draw, and (0.3.176 S2) the rigid bone it tested.
     void prepareConsume(const NorthlightActorPrepare::Output& out){
         actorShadowDraws.push_back(out.item);Replay& stored=*replays[out.item.index];stored.boneKnown=out.tested;stored.bone=out.item.bone;
     }
-    // The stable selection's prepare: prepareRecord over the selected skinned draws in replays order.
+    // The stable selection's prepare: the joined worker's outputs when they are exactly this frame's
+    // selected skinned draws in replays order (else a resync), otherwise prepareRecord over them inline.
     void prepareStable(size_t& distanceTests,size_t& distanceReused){
+        if(prepareOutputsReady){prepareOutputsReady=false;
+            const auto* outputs=prepareWorker.outputs();std::uint32_t k=0;bool aligned=true;
+            for(size_t index=0;index<replays.size()&&aligned;++index){const Replay& p=*replays[index];
+                if(!p.shadowSelected||!p.shadowSkinned)continue;aligned=k<prepareCount&&outputs[k].item.index==index;++k;}
+            if(aligned&&k==prepareCount){for(k=0;k<prepareCount;++k)prepareConsume(outputs[k]);
+                if(prepareCount){distanceTests+=outputs[prepareCount-1].after.distanceTests;distanceReused+=outputs[prepareCount-1].after.distanceReused;}
+                return;}
+            ++prepareStats.resync;}
         NorthlightActorPrepare::State state;NorthlightActorPrepare::Output out;
         for(size_t index=0;index<replays.size();++index){const Replay& p=*replays[index];
             if(!p.shadowSelected||!p.shadowSkinned)continue;
@@ -104,7 +219,7 @@
     // cached per immutable snapshot owner.
     NorthlightActorShadowSelection::Result selectStableActors(size_t budget,size_t& distanceTests,size_t& distanceReused){
         const auto started=captureSampled?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
-        prepareCaches->bones.beginFrame();actorShadowDraws.clear();actorShadowDraws.reserve(replays.size());
+        actorShadowDraws.clear();actorShadowDraws.reserve(replays.size());
         const auto tuning=selectionTuning();
         // 0.3.177 (r83): the stable identity path is prepareRecord (prepare_worker.h) per selected skinned
         // draw in replays order, the same function the prepare worker runs.

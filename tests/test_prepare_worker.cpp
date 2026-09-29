@@ -11,6 +11,8 @@
 //     completion, records never published (prepared by the joiner), the context camera changed after
 //     the frame opened: equal to inline. An exception on record j and a stalled record (the watchdog)
 //     are taken over inline with equal outputs.
+//   - The renderer's prepare block (fill, publish, join, consumption, quiesce, endFrame), pasted from
+//     world_shadow_experiment.inl, equals inline over random frames with delays and A/B windows.
 //   - Counterfactuals that must fail: the carried state reset at the handover, unfiltered records
 //     published, declaration elements read through the live cache after an eviction, the camera taken
 //     at the join.
@@ -293,11 +295,74 @@ static void watchdog(World& world){
     stallAt=SIZE_MAX;(void)ok;
     std::printf("watchdog: a 20 ms record returned stop() after %.2f ms, worker abandoned, frame prepared inline equal\n",ms);
 }
+// ---- The renderer side (world_shadow_experiment.inl's prepare block, pasted by test_prepare_worker.py):
+// captureModel's fill and publish, the join, the consumption in the selection, quiesce and endFrame, with
+// the renderer members it uses.
+static DWORD tickNow=0;static DWORD GetTickCount(){return tickNow;}
+namespace NorthlightRenderThreadProbe {static bool on=false;inline bool profiling(){return on;}}
+struct Renderer {
+    using Replay=Rec;
+    std::vector<std::unique_ptr<Rec>> replays;
+    std::unordered_map<IDirect3DVertexShader9*,std::shared_ptr<const Program>> actorPrograms;
+    NorthlightVertexDeclarations::Cache& declarationCache;
+    struct {float inverseView[16]={},camera[3]={};} context;
+    struct {unsigned actorShadows=1;} quality;
+    std::vector<NorthlightActorShadowSelection::Draw> actorShadowDraws;
+    bool sampled=false;bool profileSampled()const{return sampled;}
+    static NorthlightActorShadowSelection::Tuning selectionTuning(){return NorthlightActorShadowSelection::active();}
+    unsigned logs=0;void logf(const char*,...){++logs;}
+    std::unique_ptr<Caches> prepareCaches=std::make_unique<Caches>();
+    std::unique_ptr<Caches> prepareAbandonedCaches,prepareCheckCaches;
+    std::vector<std::unique_ptr<Rec>> prepareQuarantine;
+    NorthlightActorPrepare::Worker<Rec> prepareWorker;
+    explicit Renderer(NorthlightVertexDeclarations::Cache& d):declarationCache(d){prepareWorker.setWatchdogMs(2000);}
+    void recycleReplay(Rec* raw){if(prepareUnsettled()){prepareQuarantine.emplace_back(raw);return;}delete raw;}
+/*PREPARE_BLOCK*/
+};
+// The production integration over random frames: captures with random delays (fill, publish), the
+// join, the selection's consumption: draws, rigid bones and distance counters equal to inline over the
+// same replays. Also frames without a selection, mid-frame quiesce (trimMemory), deferred cache clears
+// (registerShader) and the RenderProfile A/B windows. No resync, no self-check mismatch, no log.
+static void integration(World& world,unsigned frames,unsigned maxGroups){
+    std::mt19937 rng(1776);Renderer r(world.declarationCache);auto referenceCaches=std::make_unique<Caches>();
+    for(unsigned k=0;k<world.programs.size();++k)if(world.programs[k])r.actorPrograms[World::shader(k)]=world.programs[k];
+    std::size_t modes[3]={},selections=0,draws=0,quiesced=0,worker=0,joined=0;unsigned mismatch=0;
+    for(unsigned f=0;f<frames;++f){
+        auto records=world.frame(rng,1+rng()%maxGroups);const Camera c=camera(rng);
+        std::memcpy(r.context.inverseView,c.inverseView,64);std::memcpy(r.context.camera,c.camera,12);
+        NorthlightRenderThreadProbe::on=rng()%3==0;r.sampled=NorthlightRenderThreadProbe::on&&rng()%2;tickNow=DWORD(rng()%100000);
+        const bool trim=rng()%12==0;const std::size_t trimAt=records.empty()?0:rng()%records.size();
+        for(std::size_t i=0;i<records.size();++i){auto rec=std::move(records[i]);
+            rec->program.reset();rec->declared=false;rec->elementCount=0; /* the renderer's fill below */
+            if(rng()%4==0)delay(rng);
+            if(rec->shadowSelected&&rec->shadowSkinned)r.prepareFill(*rec);
+            r.replays.emplace_back(std::move(rec));r.preparePublish();
+            if(rng()%50==0)r.prepareCachesStale=true; /* registerShader */
+            if(trim&&i==trimAt){r.prepareQuiesce();++quiesced;}}
+        if(rng()%10){
+            r.prepareJoin();const char* mode=r.prepareStats.mode;modes[mode[0]=='w'?0:mode[0]=='a'?1:2]+=1;
+            worker+=r.prepareStats.workerRecords;joined+=r.prepareStats.joinInline;
+            std::size_t tests=0,reused=0;r.actorShadowDraws.clear();r.prepareStable(tests,reused);
+            const auto p=published(r.replays);const std::size_t n=p.records.size();std::vector<Output> reference(n);
+            prepare(p,0,n,*referenceCaches,c.inverseView,c.camera,reference);
+            assert(r.actorShadowDraws.size()==n);
+            for(std::size_t k=0;k<n;++k){Output got;got.item=r.actorShadowDraws[k];got.tested=p.records[k]->boneKnown;got.after=reference[k].after;
+                assert(NorthlightActorPrepare::same(got,reference[k]));assert(NorthlightActorPrepare::sameBits(&p.records[k]->bone,&reference[k].item.bone,4));}
+            assert(!n||(tests==reference[n-1].after.distanceTests&&reused==reference[n-1].after.distanceReused));
+            ++selections;draws+=n;assert(!r.prepareStats.resync);mismatch+=r.prepareStats.mismatch;}
+        r.prepareQuiesce();r.prepareEndFrame();
+        for(auto& rec:r.replays)r.recycleReplay(rec.release());r.replays.clear();
+    }
+    assert(!mismatch&&!r.logs&&modes[0]&&modes[1]&&worker&&joined&&quiesced&&!r.prepareWorker.abandoned());
+    std::printf("integration: %u frames, %zu selections (%zu draws) equal to inline; modes worker=%zu ab-inline=%zu inline=%zu; %zu draws by the worker, %zu by the join; %zu mid-frame quiesces; self-check mismatches 0\n",
+        frames,selections,draws,modes[0],modes[1],modes[2],worker,joined,quiesced);
+}
 int main(int argc,char** argv){
     assert(argc>2);World world(argv[1]);const bool tsan=std::string(argv[2])=="tsan";
     loopIdentity(world,tsan?40:600);handover(world,tsan?4:24);evictedDeclaration(world);
     threaded<NorthlightActorPrepare::Prepare>(world,tsan?10000:3000,tsan?3:12,false);
     threaded<Faulty>(world,tsan?2000:1500,tsan?3:12,true);
+    integration(world,tsan?3000:2000,tsan?4:16);
     watchdog(world);
     std::puts("PASS prepare worker: handover at every index, threaded worker and join, exception and watchdog takeover equal to inline; counterfactuals fail");
 }

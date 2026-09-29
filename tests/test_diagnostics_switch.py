@@ -45,7 +45,7 @@ KEEP={
  'WORLD GPU diagnostic':'user-triggered GPU capture (F12 debug)','WORLD slow submission':'capped: first 12','POINT pass skipped':'capped: first 12',
  'CELESTIAL disabled':'error','CELESTIAL native texture identity':'error','CELESTIAL early draw skipped':'capped: first 4',
  'SHADOWBLOB candidate':'capped: first 4','SHADOWBLOB identified':'capped: first 8','WATER disabled':'error','WATER explicit recovery':'user-triggered',
- 'WATER registered':'one-off: shader registration','WATER mask patch skipped':'capped: first 8 (patch rejected or patched hash mismatch; that shader only)','GPU profile':'gated: no sample opens when off (beginFrame/poll gated)','%s':'gpu_profile report: gated as above; 0.3.176 flushDeferredLogs(): lines formatted at their gated deferLogf sites',
+ 'PREPARE worker':'warning/error: the prepare worker watchdog (once a session) or a record exception (first 4); 0.3.177', 'WATER registered':'one-off: shader registration','WATER mask patch skipped':'capped: first 8 (patch rejected or patched hash mismatch; that shader only)','GPU profile':'gated: no sample opens when off (beginFrame/poll gated)','%s':'gpu_profile report: gated as above; 0.3.176 flushDeferredLogs(): lines formatted at their gated deferLogf sites',
 }
 def conditions(s,pos):
     out=[];j=max(s.rfind(';',0,pos),s.rfind('{',0,pos),s.rfind('}',0,pos));out.append(s[j+1:pos])
@@ -109,7 +109,7 @@ print('PASS Diagnostics=0 audit: every periodic line gated, only start-up/settin
 # are deferLogf, written by flushDeferredLogs() from endFrame(). Counterfactual: with deferLogf
 # turned back into logf the audit must find those lines.
 SPAN_FILES=['world_renderer.h','world_shadow_experiment.inl','world_point_rendering.inl','world_replay_probe.inl','world_rigid_memory.inl','world_diagnostics.h']
-SPAN_ALLOWED={'WORLD DISABLED':'error (check())','GEOMETRY MEMORY':'warning: allocation deferral','WORLD pending mesh released':'event (0.3.156)',
+SPAN_ALLOWED={'PREPARE worker':'0.3.177: watchdog (once a session) / record exception (first 4)','WORLD DISABLED':'error (check())','GEOMETRY MEMORY':'warning: allocation deferral','WORLD pending mesh released':'event (0.3.156)',
  'SHADOW experiment selection allocation failed':'error','WORLD streaming retry':'capped error','WORLD staged mesh committed':'event: one per commit'}
 SPAN_DEFERRED=['MODEL GPU cache','MODEL bulk sharing','MODEL GPU policy','MODEL GPU clears','MODEL shadow actors','MODEL shadow selection','RIGID memory','RIGID event','WORLD actor packets']
 KEYWORDS={'if','for','while','switch','return','catch','sizeof','defined','decltype','static_assert','alignof','noexcept','do','else','try','new','delete'}

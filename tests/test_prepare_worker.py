@@ -4,8 +4,10 @@
 (test_prepare_worker.cpp: handover at every index, the threaded worker and join with random delays and
 stops, exception and watchdog takeover, cache independence, and the counterfactuals: state reset at the
 handover, unfiltered records, the live declaration cache after an eviction, the camera at the join),
-built O2, ASan+UBSan and TSan; and a source audit: the worker's header touches no renderer state. No game
-or GPU."""
+built O2, ASan+UBSan and TSan; and a wiring audit of the renderer side: the capture fill and publish, the
+join first in the selection, quiesce before recycling, the deferred cache clear, one prepare function, the
+frozen camera, the enable rule, the quarantine of an abandoned worker's replays, RenderProfile-only
+diagnostics. No game or GPU."""
 import sys; from pathlib import Path; sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root
 import northlight_paths as fp
 import client_fixtures  # the real client programs, from the tester's client
@@ -21,11 +23,60 @@ checks={
  'the worker header touches no renderer state (actorPrograms, declarationCache, replays, the device)':
     not any(n in worker for n in ('actorPrograms','declarationCache','replays','d->','IDirect3DDevice9','context.')),
 }
+w=fp.src('world_renderer.h').read_text();x=fp.src('world_shadow_experiment.inl').read_text();g=fp.src('world_memory_guard.inl').read_text()
+def body(text,head):
+    start=text.index(head);depth=0;i=text.index('{',start)
+    while True:
+        depth+={'{':1,'}':-1}.get(text[i],0)
+        if depth==0:return text[start:i+1]
+        i+=1
+capture=body(w,'    void captureModel(D3DPRIMITIVETYPE type,')
+select=body(x,'    void selectShadowReplays(){')
+end=body(w,'    void endFrame(bool retainPool=true){')
+release=w[w.index('    void releaseGPU(){'):];release=release[:release.index('\n')]
+reset=w[w.index('    void reset(){'):];reset=reset[:reset.index('\n')]
+trim=body(g,'    MemoryTrim trimMemory(){')
+register=body(w,'    void registerShader(IDirect3DVertexShader9* shader,uint64_t hash){')
+checks.update({
+ 'capture: the inputs filled just before a selected skinned draw joins replays, published right after':
+    'if(p->shadowSelected&&p->shadowSkinned)prepareFill(*p); /* 0.3.177: the stable selection\'s inputs */\n        replays.emplace_back(p.release());preparePublish();' in capture,
+ 'the join is the first statement of selectShadowReplays':select.split('{',1)[1].lstrip().startswith('prepareJoin();'),
+ 'quiesce before recycling: endFrame, reset (endFrame, releaseGPU), releaseGPU, trimMemory':
+    end.index('prepareQuiesce();prepareEndFrame();')<end.index('recycleReplay(')
+    and release.index('prepareQuiesce();')<release.index('prepareCaches->sampled.clear()')<release.index('releaseReplayGPU();') and reset.index('endFrame();')<reset.index('releaseGPU();')
+    and trim.index('prepareQuiesce();')<trim.index('freeReplays.clear()'),
+ 'registerShader defers the cache clear (the owner clears at its next open)':
+    'prepareCachesStale=true;' in register and 'prepareCaches->sampled.clear()' not in register and 'prepareCaches->bones.clear()' not in register,
+ 'the caches are cleared by their owner only: at open (stale), releaseGPU after quiesce':
+    w.count('prepareCaches->sampled.clear()')==1 and x.count('prepareCaches->sampled.clear()')==1
+    and 'if(prepareCachesStale.exchange(false)){prepareCaches->sampled.clear();prepareCaches->bones.clear();' in x,
+ 'one prepare function: the worker (Prepare), the join tail, the self-check and inline all call prepareRecord':
+    fp.src('prepare_worker.h').read_text().count('prepareRecord(s,p,index,c,f.inverseView,f.camera,out);')==1
+    and x.count('NorthlightActorPrepare::prepareRecord(')==3 and 'NorthlightActorPrepare::prepareRecord(state,p,index,*prepareCaches,context.inverseView,context.camera,out);prepareConsume(out);' in x,
+ 'the stable loop body exists only in prepareRecord (the legacy loop has no stable identity branch)':
+    'if(tuning.stableIdentity){' not in x and 'if(tuning.stableIdentity)prepareStable(distanceTests,distanceReused);' in x,
+ 'the worker frame copies the camera at open, and the join tail uses that copy':
+    'std::memcpy(frame.inverseView,context.inverseView,sizeof frame.inverseView);std::memcpy(frame.camera,context.camera,sizeof frame.camera);' in x
+    and 'prepareWorker.index(k),*prepareCaches,frame.inverseView,frame.camera,outputs[k]);' in x,
+ 'offload only with 6+ cores, ActorShadows=1, the stable tuning and no watchdog; RenderProfile A/B windows':
+    'bool prepareOffload()const{return prepareCores>=6&&quality.actorShadows&&selectionTuning().stableIdentity&&!prepareWorker.abandoned();}' in x
+    and 'const bool abInline=NorthlightRenderThreadProbe::profiling()&&(GetTickCount()/10000u)%2u==1u;' in x,
+ 'an abandoned worker: its replays quarantined (recycle, resize, clear) until it settles':
+    'if(prepareUnsettled()){try{prepareQuarantine.emplace_back(raw);}catch(...){} return;}' in w
+    and 'if(prepareUnsettled())for(size_t i=fit;i<replays.size();++i)recycleReplay(replays[i].release());' in w
+    and 'if(prepareUnsettled()){for(auto& p:replays)recycleReplay(p.release());for(auto& p:heldShadowReplays)recycleReplay(p.release());}' in w,
+ 'diagnostics only with RenderProfile (the fields and every clock)':
+    'if(NorthlightRenderThreadProbe::profiling())std::snprintf(prepareFields,' in x and 'prepareTimed=profileSampled();' in x,
+ 'the worker is destroyed (joined) before the replays, caches and quarantine it reads':
+    w.index('std::vector<std::unique_ptr<Replay>> replays,')<w.index('std::unique_ptr<NorthlightActorPrepare::Caches> prepareCaches=')<w.index('std::vector<std::unique_ptr<Replay>> prepareQuarantine;')<w.index('NorthlightActorPrepare::Worker<Replay> prepareWorker;'),
+})
 for name,ok in checks.items():print(('PASS ' if ok else 'FAIL ')+name)
 assert all(checks.values())
 with tempfile.TemporaryDirectory(prefix='northlight-prepare-worker-') as tmp:
     p=Path(tmp);(p/'d3d9.h').write_text(stub);client_fixtures.actor_client_programs(p)
-    (p/'test_prepare_worker.cpp').write_text((HERE/'test_prepare_worker.cpp').read_text().replace('/*SYNTHETIC_PROGRAMS*/',code))
+    xs=fp.src('world_shadow_experiment.inl').read_text()
+    block=xs[xs.index('    // ---- 0.3.177 (r83 a1-prepare)'):xs.index('    // Stable per-actor quota (see actor_shadow_selection.h).')]
+    (p/'test_prepare_worker.cpp').write_text((HERE/'test_prepare_worker.cpp').read_text().replace('/*SYNTHETIC_PROGRAMS*/',code).replace('/*PREPARE_BLOCK*/',block))
     four=str(client_fixtures.four_bone_vs3())
     for label,flags,mode in (('O2',['-O2'],'full'),('asan',['-O1','-g','-fsanitize=address,undefined','-fno-omit-frame-pointer'],'full'),('tsan',['-O1','-g','-fsanitize=thread'],'tsan')):
         exe=p/('test-'+label)
