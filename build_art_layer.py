@@ -6,7 +6,10 @@
 The input is the client's archive chain without our own letter (so a rebuild never stacks on an
 installed art layer). Steps, each on the previous step's archive, as the HD chain was built:
 
-1. relighting   build_lighting.relight: new outdoor profiles with the tuned colour and fog bands
+1. relighting   build_lighting.relight: new outdoor profiles with the tuned colour and fog bands,
+   then build_lighting.retime: their bands' key times moved onto Northlight's sun and moon
+   (sunset colour at 20:15, night by 21:00, dawn from 04:30; two-key, constant and unrecognised
+   bands unchanged), reported as its own step `retime`
 2. mulgore      warm prairie bands (any client) + the HD Mulgore sky without its sun (HD sky only)
 3. stormwind    denser day fog (any client) + the HD Stormwind sky without its sun   (HD sky only)
 4. orgrimmar    the HD Orgrimmar sky without its sun                                 (HD sky only)
@@ -77,11 +80,14 @@ def build(client, output, world_cache, locale=None, letter='z', archives='all'):
         tables = {n: DBC(assets.read(DBC_NAME.format(n))) for n in build_lighting.TABLES}
         chain_skybox = assets.read(SKYBOX)
         changes, skipped, zones = build_lighting.relight(tables)
+        retimed = build_lighting.retime(tables, [c['new'] for c in changes.values()])
         payload = {DBC_NAME.format(n): t.bytes() for n, t in tables.items()}
         last = None   # the last step's archive while payload is exactly its content
         report['steps'].append({'step': 'relighting', 'profiles': len(changes), 'skipped_incomplete_profiles': skipped,
                                 'light_volumes': zones,
                                 'sources': {n: assets.origin(DBC_NAME.format(n)) for n in build_lighting.TABLES}})
+        report['steps'].append({'step': 'retime', **{k: v for k, v in retimed.items() if k != 'rows'}})
+        report['retimed_rows'] = retimed['rows']
         steps = [
             ('mulgore', lambda s, o: build_mulgore_lighting.build(s, o, client, assets, chain_skybox, fog)),
             ('stormwind', lambda s, o: build_stormwind_single_sun.build(s, o, 'stormwind', assets, fog)),

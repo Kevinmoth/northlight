@@ -8,6 +8,7 @@ test_ao_fold.py
 test_art_layer.py
 test_async_memory_diagnostics.py
 test_backend_proxy.py
+test_band_retime.py
 test_cache_shadow_optimizations.py
 test_cache_variant.py
 test_camera_upstream_capture.py
