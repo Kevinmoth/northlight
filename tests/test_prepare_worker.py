@@ -39,7 +39,7 @@ trim=body(g,'    MemoryTrim trimMemory(){')
 register=body(w,'    void registerShader(IDirect3DVertexShader9* shader,uint64_t hash){')
 checks.update({
  'capture: the inputs filled just before a selected skinned draw joins replays, published right after':
-    'if(p->shadowSelected&&p->shadowSkinned)prepareFill(*p); /* 0.3.177: the stable selection\'s inputs */\n        replays.emplace_back(p.release());preparePublish();' in capture,
+    'if(p->shadowSelected&&p->shadowSkinned)prepareFill(*p,metadata); /* 0.3.177: the stable selection\'s inputs */\n        replays.emplace_back(p.release());preparePublish();' in capture,
  'the join is the first statement of selectShadowReplays':select.split('{',1)[1].lstrip().startswith('prepareJoin();'),
  'quiesce before recycling: endFrame, reset (endFrame, releaseGPU), releaseGPU, trimMemory':
     end.index('prepareQuiesce();prepareEndFrame();')<end.index('recycleReplay(')
@@ -70,6 +70,15 @@ checks.update({
     and 'if(prepareRearms<PrepareRearms&&GetTickCount()-prepareAbandonTick>=PrepareRearmAfterMs&&prepareWorker.rearm()){' in x
     and 'static constexpr unsigned PrepareRearms=4;static constexpr DWORD PrepareRearmAfterMs=10000;' in x and x.count('prepareWorker.rearm()')==1
     and '(re-arms %u of %u)' in x and 'prepareRearms=%u' in x,
+ 'T1 (0.3.179): prepareFill takes the capture metadata\'s program: no actorPrograms lookup, no shared_ptr copy':
+    (lambda f:'actorPrograms' not in f and 'std::shared_ptr' not in f and 'p.program=metadata.program.get();' in f)(body(x,'    void prepareFill(Replay& p,const CaptureShader& metadata){'))
+    and 'const NorthlightActorDeformation::Program* program=nullptr;' in w and 'metadata.program=std::make_shared<const NorthlightActorDeformation::Program>(std::move(program));\n                actorPrograms.emplace(shader,metadata.program);' in w,
+ 'T1: registerShader retires erased programs; they are released only after the recycle, settled, with no quarantine':
+    'retireProgram(std::move(old->second.program));' in register and 'retireProgram(std::move(program->second));actorPrograms.erase(program);' in register
+    and w.count('retiredPrograms.clear()')+x.count('retiredPrograms.clear()')==1
+    and 'if(prepareUnsettled()||!prepareQuarantine.empty())return;\n        retiredPrograms.clear();' in x
+    and end.index('recycleReplay(')<end.index('prepareFrameRelease(); /* 0.3.179: after the recycle */')
+    and 'if(replays.empty()&&heldShadowReplays.empty())prepareFrameRelease();' in release,
  'diagnostics only with RenderProfile (the fields and every clock)':
     'if(NorthlightRenderThreadProbe::profiling())std::snprintf(prepareFields,' in x and 'prepareTimed=profileSampled();' in x,
  'the worker is destroyed (joined) before the replays, caches and quarantine it reads':
@@ -81,7 +90,8 @@ with tempfile.TemporaryDirectory(prefix='northlight-prepare-worker-') as tmp:
     p=Path(tmp);(p/'d3d9.h').write_text(stub);client_fixtures.actor_client_programs(p)
     xs=fp.src('world_shadow_experiment.inl').read_text()
     block=xs[xs.index('    // ---- 0.3.177 (r83 a1-prepare)'):xs.index('    // Stable per-actor quota (see actor_shadow_selection.h).')]
-    (p/'test_prepare_worker.cpp').write_text((HERE/'test_prepare_worker.cpp').read_text().replace('/*SYNTHETIC_PROGRAMS*/',code).replace('/*PREPARE_BLOCK*/',block))
+    wr=fp.src('world_renderer.h').read_text();retire=body(wr,'    void retireProgram(std::shared_ptr<const NorthlightActorDeformation::Program>&& program){')
+    (p/'test_prepare_worker.cpp').write_text((HERE/'test_prepare_worker.cpp').read_text().replace('/*SYNTHETIC_PROGRAMS*/',code).replace('/*PREPARE_BLOCK*/',block).replace('/*RETIRE_PROGRAM*/',retire))
     four=str(client_fixtures.four_bone_vs3())
     for label,flags,mode in (('O2',['-O2'],'full'),('asan',['-O1','-g','-fsanitize=address,undefined','-fno-omit-frame-pointer'],'full'),('tsan',['-O1','-g','-fsanitize=thread'],'tsan')):
         exe=p/('test-'+label)
@@ -90,4 +100,8 @@ with tempfile.TemporaryDirectory(prefix='northlight-prepare-worker-') as tmp:
         if out.returncode or 'WARNING' in out.stderr or 'ERROR' in out.stderr:
             sys.exit(f'{label} failed ({out.returncode}):\n{out.stdout}{out.stderr[-6000:]}')
         print(f'[{label}]',out.stdout.strip(),flush=True)
+        if label=='asan': # 0.3.179 (T1) counterfactual: a program freed at the re-register is read after it
+            bad=subprocess.run([str(exe),four,'lifetime-counterfactual'],capture_output=True,text=True)
+            assert bad.returncode!=0 and 'heap-use-after-free' in bad.stderr,('the freed-program counterfactual must fail under ASan',bad.returncode,bad.stderr[-2000:])
+            print('[asan] counterfactual: a program freed at the re-register: heap-use-after-free, as expected',flush=True)
 print('PASS prepare worker: model, threads and counterfactuals')

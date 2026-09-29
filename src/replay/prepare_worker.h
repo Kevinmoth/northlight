@@ -38,9 +38,12 @@ struct Output {Draw item;bool tested=false;State after;};
 // record) with constantGroup, originalShader, decl, mesh(), shared, constants and, filled at capture,
 // program (the program handle, null: not an actor program), elements/elementCount (a copy of the
 // declaration) and declared (program && the declaration was read).
+// The record's program: a handle (tests of the 0.3.177 layout) or the raw pointer (0.3.179 T1).
+inline const NorthlightActorDeformation::Program* programOf(const std::shared_ptr<const NorthlightActorDeformation::Program>& p){return p.get();}
+inline const NorthlightActorDeformation::Program* programOf(const NorthlightActorDeformation::Program* p){return p;}
 template<class Record> void prepareRecord(State& s,const Record& p,std::size_t index,Caches& caches,const float* inverseView,const float* camera,Output& out){
     Draw& item=out.item;item=Draw{};item.index=index;item.bytes=p.mesh().byteSize();item.group=p.constantGroup;
-    const NorthlightActorDeformation::Program* program=p.program.get();const bool declared=p.declared&&program;
+    const NorthlightActorDeformation::Program* program=programOf(p.program);const bool declared=p.declared&&program;
     const D3DVERTEXELEMENT9* elements=declared?p.elements.data():nullptr;const UINT count=declared?p.elementCount:0;
     const void* shader=p.originalShader;const void* decl=p.decl;
     if(p.constantGroup==s.previousGroup&&shader==s.previousShader&&decl==s.previousDecl){

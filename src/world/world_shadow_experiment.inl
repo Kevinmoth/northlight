@@ -190,13 +190,19 @@
             NorthlightActorPrepare::prepareRecord(state,*prepareWorker.record(k),prepareWorker.index(k),*prepareCheckCaches,frame.inverseView,frame.camera,check);
             prepareStats.mismatch+=!NorthlightActorPrepare::same(check,outputs[k]);}
     }
+    // 0.3.179: end of endFrame, after the recycle: what the frame's replays pointed at may go once the
+    // worker has settled (else at a later frame's end).
+    void prepareFrameRelease(){
+        if(prepareUnsettled()||!prepareQuarantine.empty())return;
+        retiredPrograms.clear();
+    }
     // 0.3.177 (r83): the prepare inputs of a selected skinned draw, at capture (just before it joins
-    // replays): its program handle and a copy of its declaration; declared: program && the declaration
-    // was read (the stable selection's declared()).
-    void prepareFill(Replay& p){
+    // replays): its program (0.3.179: the capture metadata's) and a copy of its declaration; declared:
+    // program && the declaration was read (the stable selection's declared()).
+    void prepareFill(Replay& p,const CaptureShader& metadata){
         const bool sample=prepareTimed&&prepareFrame==PrepareFrame::Worker&&!(prepareSerial&15u); /* handoffUs: 1 in 16 */
         const auto start=sample?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
-        auto program=actorPrograms.find(p.originalShader);p.program=program!=actorPrograms.end()?program->second:nullptr;
+        p.program=metadata.program.get(); /* 0.3.179 (T1): the capture metadata's (the program map's object): no lookup, no reference */
         const D3DVERTEXELEMENT9* elements=nullptr;UINT count=0;
         p.declared=p.program&&declarationCache.get(p.decl,elements,count)&&count<=p.elements.size();
         p.elementCount=p.declared?count:0;if(p.declared)std::copy(elements,elements+count,p.elements.begin());

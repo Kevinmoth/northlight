@@ -38,7 +38,8 @@ static Program compiled(const std::uint32_t* words,std::size_t n){Program p;bool
 struct Rec {
     unsigned constantGroup=0;IDirect3DVertexShader9* originalShader=nullptr;IDirect3DVertexDeclaration9* decl=nullptr;
     std::shared_ptr<const Mesh> shared;Mesh snapshot;const float* constants=nullptr;std::vector<float> storage;
-    std::shared_ptr<const Program> program;std::array<D3DVERTEXELEMENT9,MAXD3DDECLLENGTH+1> elements{};UINT elementCount=0;bool declared=false;
+    const Program* program=nullptr; /* 0.3.179 (T1): the capture metadata's program */
+    std::array<D3DVERTEXELEMENT9,MAXD3DDECLLENGTH+1> elements{};UINT elementCount=0;bool declared=false;
     bool shadowSelected=true,shadowSkinned=true,boneKnown=false;float bone=NAN;
     const Mesh& mesh()const{return shared?*shared:snapshot;}
 };
@@ -73,9 +74,9 @@ struct World {
         decls[0].layout=gameLayout;decls[1].layout={{0,0,2,0,0,0},{0xff,0,17,0,0,0}}; /* no BLENDINDICES */
         std::mt19937 rng(177);for(unsigned i=0;i<48;++i)pool.push_back(mesh(rng,3+rng()%24,rng()%6,rng()%4==0));
     }
-    // The capture-side fill (the renderer's prepareFill): the program handle and a copy of the declaration.
+    // The capture-side fill (the renderer's prepareFill): the program and a copy of the declaration.
     void fill(Rec& r){
-        r.program=programs[(reinterpret_cast<std::uintptr_t>(r.originalShader)-0x1000)/32];
+        r.program=programs[(reinterpret_cast<std::uintptr_t>(r.originalShader)-0x1000)/32].get();
         const D3DVERTEXELEMENT9* e=nullptr;UINT n=0;r.declared=r.program&&declarationCache.get(r.decl,e,n);
         if(r.declared){std::copy(e,e+n,r.elements.begin());r.elementCount=n;}else r.elementCount=0;
     }
@@ -311,6 +312,9 @@ struct Renderer {
     using Replay=Rec;
     std::vector<std::unique_ptr<Rec>> replays;
     std::unordered_map<IDirect3DVertexShader9*,std::shared_ptr<const Program>> actorPrograms;
+    struct CaptureShader {std::shared_ptr<const Program> program;};std::unordered_map<IDirect3DVertexShader9*,CaptureShader> captureShaders;
+    std::vector<std::shared_ptr<const Program>> retiredPrograms;
+/*RETIRE_PROGRAM*/
     NorthlightVertexDeclarations::Cache& declarationCache;
     struct {float inverseView[16]={},camera[3]={};} context;
     struct {unsigned actorShadows=1;} quality;
@@ -324,6 +328,12 @@ struct Renderer {
     NorthlightActorPrepare::Worker<Rec,Faulty> prepareWorker; /* passes through unless a test stalls or throws */
     explicit Renderer(NorthlightVertexDeclarations::Cache& d):declarationCache(d){prepareWorker.setWatchdogMs(2000);}
     void recycleReplay(Rec* raw){if(prepareUnsettled()){prepareQuarantine.emplace_back(raw);return;}delete raw;}
+    // registerShader's program part: the erased entries' programs are retired (0.3.179 T1), or (the
+    // counterfactual) freed at once.
+    void reregister(IDirect3DVertexShader9* shader,bool deferred){
+        auto old=captureShaders.find(shader);if(old!=captureShaders.end()){if(deferred)retireProgram(std::move(old->second.program));captureShaders.erase(old);}
+        auto program=actorPrograms.find(shader);if(program!=actorPrograms.end()){if(deferred)retireProgram(std::move(program->second));actorPrograms.erase(program);}
+    }
 /*PREPARE_BLOCK*/
 };
 // The production integration over random frames: captures with random delays (fill, publish), the
@@ -332,7 +342,7 @@ struct Renderer {
 // (registerShader) and the RenderProfile A/B windows. No resync, no self-check mismatch, no log.
 static void integration(World& world,unsigned frames,unsigned maxGroups){
     std::mt19937 rng(1776);Renderer r(world.declarationCache);auto referenceCaches=std::make_unique<Caches>();
-    for(unsigned k=0;k<world.programs.size();++k)if(world.programs[k])r.actorPrograms[World::shader(k)]=world.programs[k];
+    for(unsigned k=0;k<world.programs.size();++k)if(world.programs[k])r.actorPrograms[World::shader(k)]=r.captureShaders[World::shader(k)].program=world.programs[k];
     std::size_t modes[3]={},selections=0,draws=0,quiesced=0,worker=0,joined=0;unsigned mismatch=0;
     for(unsigned f=0;f<frames;++f){
         auto records=world.frame(rng,1+rng()%maxGroups);const Camera c=camera(rng);
@@ -340,9 +350,9 @@ static void integration(World& world,unsigned frames,unsigned maxGroups){
         NorthlightRenderThreadProbe::on=rng()%3==0;r.sampled=NorthlightRenderThreadProbe::on&&rng()%2;tickNow=DWORD(rng()%100000);
         const bool trim=rng()%12==0;const std::size_t trimAt=records.empty()?0:rng()%records.size();
         for(std::size_t i=0;i<records.size();++i){auto rec=std::move(records[i]);
-            rec->program.reset();rec->declared=false;rec->elementCount=0; /* the renderer's fill below */
+            rec->program=nullptr;rec->declared=false;rec->elementCount=0; /* the renderer's fill below */
             if(rng()%4==0)delay(rng);
-            if(rec->shadowSelected&&rec->shadowSkinned)r.prepareFill(*rec);
+            if(rec->shadowSelected&&rec->shadowSkinned)r.prepareFill(*rec,r.captureShaders[rec->originalShader]);
             r.replays.emplace_back(std::move(rec));r.preparePublish();
             if(rng()%50==0)r.prepareCachesStale=true; /* registerShader */
             if(trim&&i==trimAt){r.prepareQuiesce();++quiesced;}}
@@ -371,15 +381,15 @@ static void integration(World& world,unsigned frames,unsigned maxGroups){
 // equals inline.
 static void rearmCap(World& world){
     std::mt19937 rng(1777);Renderer r(world.declarationCache);auto referenceCaches=std::make_unique<Caches>();
-    for(unsigned k=0;k<world.programs.size();++k)if(world.programs[k])r.actorPrograms[World::shader(k)]=world.programs[k];
+    for(unsigned k=0;k<world.programs.size();++k)if(world.programs[k])r.actorPrograms[World::shader(k)]=r.captureShaders[World::shader(k)].program=world.programs[k];
     r.prepareWorker.setWatchdogMs(5);NorthlightRenderThreadProbe::on=false;tickNow=1000;
     auto frame=[&](bool stall){
         std::vector<std::unique_ptr<Rec>> records;
         do records=world.frame(rng,8);while(published(records).records.empty());
         const Camera c=camera(rng);std::memcpy(r.context.inverseView,c.inverseView,64);std::memcpy(r.context.camera,c.camera,12);
-        for(std::size_t i=0;i<records.size();++i){auto rec=std::move(records[i]);rec->program.reset();rec->declared=false;rec->elementCount=0;
+        for(std::size_t i=0;i<records.size();++i){auto rec=std::move(records[i]);rec->program=nullptr;rec->declared=false;rec->elementCount=0;
             if(stall&&rec->shadowSelected&&rec->shadowSkinned&&stallAt.load()==SIZE_MAX)stallAt=i;
-            if(rec->shadowSelected&&rec->shadowSkinned)r.prepareFill(*rec);
+            if(rec->shadowSelected&&rec->shadowSkinned)r.prepareFill(*rec,r.captureShaders[rec->originalShader]);
             r.replays.emplace_back(std::move(rec));r.preparePublish();}
         if(stall)std::this_thread::sleep_for(std::chrono::milliseconds(2)); /* the worker is inside the stalled record */
         r.prepareJoin();const std::string mode=r.prepareStats.mode;
@@ -402,13 +412,44 @@ static void rearmCap(World& world){
     assert(r.prepareRearms==4&&r.prepareWorker.abandoned()&&r.logs==9); /* 5 watchdog lines, 4 re-arm lines */
     std::printf("watchdog re-arm: 5 abandons, re-armed 4 times (none before 10 s, none after the cap), every frame equal to inline\n");
 }
+// 0.3.179 (T1): a program erased by registerShader mid-frame is retired, not freed: the frame's records
+// (and an abandoned worker inside one of them) keep reading it; it goes after the recycle once the worker
+// settled. The programs are owned by the renderer's maps only. counterfactual: freed at the re-register
+// (ASan reports the use-after-free; test_prepare_worker.py expects that).
+static void programLifetime(World& world,bool counterfactual){
+    std::mt19937 rng(1791);Renderer r(world.declarationCache);auto referenceCaches=std::make_unique<Caches>();
+    for(unsigned k=0;k<world.programs.size();++k)if(world.programs[k]){auto own=std::make_shared<const Program>(*world.programs[k]);r.actorPrograms[World::shader(k)]=r.captureShaders[World::shader(k)].program=own;}
+    r.prepareWorker.setWatchdogMs(5);NorthlightRenderThreadProbe::on=false;tickNow=1000;
+    std::vector<std::unique_ptr<Rec>> records;do records=world.frame(rng,10);while(published(records).records.size()<4);
+    const Camera c=camera(rng);std::memcpy(r.context.inverseView,c.inverseView,64);std::memcpy(r.context.camera,c.camera,12);
+    IDirect3DVertexShader9* retired=nullptr;
+    for(std::size_t i=0;i<records.size();++i){auto rec=std::move(records[i]);rec->program=nullptr;rec->declared=false;rec->elementCount=0;
+        if(rec->shadowSelected&&rec->shadowSkinned){if(stallAt.load()==SIZE_MAX&&r.captureShaders[rec->originalShader].program){stallAt=i;retired=rec->originalShader;}
+            r.prepareFill(*rec,r.captureShaders[rec->originalShader]);}
+        r.replays.emplace_back(std::move(rec));r.preparePublish();}
+    std::this_thread::sleep_for(std::chrono::milliseconds(2)); /* the worker is inside the stalled record */
+    r.reregister(retired,!counterfactual); /* a new shader at the address: its program leaves the maps */
+    r.prepareJoin();assert(std::string(r.prepareStats.mode)=="watchdog");
+    std::size_t tests=0,reused=0;r.actorShadowDraws.clear();r.prepareStable(tests,reused); /* reads the retired program */
+    const auto p=published(r.replays);const std::size_t n=p.records.size();std::vector<Output> reference(n);
+    prepare(p,0,n,*referenceCaches,c.inverseView,c.camera,reference);
+    for(std::size_t k=0;k<n;++k){Output got;got.item=r.actorShadowDraws[k];got.tested=p.records[k]->boneKnown;got.after=reference[k].after;assert(NorthlightActorPrepare::same(got,reference[k]));}
+    r.prepareQuiesce();r.prepareEndFrame();for(auto& rec:r.replays)r.recycleReplay(rec.release());r.replays.clear();r.prepareFrameRelease();
+    assert(!r.retiredPrograms.empty()); /* the worker is still inside a record that points at it */
+    std::this_thread::sleep_for(std::chrono::milliseconds(40));stallAt=SIZE_MAX;
+    r.prepareQuiesce();r.prepareEndFrame();r.prepareFrameRelease(); /* settled: quarantine recycled, then the programs go */
+    assert(r.retiredPrograms.empty()&&r.prepareQuarantine.empty());
+    std::printf("program lifetime: a program re-registered mid-frame stays alive for the frame's records and the abandoned worker's record, released once settled\n");
+}
 int main(int argc,char** argv){
     assert(argc>2);World world(argv[1]);const bool tsan=std::string(argv[2])=="tsan";
+    if(std::string(argv[2])=="lifetime-counterfactual"){programLifetime(world,true);return 0;}
     loopIdentity(world,tsan?40:600);handover(world,tsan?4:24);evictedDeclaration(world);
     threaded<NorthlightActorPrepare::Prepare>(world,tsan?10000:3000,tsan?3:12,false);
     threaded<Faulty>(world,tsan?2000:1500,tsan?3:12,true);
     integration(world,tsan?3000:2000,tsan?4:16);
     rearmCap(world);
+    programLifetime(world,false);
     watchdog(world);
     std::puts("PASS prepare worker: handover at every index, threaded worker and join, exception and watchdog takeover equal to inline; counterfactuals fail");
 }
