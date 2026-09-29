@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # northlight-test: requires=dll
-"""0.3.181 (r90) needles on the built DLL (renderer/frd9.dll with its frd9.pdb), read
+"""0.3.181 (r90) and r89 S1/S2 needles on the built DLL (renderer/frd9.dll with its frd9.pdb), read
 with lldb and objdump; nothing is run. memcmp resolves to the one definition in renderer.cpp (zig
 compiler_rt's byte loop is not linked), every call site calls it, and its body contains no call and no
 instruction beyond i386 + SSE2 + tzcnt. compiler_rt's bcmp stays linked with no caller, as before.
-The import table has no mem* entry beyond memchr (as before), and the exports are exactly frd9.def's."""
+The import table has no mem* entry beyond memchr (as before), and the exports are exactly frd9.def's.
+The snapshot code has a prefetcht0."""
 import sys; from pathlib import Path; sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root
 import northlight_paths as fp
 import json,re,shutil,struct,subprocess
@@ -52,6 +53,7 @@ checks={
  'its body is i386 + SSE2 + tzcnt only':bool(mnemonics) and mnemonics<=ALLOWED,
  'imports: no mem*/bcmp beyond memchr':{n for _,n in imports if n.startswith('mem') or n=='bcmp'}<={'memchr'},
  'exports are exactly frd9.def':exports==declared,
+ 'the snapshot prediction prefetches (prefetcht0 present)':any('prefetcht0' in l for l in dis),
 }
 for name,ok in checks.items():print(('PASS ' if ok else 'FAIL ')+name)
 print(json.dumps({'memcmp':sorted(memcmps),'calls':calls,'bodyInstructions':len(body),'mnemonics':sorted(mnemonics),'unexpected':sorted(mnemonics-ALLOWED)}))
