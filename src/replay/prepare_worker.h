@@ -155,8 +155,10 @@ private:
     void loop(){
         std::uint64_t mine=0;
         for(;;){
+            // A newer frame, open or already stopping (stopped before this thread took the lock: run()
+            // acknowledges it at once, having touched nothing).
             {std::unique_lock<std::mutex> lock(mutex_);blocked_=true;
-             wake_.wait(lock,[&]{const auto w=word_.load(std::memory_order_seq_cst);return shutdown_||((w&3)==Open&&(w>>2)!=mine);});
+             wake_.wait(lock,[&]{const auto w=word_.load(std::memory_order_seq_cst);return shutdown_||(((w&3)==Open||(w&3)==Stopping)&&(w>>2)!=mine);});
              blocked_=false;if(shutdown_)return;mine=word_.load(std::memory_order_acquire)>>2;}
             run(mine);
         }

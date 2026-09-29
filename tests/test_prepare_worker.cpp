@@ -21,6 +21,7 @@
 #include <cstdlib>
 #include <random>
 #include <string>
+#include <unordered_map>
 #include <vector>
 using namespace NorthlightActorDeformation;
 /*SYNTHETIC_PROGRAMS*/
@@ -33,7 +34,7 @@ struct Rec {
     unsigned constantGroup=0;IDirect3DVertexShader9* originalShader=nullptr;IDirect3DVertexDeclaration9* decl=nullptr;
     std::shared_ptr<const Mesh> shared;Mesh snapshot;const float* constants=nullptr;std::vector<float> storage;
     std::shared_ptr<const Program> program;std::array<D3DVERTEXELEMENT9,MAXD3DDECLLENGTH+1> elements{};UINT elementCount=0;bool declared=false;
-    bool selected=true,skinned=true;
+    bool shadowSelected=true,shadowSkinned=true,boneKnown=false;float bone=NAN;
     const Mesh& mesh()const{return shared?*shared:snapshot;}
 };
 struct FakeDecl final:IDirect3DVertexDeclaration9 {
@@ -86,10 +87,75 @@ struct World {
                         r->storage[4*row+3]=float(int(rng()%200)-100);r->storage[4*(row+1)+3]=float(int(rng()%200)-100);r->storage[4*(row+2)+3]=float(rng()%50);}
                     bank=&r->storage;}
                 r->constants=bank->data(); /* a group shares its bank: earlier records' storage */
-                r->selected=rng()%8!=0;r->skinned=rng()%10!=0;
-                if(r->selected&&r->skinned)fill(*r);
+                r->shadowSelected=rng()%8!=0;r->shadowSkinned=rng()%10!=0;
+                if(r->shadowSelected&&r->shadowSkinned)fill(*r);
                 out.push_back(std::move(r));}}
         return out;
+    }
+};
+// ---- the 0.3.176 selectStableActors loop, verbatim (after the program-handle commit): the identity
+// reference of prepareRecord. Its renderer members, with the same caches, programs and declaration cache.
+struct Reference {
+    using Replay=Rec;
+    std::vector<std::unique_ptr<Rec>>& replays;std::unordered_map<IDirect3DVertexShader9*,std::shared_ptr<const Program>> actorPrograms;
+    NorthlightVertexDeclarations::Cache& declarationCache;struct {float inverseView[16],camera[3];} context;
+    NorthlightActorDeformation::SampledVertexCache& sampledVertices;NorthlightActorDeformation::RigidBoneCache& rigidBones;
+    std::vector<NorthlightActorShadowSelection::Draw> actorShadowDraws;
+    struct {bool stationaryHint(std::uint64_t,const float*){return false;}} actorShadowHistory;
+    static NorthlightActorShadowSelection::Tuning selectionTuning(){return NorthlightActorShadowSelection::active();}
+    Reference(std::vector<std::unique_ptr<Rec>>& r,NorthlightVertexDeclarations::Cache& d,Caches& c):replays(r),declarationCache(d),sampledVertices(c.sampled),rigidBones(c.bones){}
+    void run(std::size_t& distanceTests,std::size_t& distanceReused){actorShadowDraws.clear();
+        unsigned previousGroup=UINT_MAX;IDirect3DVertexShader9* previousShader=nullptr;
+        IDirect3DVertexDeclaration9* previousDecl=nullptr;float previousDistance=0,previousAt[3]={};bool previousKnown=false,groupRigid=true,groupStationary=false;unsigned groupDraw=0;
+        const auto tuning=selectionTuning();
+        for(size_t index=0;index<replays.size();++index){const auto& p=*replays[index];
+            if(!p.shadowSelected||!p.shadowSkinned)continue;
+            NorthlightActorShadowSelection::Draw item;item.index=index;item.bytes=p.mesh().byteSize();item.group=p.constantGroup;
+            // Program and declaration lookups only for draws that test a distance
+            // or a palette (reused-distance draws of multi-bone groups need none).
+            auto program=actorPrograms.end();const D3DVERTEXELEMENT9* elements=nullptr;UINT count=0;int declaredState=-1;
+            auto declared=[&]{if(declaredState<0){program=actorPrograms.find(p.originalShader);declaredState=program!=actorPrograms.end()&&declarationCache.get(p.decl,elements,count);}return declaredState==1;};
+            if(p.constantGroup==previousGroup&&p.originalShader==previousShader&&p.decl==previousDecl){
+                item.known=previousKnown;item.distanceSquared=previousDistance;std::memcpy(item.at,previousAt,sizeof item.at);++distanceReused;
+            }else{
+                ++distanceTests;
+                item.known=declared()&&sampledVertices.distance(*program->second,p.mesh(),p.shared,p.decl,elements,count,
+                    p.constants,context.inverseView,context.camera,item.distanceSquared,item.at);
+            }
+            // A group is rigid only if every draw is: after its first multi-bone
+            // draw the remaining draws need no palette test. Only a group's first
+            // draw supplies the actor identity key.
+            const bool first=p.constantGroup!=previousGroup;if(first)groupRigid=true;
+            item.bone=groupRigid&&declared()?rigidBones.bone(*program->second,p.mesh(),p.shared,p.decl,elements,count):NAN;item.rigid=!std::isnan(item.bone);
+            {Replay& stored=*replays[index];stored.boneKnown=groupRigid&&declared();stored.bone=item.bone;} /* 0.3.176 (S2): rigidObserveGroup reuses it */
+            groupRigid=item.rigid;
+            if(tuning.stableIdentity){
+                // Stable per-draw identity: the snapshot-cache entry (VB/IB identity,
+                // range, base, declaration) with the shader; a shape hash only for
+                // uncached draws. The actor key is the smallest key of its draws.
+                std::uint64_t key=14695981039346656037ull;auto mix=[&](uint64_t n){key=(key^n)*1099511628211ull;};
+                mix(reinterpret_cast<uintptr_t>(p.originalShader));mix(reinterpret_cast<uintptr_t>(p.decl));
+                if(p.shared)mix(reinterpret_cast<uintptr_t>(p.shared.get()));else{mix(p.mesh().vertexCount);mix(p.mesh().primitiveCount);mix(item.bytes);}
+                item.key=key;
+                // One palette root per constant group (its draws share the pose).
+                if(first){if(program==actorPrograms.end())program=actorPrograms.find(p.originalShader);
+                    // Only the audited palette template (c31.. row-major 3x4 bones, translation
+                    // in w: the skin-envelope specialization) has a provable root.
+                    item.hasRoot=program!=actorPrograms.end()&&NorthlightReplayBounds::SkinEnvelope::supports(*program->second)&&program->second->paletteBase==31&&
+                        NorthlightActorDeformation::rootWorld(*program->second,p.constants,context.inverseView,item.root);}}
+            else if(first){std::uint64_t key=14695981039346656037ull;auto mix=[&](uint64_t n){key=(key^n)*1099511628211ull;};
+                mix(reinterpret_cast<uintptr_t>(p.originalShader));mix(reinterpret_cast<uintptr_t>(p.decl));mix(p.mesh().vertexCount);mix(p.mesh().primitiveCount);mix(item.bytes);
+                item.key=key;groupDraw=0;
+                // Two extra world samples per draw (first two draws) only for actors
+                // the history marks as possibly stationary: the idle-pose check.
+                groupStationary=tuning.stationary&&!item.rigid&&item.known&&actorShadowHistory.stationaryHint(key,item.at);}
+            if(!tuning.stableIdentity){
+                if(groupStationary&&groupDraw<2&&declared())for(unsigned x=0;x<2;++x)
+                    if(NorthlightActorDeformation::sampledExtraWorld(*program->second,p.mesh(),elements,count,x,p.constants,context.inverseView,item.extra[item.extras]))++item.extras;
+                ++groupDraw;}
+            previousGroup=p.constantGroup;previousShader=p.originalShader;previousDecl=p.decl;
+            previousKnown=item.known;previousDistance=item.distanceSquared;std::memcpy(previousAt,item.at,sizeof previousAt);actorShadowDraws.push_back(item);
+        }
     }
 };
 struct Camera {float inverseView[16],camera[3];};
@@ -99,7 +165,7 @@ static Camera camera(std::mt19937& rng){Camera c{};const float yaw=float(rng()%6
 // The records the renderer publishes: selected and skinned at capture, in replays order, with their index.
 struct Published {std::vector<const Rec*> records;std::vector<std::size_t> index;};
 static Published published(const std::vector<std::unique_ptr<Rec>>& replays,bool filtered=true){
-    Published p;for(std::size_t i=0;i<replays.size();++i)if(!filtered||(replays[i]->selected&&replays[i]->skinned)){p.records.push_back(replays[i].get());p.index.push_back(i);}return p;}
+    Published p;for(std::size_t i=0;i<replays.size();++i)if(!filtered||(replays[i]->shadowSelected&&replays[i]->shadowSkinned)){p.records.push_back(replays[i].get());p.index.push_back(i);}return p;}
 // prepareRecord over [from, to) resuming from out[from-1] (from 0: a fresh state).
 static void prepare(const Published& p,std::size_t from,std::size_t to,Caches& c,const float* inverse,const float* eye,std::vector<Output>& out,bool resetState=false){
     State s=from&&!resetState?out[from-1].after:State{};
@@ -124,7 +190,7 @@ static void handover(World& world,unsigned sequences){
         // Counterfactual: every record published (small or unskinned too): the selected ones' outputs differ.
         const auto all=published(replays,false);std::vector<Output> every(all.records.size());auto caches=std::make_unique<Caches>();
         prepare(all,0,all.records.size(),*caches,c.inverseView,c.camera,every);
-        std::vector<Output> projected;for(std::size_t k=0;k<all.records.size();++k)if(all.records[k]->selected&&all.records[k]->skinned)projected.push_back(every[k]);
+        std::vector<Output> projected;for(std::size_t k=0;k<all.records.size();++k)if(all.records[k]->shadowSelected&&all.records[k]->shadowSkinned)projected.push_back(every[k]);
         unfilteredDiffer+=!equal(projected,reference,n);
     }
     assert(resetDiffer>sequences&&unfilteredDiffer>sequences/4&&hasRoot&&rigid&&known&&reused);
@@ -151,6 +217,24 @@ static void evictedDeclaration(World& world){
         cache.clear();}
     assert(differ>frames/2);std::printf("declaration copy: the live cache read after eviction differs in %zu of %zu frames\n",differ,frames);
 }
+// prepareRecord == the 0.3.176 loop: draws, the stored rigid bones and the distance counters, bit for bit.
+static void loopIdentity(World& world,unsigned frames){
+    std::mt19937 rng(1775);std::size_t draws=0,tested=0;auto caches=std::make_unique<Caches>();
+    std::unordered_map<IDirect3DVertexShader9*,std::shared_ptr<const Program>> programs;
+    for(unsigned k=0;k<world.programs.size();++k)if(world.programs[k])programs[World::shader(k)]=world.programs[k];
+    auto referenceCaches=std::make_unique<Caches>(); /* the reference's caches persist across frames, as the renderer's */
+    for(unsigned f=0;f<frames;++f){
+        auto replays=world.frame(rng,1+rng()%24);const auto p=published(replays);const std::size_t n=p.records.size();const Camera c=camera(rng);
+        Reference r(replays,world.declarationCache,*referenceCaches);r.actorPrograms=programs;std::memcpy(r.context.inverseView,c.inverseView,64);std::memcpy(r.context.camera,c.camera,12);
+        std::size_t tests=0,reusedDistances=0;r.run(tests,reusedDistances);
+        std::vector<Output> out(n);prepare(p,0,n,*caches,c.inverseView,c.camera,out);
+        assert(r.actorShadowDraws.size()==n);
+        for(std::size_t k=0;k<n;++k){Output expected;expected.item=r.actorShadowDraws[k];expected.tested=p.records[k]->boneKnown;expected.after=out[k].after;
+            assert(NorthlightActorPrepare::same(out[k],expected));assert(NorthlightActorPrepare::sameBits(&p.records[k]->bone,&out[k].item.bone,4));tested+=out[k].tested;}
+        assert(!n||(out[n-1].after.distanceTests==tests&&out[n-1].after.distanceReused==reusedDistances));draws+=n;
+    }
+    std::printf("loop identity: prepareRecord == the 0.3.176 loop over %u frames, %zu draws (%zu rigid bones tested)\n",frames,draws,tested);
+}
 // Test processes: a throw on one index, or a stall (the watchdog).
 static std::atomic<std::size_t> throwAt{SIZE_MAX},stallAt{SIZE_MAX};
 struct Faulty {template<class R> void operator()(State& s,const R& p,std::size_t index,Caches& c,const NorthlightActorPrepare::Frame& f,Output& out)const{
@@ -175,7 +259,7 @@ template<class Process> static void threaded(World& world,unsigned frames,unsign
             for(;k<cut;++k){delay(rng);bool ok=worker.publish(p.records[k],p.index[k]);assert(ok);(void)ok;}}
         context.camera[0]+=1;context.inverseView[12]+=1; /* the context changes after the frame opened */
         if(rng()%3==0)std::this_thread::sleep_for(std::chrono::microseconds(rng()%300)); /* stop after completion */
-        const auto r=worker.stop();if(r.timedOut||r.published!=k||r.done>k)std::printf("DEBUG timedOut=%d published=%u k=%zu done=%u failed=%d\n",r.timedOut,r.published,k,r.done,r.failed);assert(!r.timedOut&&r.published==k&&r.done<=k);beforeFirst+=k==0;unpublished+=n-k;failed+=r.failed;
+        const auto r=worker.stop();if(r.timedOut||r.published!=k||r.done>k)std::printf("STOP unexpected: timedOut=%d published=%u k=%zu done=%u failed=%d\n",r.timedOut,r.published,k,r.done,r.failed);assert(!r.timedOut&&r.published==k&&r.done<=k);beforeFirst+=k==0;unpublished+=n-k;failed+=r.failed;
         std::vector<Output> out(n);
         for(std::size_t j=0;j<r.done;++j)out[j]=worker.outputs()[j];
         prepare(p,r.done,n,*caches,frame.inverseView,frame.camera,out);
@@ -209,7 +293,7 @@ static void watchdog(World& world){
 }
 int main(int argc,char** argv){
     assert(argc>2);World world(argv[1]);const bool tsan=std::string(argv[2])=="tsan";
-    handover(world,tsan?4:24);evictedDeclaration(world);
+    loopIdentity(world,tsan?40:600);handover(world,tsan?4:24);evictedDeclaration(world);
     threaded<NorthlightActorPrepare::Prepare>(world,tsan?10000:3000,tsan?3:12,false);
     threaded<Faulty>(world,tsan?2000:1500,tsan?3:12,true);
     watchdog(world);
