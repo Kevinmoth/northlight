@@ -29,7 +29,8 @@ text=fixture+r'''
 #include "world_gi.h"
 using V=NorthlightGI::Vec3;
 namespace NorthlightReplayBounds {struct Bounds {float low[3]={},high[3]={};bool valid=false;};struct WorkInfo {};struct Prepared {};}
-namespace NorthlightActorDeformation {struct Program {};} /* 0.3.177: the Replay's program handle */
+namespace NorthlightActorDeformation {struct Program {};} /* 0.3.177: the Replay's program */
+namespace NorthlightActorPrepare {struct DeclCopy {UINT count=0;D3DVERTEXELEMENT9 elements[MAXD3DDECLLENGTH+1]={};};} /* 0.3.179: the Replay's declaration copy */
 using BOOL=int;constexpr DWORD D3DTADDRESS_WRAP=1;
 struct ModelRef:IRef{unsigned refs=1,releases=0;unsigned AddRef()override{return ++refs;}unsigned Release()override{++releases;return --refs;}};
 using IDirect3DVertexShader9=ModelRef;using IDirect3DBaseTexture9=ModelRef;
