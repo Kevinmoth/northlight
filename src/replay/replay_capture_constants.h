@@ -1,4 +1,5 @@
 #pragma once
+#include <cassert>
 #include "captured_constant_epoch.h"
 #include "replay_pose_groups.h"
 
@@ -119,6 +120,82 @@ template<class Replay,class Fetch,class FetchFloats> bool captureBlocks(Replay& 
     if(!fetch())return false;
     const auto after=read(context,reader);
     if(NorthlightConstantEpoch::exact(before,after))p.constantStamp=after;
+    return true;
+}
+// 0.3.180 (C0): the self-check apart from the diagnostic Stats. On a self-check frame every block hit
+// advances serial, as that frame's Stats::blockTests did in 0.3.179, and every SelfCheckInterval-th is
+// verified; verify() counts into stats. The caller clears serial together with that object.
+struct SelfCheck {std::uint64_t serial=0;Stats* stats=nullptr;};
+// 0.3.180 (C1): the epoch source of the templated captureBlocks(). valid(): a stamp taken now would
+// certify; live(): the serial words, read in place (valid() decides, not live().valid); snapshot(): the
+// certifying copy. ReaderSource is the 0.3.179 Reader and context (tests); ClockSource reads the
+// mirror's Clock in place. Precondition: the caller owns the mirror's gate from valid() to the last
+// snapshot() (capture runs inside the game draw's guard); validation builds assert it.
+struct ReaderSource {
+    void* context=nullptr;NorthlightConstantEpoch::Reader reader=nullptr;
+    mutable NorthlightConstantEpoch::Stamp current;
+    bool attached()const{return reader!=nullptr;}
+    bool valid()const{current=read(context,reader);return current.valid;}
+    const NorthlightConstantEpoch::Stamp& live()const{return current;}
+    NorthlightConstantEpoch::Stamp snapshot()const{return read(context,reader);}
+};
+template<class Mirror> struct ClockSource {
+    const NorthlightConstantEpoch::Clock* clock=nullptr;const Mirror* mirror=nullptr;
+    bool attached()const{return clock!=nullptr;}
+    bool valid()const{
+        if constexpr(ValidateEvery)assert(!clock||mirror->heldByThisThread());
+        return clock&&mirror->active()&&!clock->overflow();
+    }
+    const NorthlightConstantEpoch::Stamp& live()const{return clock->live();}
+    NorthlightConstantEpoch::Stamp snapshot()const{return clock->stamp(mirror->active());}
+};
+// 0.3.180 (C1+C2): the Reader overload's result, bytes and Stats, comparing the stamp in place and
+// copying it once, only to certify. No post-fetch re-read: the caller holds the gate from before to
+// after and a fetch never advances the Clock, so after==before and nothing races the block fetch.
+// Validation builds keep both re-reads, as assertions. selfCheck/check: C0 above.
+template<class Replay,class Source,class Fetch,class FetchFloats> bool captureBlocks(Replay& p,const Replay* previous,
+    const Source& source,Fetch&& fetch,FetchFloats&& fetchFloats,Stats* stats,bool selfCheck,SelfCheck& check){
+    namespace E=NorthlightConstantEpoch;
+    reset(p);
+    const bool valid=source.valid();
+    [[maybe_unused]] const E::Stamp before=ValidateEvery?source.snapshot():E::Stamp{};
+    const E::Stamp& now=source.live();
+    if(stats&&source.attached())++stats->tests;
+    const auto& u=p.constantUsage;
+    const bool usable=valid&&previous&&previous->constantStamp.valid&&compatible(*previous,p);
+    if(usable&&E::sameWords(previous->constantStamp,now)){
+        p.constants=previous->constants;p.bools=previous->bools;p.ints=previous->ints;p.constantStamp=source.snapshot();
+        if(stats){++stats->hits;stats->bytesAvoided+=u.floats.count*16+u.booleans.count*sizeof(p.bools[0])+u.integers.count*16;}
+        if(ValidateEvery)verify(p,fetchFloats,check.stats);
+        return true;
+    }
+    if(BlockReuse&&usable&&E::sameBanks(previous->constantStamp,now,u.booleans.count,u.integers.count)){
+        const unsigned lo=u.floats.first,hi=lo+u.floats.count;unsigned first=lo,last=lo;
+        E::dirtySpan(previous->constantStamp,now,lo,hi,first,last);
+        bool shared=first==last;
+        if(!shared){
+            if(!fetchFloats(first,last-first,p.constantStorage+4*first))return false;
+            if constexpr(ValidateEvery)assert(E::exact(before,source.snapshot()));
+            shared=!std::memcmp(p.constantStorage+4*first,previous->constants+4*first,std::size_t(last-first)*16);
+        }
+        if(shared)p.constants=previous->constants;
+        else{
+            std::memcpy(p.constantStorage+4*lo,previous->constants+4*lo,std::size_t(first-lo)*16);
+            std::memcpy(p.constantStorage+4*last,previous->constants+4*last,std::size_t(hi-last)*16);
+        }
+        p.bools=previous->bools;p.ints=previous->ints;p.constantStamp=source.snapshot();
+        if(stats){++stats->blockTests;stats->blockShared+=shared;stats->blockRewrites+=shared&&first!=last;stats->blockCopies+=!shared;
+            stats->registersReused+=u.floats.count-(last-first);stats->registersFetched+=last-first;
+            stats->bytesAvoided+=(u.floats.count-(last-first))*16+u.booleans.count*sizeof(p.bools[0])+u.integers.count*16;
+            for(unsigned block=first/E::BlockRegisters;first<last&&block*E::BlockRegisters<last;++block)
+                stats->dirtyBlocks[block]+=previous->constantStamp.floatBlock[block]!=now.floatBlock[block];}
+        if(selfCheck)++check.serial;
+        if(ValidateEvery||(selfCheck&&SelfCheckInterval&&check.serial%SelfCheckInterval==0))verify(p,fetchFloats,check.stats);
+        return true;
+    }
+    if(!fetch())return false;
+    if constexpr(ValidateEvery)assert(source.valid()==valid&&(!valid||E::exact(before,source.snapshot())));
+    if(valid)p.constantStamp=source.snapshot();
     return true;
 }
 template<class Replay> bool samePose(const Replay& a,const Replay& b,Stats* stats=nullptr){

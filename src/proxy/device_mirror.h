@@ -76,6 +76,7 @@ struct DeviceMirror {
     // nothing else mutated the mirror during its own backend call (re-entry).
     std::uint64_t mutations=0;
     bool active()const{return enabled&&!recording&&!rawDepth;}
+    bool heldByThisThread()const{return MirrorGuard::heldByThisThread(gate);} /* 0.3.180 (C1): the in-place epoch source's precondition */
     // Accepted, active setter whose value is already in the slot's field.
     // Scalar slots (render/sampler states, viewport) additionally need this
     // exact value proven by an earlier round trip: a backend may normalize or

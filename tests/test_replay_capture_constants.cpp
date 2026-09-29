@@ -1,8 +1,12 @@
 #include "replay_capture_constants.h"
 #include <cassert>
 #include <cstdio>
+#include <cstring>
+#include <limits>
 #include <memory>
 #include <random>
+#include <string>
+#include <type_traits>
 #include <vector>
 using namespace NorthlightReplayCaptureConstants;
 struct Packet {
@@ -76,7 +80,187 @@ static void edges(){
     assert(get(bits2,&bits1,s)&&samePose(bits1,bits2));nan++;std::memcpy(s.floats+100,&nan,4);s.clock.writeFloat(25,1);assert(get(bits2,&bits1,s)&&!samePose(bits1,bits2));
     s.floats[100]=0;s.clock.writeFloat(25,1);assert(get(bits1,nullptr,s));s.floats[100]=-0.f;s.clock.writeFloat(25,1);assert(get(bits2,&bits1,s)&&!samePose(bits1,bits2));
 }
-int main(){
+// 0.3.180 (C0-C2): the templated captureBlocks() through ReaderSource and ClockSource against the
+// 0.3.179 Reader overload (unchanged, the reference) on one randomized mirror.
+struct Mirror {
+    NorthlightConstantEpoch::Clock constantEpoch;
+    bool enabled=true,recording=false;std::size_t rawDepth=0;
+    float floats[1024]={};int booleans[16]={},integers[64]={};
+    bool active()const{return enabled&&!recording&&!rawDepth;}
+    bool heldByThisThread()const{return true;}
+    static bool reader(void* context,NorthlightConstantEpoch::Stamp& out){
+        auto& m=*static_cast<Mirror*>(context);out=m.constantEpoch.stamp(m.active());return out.valid;
+    }
+    // MirrorDevice: an accepted write advances the serials only while active; every change of the
+    // active state (Begin/EndStateBlock, RawScope, disable) and every Apply/Reset invalidates.
+    void writeFloats(unsigned first,unsigned count,const float* data){
+        for(unsigned r=0;r<count;++r)if(first+r<256)std::memcpy(floats+4*(first+r),data+4*r,16);
+        if(active())constantEpoch.writeFloat(first,count);
+    }
+    void writeBool(unsigned reg,int value){booleans[reg]=value;if(active())constantEpoch.writeBool(1);}
+    void writeInt(unsigned reg,int value){integers[4*reg]=value;if(active())constantEpoch.writeInt(1);}
+    void inactive(unsigned kind,bool on){
+        constantEpoch.invalidate();
+        if(kind==0)recording=on;else if(kind==1)rawDepth=on;else enabled=!on;
+        constantEpoch.invalidate();
+    }
+    // Test hook: the Clock's serials near the top (overflow); Clock is standard-layout, value_ first.
+    void nearOverflow(){
+        static_assert(std::is_standard_layout<NorthlightConstantEpoch::Clock>::value,"Clock layout");
+        NorthlightConstantEpoch::Stamp words=constantEpoch.live();words.reset=std::numeric_limits<std::uint64_t>::max()-1;
+        std::memcpy(static_cast<void*>(&constantEpoch),&words,sizeof words);
+    }
+    bool fetch(Packet& p)const{
+        const auto& u=p.constantUsage;
+        std::memcpy(p.constantStorage+4*u.floats.first,floats+4*u.floats.first,u.floats.count*16);
+        std::memcpy(p.boolStorage+u.booleans.first,booleans+u.booleans.first,u.booleans.count*4);
+        std::memcpy(p.intStorage+4*u.integers.first,integers+4*u.integers.first,u.integers.count*16);
+        return true;
+    }
+    bool fetchFloats(unsigned first,unsigned count,float* out)const{std::memcpy(out,floats+4*first,count*16);return true;}
+};
+// Counterfactual sources (each must change some result): an in-place compare that ignores the reset
+// serial, and one that certifies while the mirror is inactive.
+struct IgnoreResetSource {
+    const Mirror* mirror;std::uint64_t pinned=0;mutable NorthlightConstantEpoch::Stamp words;
+    bool attached()const{return true;}
+    bool valid()const{return mirror->active()&&!mirror->constantEpoch.overflow();}
+    const NorthlightConstantEpoch::Stamp& live()const{words=mirror->constantEpoch.live();words.reset=pinned;return words;}
+    NorthlightConstantEpoch::Stamp snapshot()const{auto s=mirror->constantEpoch.stamp(mirror->active());s.reset=pinned;return s;}
+};
+struct CertifyInactiveSource {
+    const Mirror* mirror;
+    bool attached()const{return true;}
+    bool valid()const{return !mirror->constantEpoch.overflow();}
+    const NorthlightConstantEpoch::Stamp& live()const{return mirror->constantEpoch.live();}
+    NorthlightConstantEpoch::Stamp snapshot()const{return mirror->constantEpoch.stamp(true);}
+};
+static bool sameStamp(const NorthlightConstantEpoch::Stamp& a,const NorthlightConstantEpoch::Stamp& b){
+    return a.valid==b.valid&&a.reset==b.reset&&a.floats==b.floats&&a.floatWithout2==b.floatWithout2&&a.floatWithout4==b.floatWithout4&&
+        a.booleans==b.booleans&&a.integers==b.integers&&!std::memcmp(a.floatBlock,b.floatBlock,sizeof a.floatBlock);
+}
+static bool sameStats(const Stats& a,const Stats& b){
+    return a.tests==b.tests&&a.hits==b.hits&&a.bytesAvoided==b.bytesAvoided&&a.poseFastHits==b.poseFastHits&&a.blockTests==b.blockTests&&
+        a.blockShared==b.blockShared&&a.blockRewrites==b.blockRewrites&&a.blockCopies==b.blockCopies&&a.registersReused==b.registersReused&&
+        a.registersFetched==b.registersFetched&&a.poseBlockHits==b.poseBlockHits&&a.poseBytesAvoided==b.poseBytesAvoided&&a.selfChecks==b.selfChecks&&
+        a.selfCheckMismatches==b.selfCheckMismatches&&!std::memcmp(a.dirtyBlocks,b.dirtyBlocks,sizeof a.dirtyBlocks);
+}
+// Which storage a packet's bank pointer names: its own (-1) or the packet (index) that owns it.
+template<class Storage> static long owner(const std::vector<std::unique_ptr<Packet>>& run,size_t index,const void* pointer,Storage storage){
+    for(size_t i=0;i<=index;++i)if(pointer==storage(*run[i]))return i==index?-1:long(i);
+    return -2;
+}
+static unsigned samePackets(const std::vector<std::unique_ptr<Packet>>& a,const std::vector<std::unique_ptr<Packet>>& b,size_t i){
+    const Packet& x=*a[i];const Packet& y=*b[i];const auto& u=x.constantUsage;
+    auto floats=[](const Packet& p)->const void*{return p.constantStorage;};
+    auto bools=[](const Packet& p)->const void*{return p.boolStorage;};
+    auto ints=[](const Packet& p)->const void*{return p.intStorage;};
+    if(owner(a,i,x.constants,floats)!=owner(b,i,y.constants,floats)||owner(a,i,x.bools,bools)!=owner(b,i,y.bools,bools)||
+       owner(a,i,x.ints,ints)!=owner(b,i,y.ints,ints))return 1;
+    if(std::memcmp(x.constants+4*u.floats.first,y.constants+4*u.floats.first,u.floats.count*16)||
+       std::memcmp(x.bools+u.booleans.first,y.bools+u.booleans.first,u.booleans.count*4)||
+       std::memcmp(x.ints+4*u.integers.first,y.ints+4*u.integers.first,u.integers.count*16))return 2;
+    if(!sameStamp(x.constantStamp,y.constantStamp))return 3;
+    return x.constantGroup==y.constantGroup?0:4;
+}
+struct Verified {size_t draw;unsigned first,count;bool operator==(const Verified& o)const{return draw==o.draw&&first==o.first&&count==o.count;}};
+// One capture path over the sequence. Kind 0: the 0.3.179 Reader overload (stats on self-check frames
+// only, as the renderer passed them). Templated kinds keep the profile Stats (stats) apart from the
+// self-check object (check.stats): 1 ReaderSource, 2 ClockSource, 3 ClockSource with profile stats on
+// every frame (C0: must not move a verify()), 4/5 the counterfactual sources.
+struct Path {
+    unsigned kind;std::vector<std::unique_ptr<Packet>> packets;Stats stats,profile,pose;SelfCheck check;std::vector<Verified> verified;
+    unsigned differences=0;
+    template<class Src> bool run(Packet& p,const Packet* previous,const Src& source,Mirror& m,bool selfCheck,bool profiled){
+        check.stats=selfCheck?&stats:nullptr;
+        return captureBlocks(p,previous,source,[&]{return m.fetch(p);},[&](unsigned first,unsigned count,float* out){return m.fetchFloats(first,count,out);},
+            profiled?&profile:selfCheck?&stats:nullptr,selfCheck,check);
+    }
+    bool capture(Packet& p,Mirror& m,bool selfCheck){
+        const Packet* previous=packets.empty()?nullptr:packets.back().get();
+        const auto checks=stats.selfChecks;bool ok=false;
+        if(kind==0)ok=captureBlocks(p,previous,&m,Mirror::reader,[&]{return m.fetch(p);},[&](unsigned first,unsigned count,float* out){return m.fetchFloats(first,count,out);},selfCheck?&stats:nullptr);
+        else if(kind==1)ok=run(p,previous,ReaderSource{&m,Mirror::reader,{}},m,selfCheck,false);
+        else if(kind==2)ok=run(p,previous,ClockSource<Mirror>{&m.constantEpoch,&m},m,selfCheck,false);
+        else if(kind==3)ok=run(p,previous,ClockSource<Mirror>{&m.constantEpoch,&m},m,selfCheck,true);
+        else if(kind==4)ok=run(p,previous,IgnoreResetSource{&m,7,{}},m,selfCheck,false);
+        else ok=run(p,previous,CertifyInactiveSource{&m},m,selfCheck,false);
+        if(stats.selfChecks!=checks)verified.push_back({packets.size(),p.constantUsage.floats.first,p.constantUsage.floats.count});
+        if(ok)p.constantGroup=previous?previous->constantGroup+!samePose(*previous,p,&pose):0;
+        return ok;
+    }
+    void frame(){stats={};profile={};check.serial=0;for(auto& p:packets)reset(*p);packets.clear();}
+};
+static void sources(){
+    std::mt19937 random(180);Mirror m;
+    Path paths[6];for(unsigned k=0;k<6;++k)paths[k].kind=k;
+    const NorthlightShaderConstants::Range layouts[]={{0,256},{0,256},{0,256},{2,32},{0,40},{2,120}};
+    size_t draws=0,verified=0,inactiveDraws=0,invalidStamps=0,overflows=0;
+    for(unsigned frame=0;frame<24;++frame){
+        const bool selfCheck=frame%3!=1; // the renderer's frame%120==0 frames
+        unsigned layout=0,kind=2;
+        for(unsigned draw=0;draw<1600;++draw,++draws){
+            const unsigned action=random()%100;
+            float data[64*4];for(auto& v:data){uint32_t bits=random()%4?random()%64:random();std::memcpy(&v,&bits,4);}
+            if(action<30){unsigned first=random()%260,count=1+random()%(random()%4?4:64);m.writeFloats(first,count,data);} // spans across block edges
+            else if(action<42){unsigned first=random()%256,count=1+random()%24;if(first+count>256)count=256-first;float same[24*4];std::memcpy(same,m.floats+4*first,count*16);m.writeFloats(first,count,same);}
+            else if(action<45){m.floats[4*(random()%256)]=float(random());m.constantEpoch.invalidate();} // state-block Apply
+            else if(action<47)m.writeBool(random()%16,int(random()%2));
+            else if(action<49)m.writeInt(random()%16,int(random()));
+            else if(action<50)m.constantEpoch.invalidate(); // Reset
+            else if(action<52){const unsigned which=random()%3;m.inactive(which,true);m.writeFloats(random()%256,1,data);m.inactive(which,false);}
+            const bool inactive=random()%31==0;const unsigned which=random()%3;
+            if(inactive){m.inactive(which,true);m.writeFloats(random()%250,2,data);++inactiveDraws;}
+            if(frame==20&&draw==800){m.nearOverflow();m.constantEpoch.invalidate();m.constantEpoch.invalidate();assert(m.constantEpoch.overflow());++overflows;}
+            if(draw%37==0)layout=random()%6;
+            if(draw%61==0)kind=random()%2?1:2;
+            for(auto& path:paths){
+                auto p=std::make_unique<Packet>();p->constantUsage.floats=layouts[layout];p->projectionKind=kind;
+                if(layout==3){p->constantUsage.booleans={2,4};p->constantUsage.integers={3,7};}
+                if(layout==4){p->constantUsage.booleans={};p->constantUsage.integers={};}
+                assert(path.capture(*p,m,selfCheck));path.packets.push_back(std::move(p));
+            }
+            const size_t i=paths[0].packets.size()-1;
+            invalidStamps+=!paths[0].packets[i]->constantStamp.valid;
+            {Packet reference;reference.constantUsage=paths[0].packets[i]->constantUsage;m.fetch(reference);equal(*paths[0].packets[i],reference);}
+            for(unsigned k=1;k<4;++k)assert(!samePackets(paths[0].packets,paths[k].packets,i));
+            for(unsigned k=4;k<6;++k)paths[k].differences+=samePackets(paths[0].packets,paths[k].packets,i)!=0;
+            if(inactive)m.inactive(which,false);
+            // Reference-equal Stats: the templated paths with the reference's single object (kinds 1, 2).
+            for(unsigned k=1;k<3;++k)assert(sameStats(paths[0].stats,paths[k].stats)&&sameStats(paths[0].pose,paths[k].pose));
+            // C0: profile counters apart; the self-check object keeps exactly the verify() counts.
+            assert(paths[3].stats.selfChecks==paths[0].stats.selfChecks&&paths[3].stats.selfCheckMismatches==paths[0].stats.selfCheckMismatches);
+        }
+        for(unsigned k=0;k<4;++k)assert(paths[k].verified==paths[0].verified);
+        // C0: the profile object counts every frame; the 0.3.179 object only self-check frames.
+        assert(paths[3].profile.tests==1600&&(paths[3].profile.hits+paths[3].profile.blockTests>0)==(frame<=20));
+        assert(selfCheck||(!paths[0].stats.tests&&!paths[2].stats.tests));
+        verified+=paths[0].verified.size();
+        for(auto& path:paths){path.verified.clear();path.frame();}
+    }
+    // The cadence was exercised (every 512th block hit of a self-check frame) and the counterfactuals bite.
+    assert(verified>=10&&inactiveDraws>100&&invalidStamps>100&&overflows==1);
+    assert(paths[4].differences>0&&paths[5].differences>0);
+    std::printf("{\"sourceDraws\":%zu,\"verified\":%zu,\"inactiveDraws\":%zu,\"invalidStamps\":%zu,\"ignoreResetDifferences\":%u,\"certifyInactiveDifferences\":%u}\n",
+        draws,verified,inactiveDraws,invalidStamps,paths[4].differences,paths[5].differences);
+}
+// C2 counterfactual (validation build only): a fetch that writes the bank (SetVertexShaderConstantF
+// mid-fetch) breaks "after==before" and must trip the assertion. Block path, then the full-fetch path.
+static void race(bool block){
+    Mirror m;SelfCheck check;Packet first,second;
+    auto run=[&](Packet& p,const Packet* previous,bool mutate){
+        float row[4]={1,2,3,4};
+        return captureBlocks(p,previous,ClockSource<Mirror>{&m.constantEpoch,&m},[&]{if(mutate)m.writeFloats(40,1,row);return m.fetch(p);},
+            [&](unsigned f,unsigned c,float* out){if(mutate)m.writeFloats(40,1,row);return m.fetchFloats(f,c,out);},nullptr,false,check);
+    };
+    assert(run(first,nullptr,false));
+    float row[4]={5,6,7,8};m.writeFloats(40,1,row);
+    if(!block)m.constantEpoch.invalidate();
+    run(second,&first,true);
+}
+int main(int argc,char** argv){
+    if(argc>1){const std::string mode=argv[1];race(mode=="c2-race-block");std::puts("race not detected");return 0;}
+    sources();
     edges();std::mt19937 random(127);Source source;Stats stats;
     size_t frames=100,draws=300,legacyBytes=0,accepted=0;
     for(size_t frame=0;frame<frames;++frame){

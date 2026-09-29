@@ -631,9 +631,12 @@ private:
     unsigned terrainCaptureCalls=0,terrainUPCalls=0,replayCaptureCalls=0,unknownCaptureCalls=0;
     std::uint64_t previousCacheHits=0;
     size_t capturedConstantBytes=0,capturedConstantCalls=0;
-    void* constantEpochContext=nullptr;
-    NorthlightConstantEpoch::Reader constantEpochReader=nullptr;
-    NorthlightReplayCaptureConstants::Stats constantEpochStats;
+    // 0.3.180 (C1): the device mirror's constant clock, read in place under the draw's gate.
+    NorthlightReplayCaptureConstants::ClockSource<DeviceMirror> constantEpochSource;
+    // 0.3.180 (C0): constantEpochStats keeps the self-check (verify()) and pose counters; the epoch and
+    // block counters of RenderProfile sample frames go to constantEpochProfile. Both are cleared per frame.
+    NorthlightReplayCaptureConstants::Stats constantEpochStats,constantEpochProfile;
+    NorthlightReplayCaptureConstants::SelfCheck constantSelfCheckState{0,&constantEpochStats};
     unsigned capturedSM1Draws=0,capturedRelativeDraws=0;
     unsigned skinnedCandidates=0,skinnedBlendRejected=0,skinnedProjectionRejected=0,skinnedBudgetRejected=0,skinnedSnapshotRejected=0,skinnedAccepted=0;
     size_t captureRejectedBytes=0,acceptedSkinnedBytes=0,acceptedOtherBytes=0;
@@ -650,7 +653,7 @@ private:
     unsigned capturePhaseSerial=0,capturePhaseDraws=0,capturePhaseAccepted=0,alphaStateQueriesSkipped=0;
     unsigned actorPhaseCandidates=0,actorTextureReads=0,replayUploadCalls=0,replayUploadFallbacks=0;
     void clearCaptureDiagnostics(){
-        capturePhases.clear();actorPhases.clear();replayUploadPhases.clear();constantEpochStats={};
+        capturePhases.clear();actorPhases.clear();replayUploadPhases.clear();constantEpochStats={};constantEpochProfile={};constantSelfCheckState.serial=0;
         capturePhaseDraws=capturePhaseAccepted=alphaStateQueriesSkipped=0;
         actorPhaseCandidates=actorTextureReads=replayUploadCalls=replayUploadFallbacks=0;
     }
@@ -1654,10 +1657,10 @@ public:
     static std::uint64_t bufferIdentity(void* buffer,bool indexBuffer){
         return NorthlightTrackedBuffers::identity(buffer,indexBuffer);
     }
-    void setConstantEpochSource(void* context,NorthlightConstantEpoch::Reader reader){
+    void setConstantEpochSource(NorthlightReplayCaptureConstants::ClockSource<DeviceMirror> source){
         // A different provider can have the same numeric serials.
         for(auto& replay:replays)replay->constantStamp={};
-        constantEpochContext=context;constantEpochReader=reader;
+        constantEpochSource=source;
     }
     explicit WorldRenderer(IDirect3DDevice9* device):d(device),stateBlocks(device){terrainBoundsCache.setIdentityProvider(&bufferIdentity);terrainBoundsCache.setVersionProvider(&NorthlightTrackedBuffers::version);terrainBoundsCache.setDeclarationCache(&declarationCache);replaySnapshots.setDeclarationProvider(&declarationCache,[](void* c,IDirect3DVertexDeclaration9* decl,const D3DVERTEXELEMENT9*& e,UINT& n){return static_cast<NorthlightVertexDeclarations::Cache*>(c)->get(decl,e,n);});replaySnapshots.setLayoutProvider(&declarationCache,[](void* c,IDirect3DVertexDeclaration9* decl,UINT* extent){return static_cast<NorthlightVertexDeclarations::Cache*>(c)->captureLayout(decl,extent);});replaySnapshots.setIdentityProvider(&bufferIdentity);replaySnapshots.setVersionProvider(&NorthlightTrackedBuffers::version);replaySnapshots.setMetadataProvider(&NorthlightTrackedBuffers::captureMetadata);QueryPerformanceFrequency(&captureFrequency);char path[MAX_PATH*3];WideCharToMultiByte(CP_UTF8,0,rootPath,-1,path,sizeof path,nullptr,nullptr);root=path;std::string paletteError;
         loadQuality();effects.gi=NorthlightQuality::giPass(quality,effects.gi);
@@ -1744,12 +1747,12 @@ public:
             const auto& u=replayUploadPhases.ticks;
             logf("MODEL GPU upload phases calls=%u fallbackRetries=%u clockReads=%u cacheMs=%.3f bulkMs=%.3f",replayUploadCalls,replayUploadFallbacks,replayUploadPhases.clockReads,u[0]*ms,u[1]*ms);
         }
-        if(captureSampled){const auto& c=constantEpochStats;
+        if(captureSampled){const auto& c=constantEpochProfile;const auto& s=constantEpochStats; /* 0.3.180 (C0): epoch/block counters of this sample frame; pose and self-check counters */
             logf("MODEL capture constants epochTests=%llu snapshotHits=%llu bytesAvoided=%llu poseFastHits=%llu blockTests=%llu blockShared=%llu blockRewrites=%llu blockCopies=%llu registersReused=%llu registersFetched=%llu poseBlockHits=%llu poseBytesAvoided=%llu selfChecks=%llu selfCheckMismatches=%llu",
-            (unsigned long long)c.tests,(unsigned long long)c.hits,(unsigned long long)c.bytesAvoided,(unsigned long long)c.poseFastHits,
+            (unsigned long long)c.tests,(unsigned long long)c.hits,(unsigned long long)c.bytesAvoided,(unsigned long long)s.poseFastHits,
             (unsigned long long)c.blockTests,(unsigned long long)c.blockShared,(unsigned long long)c.blockRewrites,(unsigned long long)c.blockCopies,
-            (unsigned long long)c.registersReused,(unsigned long long)c.registersFetched,(unsigned long long)c.poseBlockHits,
-            (unsigned long long)c.poseBytesAvoided,(unsigned long long)c.selfChecks,(unsigned long long)c.selfCheckMismatches);
+            (unsigned long long)c.registersReused,(unsigned long long)c.registersFetched,(unsigned long long)s.poseBlockHits,
+            (unsigned long long)s.poseBytesAvoided,(unsigned long long)s.selfChecks,(unsigned long long)s.selfCheckMismatches);
             char blocks[16*21]={};size_t used=0;
             for(unsigned n=0;n<NorthlightConstantEpoch::FloatBlocks&&used<sizeof blocks;++n)
                 used+=std::snprintf(blocks+used,sizeof blocks-used,n?",%llu":"%llu",(unsigned long long)c.dirtyBlocks[n]);
@@ -2420,7 +2423,7 @@ public:
         p->constantUsage=usage;
         const auto f=usage.floats,b=usage.booleans,i=usage.integers;
         const Replay* previous=replays.empty()?nullptr:replays.back().get();
-        if(!NorthlightReplayCaptureConstants::captureBlocks(*p,previous,constantEpochContext,constantEpochReader,[&]{
+        if(!NorthlightReplayCaptureConstants::captureBlocks(*p,previous,constantEpochSource,[&]{
             if((f.count&&FAILED(d->GetVertexShaderConstantF(f.first,p->constantStorage+4*f.first,f.count)))||
                (b.count&&FAILED(d->GetVertexShaderConstantB(b.first,p->boolStorage+b.first,b.count)))||
                (i.count&&FAILED(d->GetVertexShaderConstantI(i.first,p->intStorage+4*i.first,i.count))))return false;
@@ -2431,7 +2434,7 @@ public:
             if(FAILED(d->GetVertexShaderConstantF(first,out,count)))return false;
             if(sample){capturedConstantBytes+=16*count;++capturedConstantCalls;}
             return true;
-        },constantSelfCheck?&constantEpochStats:nullptr))return;
+        },sample?&constantEpochProfile:nullptr,constantSelfCheck,constantSelfCheckState))return;
         if(sample){capturedSM1Draws+=metadata.sm1;capturedRelativeDraws+=usage.relativeFloat;}
         phase.next(CaptureMaterial);fate.reason=NorthlightShadowFate::Material;
         if(FAILED(d->GetTexture(0,&p->texture))||(alpha&&!p->texture))return;

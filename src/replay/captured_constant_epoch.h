@@ -21,19 +21,22 @@ struct Stamp {
     bool valid=false;
 };
 using Reader=bool(*)(void*,Stamp&);
-inline bool exact(const Stamp& a,const Stamp& b){
-    return a.valid&&b.valid&&a.reset==b.reset&&a.floats==b.floats&&
-        a.booleans==b.booleans&&a.integers==b.integers;
+// 0.3.180 (C1): the serial words alone. exact() and banks() also need both stamps valid; an in-place
+// compare with a Clock's live words (whose valid flag is never set) asks its source's valid() instead.
+inline bool sameWords(const Stamp& a,const Stamp& b){
+    return a.reset==b.reset&&a.floats==b.floats&&a.booleans==b.booleans&&a.integers==b.integers;
 }
+inline bool exact(const Stamp& a,const Stamp& b){return a.valid&&b.valid&&sameWords(a,b);}
 inline bool pose(const Stamp& a,const Stamp& b,unsigned projectionKind){
     return a.valid&&b.valid&&a.reset==b.reset&&a.booleans==b.booleans&&a.integers==b.integers&&
         ((projectionKind==1&&a.floatWithout4==b.floatWithout4)||
          (projectionKind==2&&a.floatWithout2==b.floatWithout2));
 }
 // Same reset and, for banks the capture reads, the same BOOL/INT serials.
-inline bool banks(const Stamp& a,const Stamp& b,bool booleans,bool integers){
-    return a.valid&&b.valid&&a.reset==b.reset&&(!booleans||a.booleans==b.booleans)&&(!integers||a.integers==b.integers);
+inline bool sameBanks(const Stamp& a,const Stamp& b,bool booleans,bool integers){
+    return a.reset==b.reset&&(!booleans||a.booleans==b.booleans)&&(!integers||a.integers==b.integers);
 }
+inline bool banks(const Stamp& a,const Stamp& b,bool booleans,bool integers){return a.valid&&b.valid&&sameBanks(a,b,booleans,integers);}
 // Registers [first,last) spanning every block of [lo,hi) whose serial differs,
 // clipped to [lo,hi). first==last proves the whole range unchanged. Callers
 // must first establish banks(); the span is conservative (clean blocks between
@@ -69,5 +72,8 @@ public:
     void writeBool(unsigned count){if(count)advance(value_.booleans);}
     void writeInt(unsigned count){if(count)advance(value_.integers);}
     Stamp stamp(bool active)const{auto result=value_;result.valid=active&&!overflow_;return result;}
+    // 0.3.180 (C1): the words in place (valid is never set here) and the overflow latch of stamp().
+    const Stamp& live()const{return value_;}
+    bool overflow()const{return overflow_;}
 };
 }
