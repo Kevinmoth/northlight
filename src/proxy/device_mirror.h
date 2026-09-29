@@ -18,6 +18,17 @@
 
 static constexpr bool kMirrorWriteThrough=true,kMirrorBorrowedPeek=true;
 
+// 0.3.180 (C3): known[0..count) all set. The flags hold only 0/1 (=true/false, memset 0), so a 4-byte
+// word is all known iff it equals 0x01010101. Inline: a CRT memchr is an import-thunk byte loop under Wine.
+static_assert(sizeof(bool)==1,"known flags are scanned as bytes");
+inline bool allKnown(const bool* known,unsigned count){
+    unsigned i=0;
+    for(;i<count&&(reinterpret_cast<std::uintptr_t>(known+i)&3);++i)if(!known[i])return false;
+    for(;count-i>=4;i+=4){std::uint32_t word;std::memcpy(&word,known+i,4);if(word!=0x01010101u)return false;}
+    for(;i<count;++i)if(!known[i])return false;
+    return true;
+}
+
 struct DeviceMirror {
     static constexpr unsigned Streams=16,Textures=16,RenderStates=256,SamplerTypes=16,VsFloat=256,PsFloat=224,Ints=16,Bools=16,Targets=4;
     std::recursive_mutex gate;
@@ -315,7 +326,7 @@ public:
     }
     HRESULT STDMETHODCALLTYPE GetVertexShaderConstantF(UINT start,float* out,UINT count) override{
         Guard lock(m->gate);bool valid=out&&count&&start<DeviceMirror::VsFloat&&count<=DeviceMirror::VsFloat-start;
-        bool known=valid&&m->active();if(known)for(UINT i=0;i<count;++i)if(!m->vsFloatKnown[start+i]){known=false;break;}
+        const bool known=valid&&m->active()&&allKnown(m->vsFloatKnown+start,count);
         if(known){++m->answered;std::memcpy(out,m->vsFloat[start],size_t(count)*4*sizeof(float));return D3D_OK;}
         ++m->forwarded;HRESULT hr=real->GetVertexShaderConstantF(start,out,count);
         if(valid&&SUCCEEDED(hr)&&m->active()){std::memcpy(m->vsFloat[start],out,size_t(count)*4*sizeof(float));for(UINT i=0;i<count;++i)m->vsFloatKnown[start+i]=true;}return hr;
@@ -327,7 +338,7 @@ public:
     }
     HRESULT STDMETHODCALLTYPE GetVertexShaderConstantI(UINT start,int* out,UINT count) override{
         Guard lock(m->gate);bool valid=out&&count&&start<DeviceMirror::Ints&&count<=DeviceMirror::Ints-start;
-        bool known=valid&&m->active();if(known)for(UINT i=0;i<count;++i)if(!m->vsIntKnown[start+i]){known=false;break;}
+        const bool known=valid&&m->active()&&allKnown(m->vsIntKnown+start,count);
         if(known){++m->answered;std::memcpy(out,m->vsInt[start],size_t(count)*4*sizeof(int));return D3D_OK;}
         ++m->forwarded;HRESULT hr=real->GetVertexShaderConstantI(start,out,count);
         if(valid&&SUCCEEDED(hr)&&m->active()){std::memcpy(m->vsInt[start],out,size_t(count)*4*sizeof(int));for(UINT i=0;i<count;++i)m->vsIntKnown[start+i]=true;}return hr;
@@ -339,7 +350,7 @@ public:
     }
     HRESULT STDMETHODCALLTYPE GetVertexShaderConstantB(UINT start,WINBOOL* out,UINT count) override{
         Guard lock(m->gate);bool valid=out&&count&&start<DeviceMirror::Bools&&count<=DeviceMirror::Bools-start;
-        bool known=valid&&m->active();if(known)for(UINT i=0;i<count;++i)if(!m->vsBoolKnown[start+i]){known=false;break;}
+        const bool known=valid&&m->active()&&allKnown(m->vsBoolKnown+start,count);
         if(known){++m->answered;std::memcpy(out,m->vsBool+start,size_t(count)*1*sizeof(WINBOOL));return D3D_OK;}
         ++m->forwarded;HRESULT hr=real->GetVertexShaderConstantB(start,out,count);
         if(valid&&SUCCEEDED(hr)&&m->active()){std::memcpy(m->vsBool+start,out,size_t(count)*1*sizeof(WINBOOL));for(UINT i=0;i<count;++i)m->vsBoolKnown[start+i]=true;}return hr;
@@ -350,7 +361,7 @@ public:
     }
     HRESULT STDMETHODCALLTYPE GetPixelShaderConstantF(UINT start,float* out,UINT count) override{
         Guard lock(m->gate);bool valid=out&&count&&start<DeviceMirror::PsFloat&&count<=DeviceMirror::PsFloat-start;
-        bool known=valid&&m->active();if(known)for(UINT i=0;i<count;++i)if(!m->psFloatKnown[start+i]){known=false;break;}
+        const bool known=valid&&m->active()&&allKnown(m->psFloatKnown+start,count);
         if(known){++m->answered;std::memcpy(out,m->psFloat[start],size_t(count)*4*sizeof(float));return D3D_OK;}
         ++m->forwarded;HRESULT hr=real->GetPixelShaderConstantF(start,out,count);
         if(valid&&SUCCEEDED(hr)&&m->active()){std::memcpy(m->psFloat[start],out,size_t(count)*4*sizeof(float));for(UINT i=0;i<count;++i)m->psFloatKnown[start+i]=true;}return hr;

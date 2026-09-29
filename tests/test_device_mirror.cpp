@@ -730,6 +730,40 @@ static void writeThroughDifferential(){
   (unsigned long long)m.writeThrough,(unsigned long long)m.learnedSlots,(unsigned long long)m.distrustedSlots,(unsigned long long)m.answered,(unsigned long long)m.forwarded);
  for(auto* p:vs)p->Release();for(auto* p:ps)p->Release();for(auto* p:tex)p->Release();for(auto* p:surf)p->Release();for(auto* p:vb)p->Release();for(auto* p:ib)p->Release();for(auto* p:dec)p->Release();
 }
+// 0.3.180 (C3): allKnown() equals the per-register loop for every (start,count) of each bank (the
+// mirror's own arrays, so their real alignment), count 0 and ranges ending at the bank end, all
+// unaligned starts, random masks. Counterfactuals: whole words only (no tail), first/last flag only.
+static bool knownLoop(const bool* known,unsigned count){for(unsigned i=0;i<count;++i)if(!known[i])return false;return true;}
+static bool knownWordsOnly(const bool* known,unsigned count){for(unsigned i=0;i+4<=count;i+=4){uint32_t word;std::memcpy(&word,known+i,4);if(word!=0x01010101u)return false;}return true;}
+static bool knownEndsOnly(const bool* known,unsigned count){return !count||(known[0]&&known[count-1]);}
+static void knownScan(){
+ std::mt19937 rng(180);DeviceMirror m;size_t cases=0;bool wordsDiffer=false,endsDiffer=false;
+ bool* banks[]={m.vsFloatKnown,m.psFloatKnown,m.vsIntKnown,m.vsBoolKnown};const unsigned sizes[]={DeviceMirror::VsFloat,DeviceMirror::PsFloat,DeviceMirror::Ints,DeviceMirror::Bools};
+ static_assert(DeviceMirror::VsFloat==256&&DeviceMirror::PsFloat==224&&DeviceMirror::Ints==16&&DeviceMirror::Bools==16,"bank sizes");
+ for(unsigned b=0;b<4;++b)for(unsigned round=0;round<(sizes[b]>16?6u:64u);++round){
+  bool* known=banks[b];const unsigned size=sizes[b],mode=round%4;
+  for(unsigned i=0;i<size;++i)known[i]=mode==0||(mode==1?rng()%48!=0:mode==2?rng()%2!=0:true);
+  if(mode==3)known[rng()%size]=false;
+  for(unsigned start=0;start<=size;++start)for(unsigned count=0;start+count<=size;++count){
+   const bool expected=knownLoop(known+start,count);assert(allKnown(known+start,count)==expected);++cases;
+   wordsDiffer|=knownWordsOnly(known+start,count)!=expected;endsDiffer|=knownEndsOnly(known+start,count)!=expected;}
+ }
+ assert(wordsDiffer&&endsDiffer);
+ // Answers and counters through the Get paths: answered iff every register was known before the call.
+ Backend backend;DeviceMirror mirror;MirrorDevice game(&backend,&mirror);ExtensionDevice ext(&backend,&mirror);
+ float values[1024],out[1024];for(unsigned j=0;j<1024;++j){uint32_t v=rng();std::memcpy(values+j,&v,4);}
+ assert(SUCCEEDED(game.SetVertexShaderConstantF(0,values,256)));assert(SUCCEEDED(game.SetPixelShaderConstantF(0,values,224)));
+ unsigned answeredCalls=0;
+ for(unsigned n=0;n<4000;++n){const bool pixel=n%2;const unsigned size=pixel?224:256,first=rng()%size,count=1+rng()%std::min(size-first,rng()%3?8u:size);
+  if(n%97==0){D3DPRESENT_PARAMETERS params;assert(SUCCEEDED(game.Reset(&params)));assert(SUCCEEDED(game.SetVertexShaderConstantF(0,values,256)));assert(SUCCEEDED(game.SetPixelShaderConstantF(0,values,224)));}
+  const bool expected=knownLoop((pixel?mirror.psFloatKnown:mirror.vsFloatKnown)+first,count);
+  const auto answered=mirror.answered,forwarded=mirror.forwarded;const unsigned gets=backend.gets;
+  assert(SUCCEEDED(pixel?ext.GetPixelShaderConstantF(first,out,count):ext.GetVertexShaderConstantF(first,out,count)));
+  assert(!std::memcmp(out,pixel?backend.state.pf[first]:backend.state.vf[first],count*16));
+  assert(mirror.answered==answered+expected&&mirror.forwarded==forwarded+!expected&&backend.gets==gets+!expected);answeredCalls+=expected;}
+ assert(answeredCalls>1000);
+ std::printf("PASS known scan: allKnown == per-register loop over %zu (start,count) ranges of the 256/224/16/16 banks; whole-word-only and ends-only counterfactuals differ; %u of 4000 Get calls answered, counters unchanged\n",cases,answeredCalls);
+}
 // One real acquisition per nested call chain; foreign threads still block.
 static void singleGate(){
  std::recursive_mutex a,other;
@@ -741,4 +775,4 @@ static void singleGate(){
  std::puts("PASS single gate: nested same-mutex guards skip re-locking, interleaved mutexes restore ownership, exceptions unwind, other threads still excluded.");
 }
 
-int main(){singleGate();writeThroughLearning();assert(!liveObjects);writeThroughImplicitState();assert(!liveObjects);writeThroughDifferential();assert(!liveObjects);rawScopeDispatchArguments();assert(!liveObjects);rawScopeBanksAndReentry();assert(!liveObjects);rawScopeRestoreAndControls();assert(!liveObjects);rawScopeConcurrency();assert(!liveObjects);rawScopeShadowWorkload();assert(!liveObjects);constantCertificates();assert(!liveObjects);auditCoverageAndSchedule();assert(!liveObjects);static_assert(!std::is_copy_constructible<DeviceMirror>::value,"mirror cannot copy mutex/state");bindingsAndScalars();assert(!liveObjects);constantBanks();assert(!liveObjects);constantCapabilities();assert(!liveObjects);recordingFailures();assert(!liveObjects);savedStateIntegration();assert(!liveObjects);crowdedWorkload();assert(!liveObjects);stateBlocks();assert(!liveObjects);implicitAndDisabled();assert(!liveObjects);auditChecks();assert(!liveObjects);auditEveryField();assert(!liveObjects);concurrency();assert(!liveObjects);std::puts("PASS actual device_mirror.h: authoritative cached queries; COM refs; normalized/failed setters; partial exact-bit banks; ALL/partial/recorded stateblocks including failed Apply; UP and Reset failures; target/FVF implicit changes; two proxies; disabled raw bypass; 30000 randomized banks; 8 threads x5000 iterations, serialized backend calls (80072 with learned write-through, 120008 read-through).");}
+int main(){knownScan();assert(!liveObjects);singleGate();writeThroughLearning();assert(!liveObjects);writeThroughImplicitState();assert(!liveObjects);writeThroughDifferential();assert(!liveObjects);rawScopeDispatchArguments();assert(!liveObjects);rawScopeBanksAndReentry();assert(!liveObjects);rawScopeRestoreAndControls();assert(!liveObjects);rawScopeConcurrency();assert(!liveObjects);rawScopeShadowWorkload();assert(!liveObjects);constantCertificates();assert(!liveObjects);auditCoverageAndSchedule();assert(!liveObjects);static_assert(!std::is_copy_constructible<DeviceMirror>::value,"mirror cannot copy mutex/state");bindingsAndScalars();assert(!liveObjects);constantBanks();assert(!liveObjects);constantCapabilities();assert(!liveObjects);recordingFailures();assert(!liveObjects);savedStateIntegration();assert(!liveObjects);crowdedWorkload();assert(!liveObjects);stateBlocks();assert(!liveObjects);implicitAndDisabled();assert(!liveObjects);auditChecks();assert(!liveObjects);auditEveryField();assert(!liveObjects);concurrency();assert(!liveObjects);std::puts("PASS actual device_mirror.h: authoritative cached queries; COM refs; normalized/failed setters; partial exact-bit banks; ALL/partial/recorded stateblocks including failed Apply; UP and Reset failures; target/FVF implicit changes; two proxies; disabled raw bypass; 30000 randomized banks; 8 threads x5000 iterations, serialized backend calls (80072 with learned write-through, 120008 read-through).");}
