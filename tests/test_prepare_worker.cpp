@@ -340,6 +340,8 @@ static void integration(World& world,unsigned frames,unsigned maxGroups){
             if(rng()%50==0)r.prepareCachesStale=true; /* registerShader */
             if(trim&&i==trimAt){r.prepareQuiesce();++quiesced;}}
         if(rng()%10){
+            const bool open=r.prepareFrame==Renderer::PrepareFrame::Worker;
+            if(open)assert(!std::memcmp(r.prepareWorker.frame().inverseView,r.context.inverseView,64)&&!std::memcmp(r.prepareWorker.frame().camera,r.context.camera,12)); /* the frozen camera equals the context at the join */
             r.prepareJoin();const char* mode=r.prepareStats.mode;modes[mode[0]=='w'?0:mode[0]=='a'?1:2]+=1;
             worker+=r.prepareStats.workerRecords;joined+=r.prepareStats.joinInline;
             std::size_t tests=0,reused=0;r.actorShadowDraws.clear();r.prepareStable(tests,reused);
