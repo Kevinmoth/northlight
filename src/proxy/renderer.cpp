@@ -33,6 +33,12 @@
 #include "effects_buckets.h"
 #include "log_rotation.h"
 #include "memory_guard.h"
+#include "northlight_mem.h"
+
+// 0.3.181 (r90): the DLL's one memcmp. This strong definition overrides zig compiler_rt's weak byte
+// loop for every call site in all four TUs (libc++ included) and returns the same value for every
+// input (northlight_mem.h). no_builtin: its body must not turn back into a memcmp call. Not exported.
+extern "C" __attribute__((no_builtin("memcmp"),no_builtin("bcmp"))) int memcmp(const void* a,const void* b,size_t n){return NorthlightMem::compare(a,b,n);}
 
 // Temporarily disable the water appearance passes.
 // Keep the liquid mask: AO/GI need it to avoid treating water as solid terrain.
