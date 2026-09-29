@@ -2444,8 +2444,11 @@ public:
         phase.next(CaptureFinalize);
         if(sample){++acceptedTriangleBins[triangleBin];if(priority)++acceptedSkinnedTriangleBins[triangleBin];smallShadowGI+=smallShadow;}
         p->fateSlot=fate.slot;fate.slot=-1; /* the selection records this draw's outcome */
-        if(p->shadowSelected&&p->shadowSkinned)prepareFill(*p,metadata); /* 0.3.177: the stable selection's inputs */
-        replays.emplace_back(p.release());preparePublish();if(detailed)++capturePhaseAccepted;
+        // 0.3.179 (M1): the handoff (fill + publish) as one span on sampled records of RenderProfile sample frames.
+        const bool handoff=p->shadowSelected&&p->shadowSkinned,timedHandoff=handoff&&prepareHandoffSample();
+        const auto handoffStart=timedHandoff?prepareMeter.start():std::chrono::steady_clock::time_point{};
+        if(handoff)prepareFill(*p,metadata); /* 0.3.177: the stable selection's inputs */
+        replays.emplace_back(p.release());preparePublish();if(timedHandoff)prepareMeter.stop(handoffStart);if(detailed)++capturePhaseAccepted;
     }
 
     // One directional replay draw in the 0.3.142 order: geometry, pose constants,

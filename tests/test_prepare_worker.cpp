@@ -325,6 +325,26 @@ static void wakeStress(World& world,unsigned frames){
     }
     std::printf("wake stress (WakeBatch=1, release publish, fence-fence wake): %u frames, %zu records all prepared by the worker, %zu producer pauses past the spin, %u notifies; equal to inline\n",frames,records,slept,wakes);
 }
+// 0.3.179 (M1): the handoff meter against a synthetic clock whose every read costs readNs (the span of a
+// timed record pays about one read): the corrected estimate equals the true (x16) cost within 5 %; raw is
+// inflated past 20 % (the counterfactual without the pair subtraction fails the bound). Off: no clock read.
+struct SynthClock {using rep=std::int64_t;using period=std::nano;using duration=std::chrono::nanoseconds;using time_point=std::chrono::time_point<SynthClock>;
+    static constexpr bool is_steady=true;static std::int64_t nowNs,readNs;static time_point now(){nowNs+=readNs/2;const time_point t{duration(nowNs)};nowNs+=readNs-readNs/2;return t;}};
+std::int64_t SynthClock::nowNs=0,SynthClock::readNs=0;
+static void handoffMeter(){
+    std::mt19937 rng(1795);unsigned frames=0,rawFails=0;double worst=0;
+    for(unsigned f=0;f<200;++f){SynthClock::readNs=100+rng()%300;NorthlightActorPrepare::HandoffMeter<SynthClock> meter;meter.beginFrame(true,f);
+        double sampledNs=0;unsigned expected=0;const unsigned records=300+rng()%900;
+        for(unsigned k=0;k<records;++k){const std::int64_t work=60+rng()%120; /* ~0.1 us a record */
+            const bool timed=meter.sample();expected+=(k+f)%16==0;assert(timed==((k+f)%16==0)); /* stride 16 from the frame's phase */
+            if(timed){const auto t=meter.start();SynthClock::nowNs+=work;meter.stop(t);sampledNs+=double(work);}else SynthClock::nowNs+=work;}
+        const double trueUs=16*sampledNs/1000;worst=std::max(worst,std::fabs(meter.correctedUs()-trueUs)/trueUs);
+        assert(std::fabs(meter.pairNs()-double(SynthClock::readNs))<1&&meter.samples()==expected);
+        rawFails+=meter.rawUs()>1.2*trueUs;++frames;}
+    NorthlightActorPrepare::HandoffMeter<SynthClock> off;off.beginFrame(false,0);const auto before=SynthClock::nowNs;for(unsigned k=0;k<100;++k)assert(!off.sample());assert(SynthClock::nowNs==before);
+    assert(worst<.05&&rawFails==frames);
+    std::printf("handoff meter: corrected within %.2f %% of the true cost over %u synthetic frames (clock reads 100-400 ns); raw inflated past 20 %% in all\n",100*worst,frames);
+}
 // Test processes: a throw on one index, or a stall (the watchdog).
 static std::atomic<std::size_t> throwAt{SIZE_MAX},stallAt{SIZE_MAX};
 struct Faulty {template<class R> void operator()(State& s,const R& p,std::size_t index,Caches& c,const NorthlightActorPrepare::Frame& f,Output& out)const{
@@ -438,8 +458,10 @@ static void integration(World& world,unsigned frames,unsigned maxGroups){
         for(std::size_t i=0;i<records.size();++i){auto rec=std::move(records[i]);
             rec->program=nullptr;rec->declCopy=nullptr;rec->declared=false;rec->elementCount=0; /* the renderer's fill below */
             if(rng()%4==0)delay(rng);
-            if(rec->shadowSelected&&rec->shadowSkinned)r.prepareFill(*rec,r.captureShaders[rec->originalShader]);
-            r.replays.emplace_back(std::move(rec));r.preparePublish();
+            const bool handoff=rec->shadowSelected&&rec->shadowSkinned,timedHandoff=handoff&&r.prepareHandoffSample(); /* captureModel's M1 span */
+            const auto handoffStart=timedHandoff?r.prepareMeter.start():std::chrono::steady_clock::time_point{};
+            if(handoff)r.prepareFill(*rec,r.captureShaders[rec->originalShader]);
+            r.replays.emplace_back(std::move(rec));r.preparePublish();if(timedHandoff)r.prepareMeter.stop(handoffStart);
             if(rng()%50==0)r.prepareCachesStale=true; /* registerShader */
             if(trim&&i==trimAt){r.prepareQuiesce();++quiesced;}}
         if(rng()%10){
@@ -475,8 +497,10 @@ static void rearmCap(World& world){
         const Camera c=camera(rng);std::memcpy(r.context.inverseView,c.inverseView,64);std::memcpy(r.context.camera,c.camera,12);
         for(std::size_t i=0;i<records.size();++i){auto rec=std::move(records[i]);rec->program=nullptr;rec->declCopy=nullptr;rec->declared=false;rec->elementCount=0;
             if(stall&&rec->shadowSelected&&rec->shadowSkinned&&stallAt.load()==SIZE_MAX)stallAt=i;
-            if(rec->shadowSelected&&rec->shadowSkinned)r.prepareFill(*rec,r.captureShaders[rec->originalShader]);
-            r.replays.emplace_back(std::move(rec));r.preparePublish();}
+            const bool handoff=rec->shadowSelected&&rec->shadowSkinned,timedHandoff=handoff&&r.prepareHandoffSample(); /* captureModel's M1 span */
+            const auto handoffStart=timedHandoff?r.prepareMeter.start():std::chrono::steady_clock::time_point{};
+            if(handoff)r.prepareFill(*rec,r.captureShaders[rec->originalShader]);
+            r.replays.emplace_back(std::move(rec));r.preparePublish();if(timedHandoff)r.prepareMeter.stop(handoffStart);}
         if(stall)std::this_thread::sleep_for(std::chrono::milliseconds(2)); /* the worker is inside the stalled record */
         r.prepareJoin();const std::string mode=r.prepareStats.mode;
         std::size_t tests=0,reused=0;r.actorShadowDraws.clear();r.prepareStable(tests,reused);
@@ -530,6 +554,7 @@ static void programLifetime(World& world,bool counterfactual){
 int main(int argc,char** argv){
     assert(argc>2);World world(argv[1]);const bool tsan=std::string(argv[2])=="tsan";
     if(std::string(argv[2])=="lifetime-counterfactual"){programLifetime(world,true);return 0;}
+    handoffMeter();
     loopIdentity(world,tsan?40:600);layouts(world,tsan?20:200);staleDeclaration(world);handover(world,tsan?4:24);evictedDeclaration(world);
     threaded<NorthlightActorPrepare::Prepare>(world,tsan?10000:3000,tsan?3:12,false);
     wakeStress(world,tsan?600:1500);

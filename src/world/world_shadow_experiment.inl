@@ -65,8 +65,8 @@
         if(captureSampled){const double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
             // 0.3.177 (r83): the prepare worker's fields, RenderProfile only.
             char prepareFields[400]="";
-            if(NorthlightRenderThreadProbe::profiling())std::snprintf(prepareFields,sizeof prepareFields," prepareMode=%s published=%u workerRecords=%u joinInlineRecords=%u workerPrepareMs=%.3f joinWaitMs=%.3f joinInlineMs=%.3f wakes=%u notifyUs=%.1f handoffUs=%.1f prepareMismatch=%u cachesStaleClears=%u prepareResync=%u prepareRearms=%u",
-                prepareStats.mode,prepareStats.published,prepareStats.workerRecords,prepareStats.joinInline,prepareStats.workerMs,prepareStats.joinWaitMs,prepareStats.joinInlineMs,prepareStats.wakes,prepareStats.notifyUs,prepareStats.handoffUs,prepareStats.mismatch,prepareStats.staleClears,prepareStats.resync,prepareRearms);
+            if(NorthlightRenderThreadProbe::profiling())std::snprintf(prepareFields,sizeof prepareFields," prepareMode=%s published=%u workerRecords=%u joinInlineRecords=%u workerPrepareMs=%.3f joinWaitMs=%.3f joinInlineMs=%.3f wakes=%u notifyUs=%.1f handoffUs=%.1f handoffRawUs=%.1f pairNs=%.1f handoffSamples=%u handoffWarmUs=%.1f prepareMismatch=%u cachesStaleClears=%u prepareResync=%u prepareRearms=%u",
+                prepareStats.mode,prepareStats.published,prepareStats.workerRecords,prepareStats.joinInline,prepareStats.workerMs,prepareStats.joinWaitMs,prepareStats.joinInlineMs,prepareStats.wakes,prepareStats.notifyUs,prepareMeter.on()?prepareMeter.correctedUs():-1.0,prepareMeter.on()?prepareMeter.rawUs():-1.0,prepareMeter.pairNs(),prepareMeter.samples(),prepareStats.handoffWarmUs,prepareStats.mismatch,prepareStats.staleClears,prepareStats.resync,prepareRearms);
             if(stable.actors+stable.rigidActors){deferLogf("MODEL shadow actors ranked=%zu kept=%zu toggles=%zu togglesSinceLog=%zu rankedFramesSinceLog=%u matched=%zu retained=%zu rigidActors=%zu rigidDraws=%zu rigidBytes=%zu attached=%zu attachedBytes=%zu orphans=%zu freeNearBody=%zu attachRadius=%.1f rigidHits=%u rigidMisses=%u rigidScannedVertices=%zu history=%zu cut=prefix margin=%.2f origin=%s rigidNew=%zu prepareMs=%.3f chooseMs=%.3f exemptActors=%zu exemptDraws=%zu exemptBytes=%zu cappedExempt=%zu stillRankedSmall=%zu exemptCapBindsSinceLog=%u rooted=%zu rootFallback=%zu rootRejected=%zu locked=%zu exemptNpcLike=%zu%s",
                 stable.actors,stable.actorsKept,stable.toggles,actorShadowToggles,actorShadowFrames,stable.matched,stable.retained,stable.rigidActors,stable.rigidDraws,stable.rigidBytes,stable.attached,stable.attachedBytes,stable.orphans,stable.rigidStuck,double(NorthlightActorShadowSelection::AttachRadius),prepareCaches->bones.hits,prepareCaches->bones.misses,prepareCaches->bones.scannedVertices,actorShadowHistory.size(),double(NorthlightActorShadowSelection::active().margin),NorthlightActorShadowSelection::FlickerFixes&&actorShadowOriginValid?"pivot":"camera",stable.rigidNew,actorShadowPrepareMs,actorShadowChooseMs,stable.exemptActors,stable.exemptDraws,stable.exemptBytes,stable.cappedExempt,stable.stillRankedSmall,actorShadowCapBinds,stable.rooted,stable.rootFallback,stable.rootRejected,stable.locked,stable.exemptNpcLike,prepareFields);actorShadowCapBinds=0;
                 actorShadowToggles=0;actorShadowFrames=0;}
@@ -90,13 +90,17 @@
     // 6 cores, no thread, ActorShadows=0, a legacy tuning, after a watchdog, and the RenderProfile A/B
     // inline windows (every other 10 s).
     enum class PrepareFrame : unsigned char {None,Worker,Inline,Joined};
-    PrepareFrame prepareFrame=PrepareFrame::None;bool prepareOutputsReady=false,prepareOpened=false,prepareTimed=false;std::uint32_t prepareCount=0,prepareSerial=0;
+    PrepareFrame prepareFrame=PrepareFrame::None;bool prepareOutputsReady=false,prepareOpened=false,prepareTimed=false;std::uint32_t prepareCount=0;
     const unsigned prepareCores=std::thread::hardware_concurrency();
     std::atomic<bool> prepareCachesStale{false}; /* registerShader(): the owner clears the caches at its next open */
     // RenderProfile diagnostics of the frame (appended to MODEL shadow actors); -1: not measured.
     struct PrepareStats {const char* mode="inline";std::uint32_t published=0,workerRecords=0,joinInline=0,wakes=0,mismatch=0,staleClears=0,resync=0;
-        double workerMs=-1,joinWaitMs=-1,joinInlineMs=-1,notifyUs=-1,handoffUs=-1;} prepareStats;
-    double prepareHandoffUs=0;unsigned prepareFaults=0;
+        double workerMs=-1,joinWaitMs=-1,joinInlineMs=-1,notifyUs=-1,handoffWarmUs=-1;} prepareStats;
+    unsigned prepareFaults=0;
+    // 0.3.179 (M1): the capture-side handoff, RenderProfile sample frames only; the phase from the frame serial.
+    NorthlightActorPrepare::HandoffMeter<std::chrono::steady_clock> prepareMeter;bool prepareMeterBegun=false;std::uint32_t prepareFrameSerial=0;
+    bool prepareHandoffSample(){if(!prepareMeterBegun){prepareMeterBegun=true;prepareMeter.beginFrame(profileSampled(),prepareFrameSerial);}return prepareMeter.sample();}
+    std::atomic<std::uint32_t> prepareWarmCounter{0};std::atomic<std::uintptr_t> prepareWarmSink{0}; /* M2's publish and result stand-ins */
     // Watchdog re-arm: a settled abandoned worker is taken back PrepareRearmAfterMs after its abandon, at
     // most PrepareRearms times a session (a one-off scheduler stall must not cost the whole session).
     static constexpr unsigned PrepareRearms=4;static constexpr DWORD PrepareRearmAfterMs=10000;
@@ -126,10 +130,7 @@
         const Replay& p=*replays.back();if(!p.shadowSelected||!p.shadowSkinned)return;
         if(prepareFrame==PrepareFrame::None)prepareOpen();
         if(prepareFrame!=PrepareFrame::Worker)return;
-        const bool sample=prepareTimed&&!(prepareSerial++&15u);
-        const auto start=sample?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
         prepareWorker.publish(&p,replays.size()-1); /* false (arena full): the join's check resyncs inline */
-        if(sample)prepareHandoffUs+=16*std::chrono::duration<double,std::micro>(std::chrono::steady_clock::now()-start).count();
     }
     // The worker did not acknowledge within the watchdog: inline until it is re-armed (prepareEndFrame).
     // It may still be in one record: its caches are set aside and the replays it may read are quarantined
@@ -151,7 +152,7 @@
     // endFrame (after prepareQuiesce): the next frame starts closed; a settled abandoned worker frees
     // what it held and, within the re-arm budget, returns to use.
     void prepareEndFrame(){
-        prepareFrame=PrepareFrame::None;prepareOutputsReady=false;prepareOpened=false;prepareTimed=false;prepareCount=prepareSerial=0;prepareHandoffUs=0;prepareStats=PrepareStats{};
+        prepareFrame=PrepareFrame::None;prepareOutputsReady=false;prepareOpened=false;prepareTimed=false;prepareCount=0;prepareMeterBegun=false;prepareMeter.beginFrame(false,0);++prepareFrameSerial;prepareStats=PrepareStats{};
         if(prepareWorker.abandoned()&&prepareWorker.settled()){
             if(!prepareQuarantine.empty()){auto held=std::move(prepareQuarantine);prepareQuarantine.clear();for(auto& p:held)recycleReplay(p.release());}
             prepareAbandonedCaches.reset();
@@ -166,7 +167,7 @@
         prepareFrame=PrepareFrame::Joined;
         const auto r=prepareWorker.stop();
         prepareStats.published=r.published;prepareStats.wakes=prepareWorker.wakes();
-        if(prepareTimed){prepareStats.joinWaitMs=r.waitMs;prepareStats.notifyUs=prepareWorker.notifyUs();prepareStats.workerMs=prepareWorker.busyMs();prepareStats.handoffUs=prepareHandoffUs;}
+        if(prepareTimed){prepareStats.joinWaitMs=r.waitMs;prepareStats.notifyUs=prepareWorker.notifyUs();prepareStats.workerMs=prepareWorker.busyMs();}
         if(r.timedOut){prepareAbandon();return;} /* the selection prepares inline with the new caches */
         if(r.failed&&prepareFaults++<4)logf("PREPARE worker record failed (exception); the join prepared it inline");
         const auto started=prepareTimed?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
@@ -178,6 +179,7 @@
         }catch(...){prepareOutputsReady=false;} /* the selection prepares inline */
         prepareStats.workerRecords=r.done;prepareStats.joinInline=r.published-r.done;
         if(prepareTimed){prepareStats.joinInlineMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();prepareSelfCheck();}
+        if(profileSampled()&&r.published)prepareWarmHandoff(r.published); /* M2 */
     }
     // RenderProfile sample frames: every 16th output recomputed inline (scratch caches, the carried state
     // of the output before it) and compared bit for bit; the frozen camera compared with the context.
@@ -204,8 +206,6 @@
     // replays): its program (0.3.179: the capture metadata's) and a copy of its declaration; declared:
     // program && the declaration was read (the stable selection's declared()).
     void prepareFill(Replay& p,const CaptureShader& metadata){
-        const bool sample=prepareTimed&&prepareFrame==PrepareFrame::Worker&&!(prepareSerial&15u); /* handoffUs: 1 in 16 */
-        const auto start=sample?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
         p.program=metadata.program.get(); /* 0.3.179 (T1): the capture metadata's (the program map's object): no lookup, no reference */
         p.declCopy=nullptr;p.elementCount=0;
         // 0.3.179 (T2): the frame's copy of the declaration, read once a frame; the per-record copy when full.
@@ -215,7 +215,20 @@
         else{const D3DVERTEXELEMENT9* elements=nullptr;UINT count=0;
             p.declared=p.program&&declarationCache.get(p.decl,elements,count)&&count<=p.elements.size();
             p.elementCount=p.declared?count:0;if(p.declared)std::copy(elements,elements+count,p.elements.begin());}
-        if(sample)prepareHandoffUs+=16*std::chrono::duration<double,std::micro>(std::chrono::steady_clock::now()-start).count();
+    }
+    // 0.3.179 (M2): a warm lower bound of the handoff. At the join of a RenderProfile sample frame, the
+    // fill's work for every published record again, into a scratch value (no replay written, no reference
+    // taken), with a release store standing in for the publish; one clock pair.
+    void prepareWarmHandoff(std::uint32_t published){
+        const auto start=std::chrono::steady_clock::now();std::uintptr_t sink=0;
+        for(std::uint32_t k=0;k<published;++k){const Replay& p=*prepareWorker.record(k);
+            struct {const NorthlightActorDeformation::Program* program;const NorthlightActorPrepare::DeclCopy* decl;bool declared;} scratch{p.program,nullptr,false};
+            if(scratch.program&&prepareDecls){scratch.decl=prepareDecls->find(p.decl,[this](IDirect3DVertexDeclaration9* decl,const D3DVERTEXELEMENT9*& elements,UINT& count){return declarationCache.get(decl,elements,count);});
+                scratch.declared=scratch.decl&&scratch.decl->declared;}
+            sink+=reinterpret_cast<std::uintptr_t>(scratch.program)^reinterpret_cast<std::uintptr_t>(scratch.decl)^std::uintptr_t(scratch.declared);
+            prepareWarmCounter.store(k+1,std::memory_order_release);}
+        prepareWarmSink.store(sink,std::memory_order_relaxed);
+        prepareStats.handoffWarmUs=std::chrono::duration<double,std::micro>(std::chrono::steady_clock::now()-start).count();
     }
     // One prepared draw into the selection: its draw, and (0.3.176 S2) the rigid bone it tested.
     void prepareConsume(const NorthlightActorPrepare::Output& out){

@@ -39,7 +39,7 @@ trim=body(g,'    MemoryTrim trimMemory(){')
 register=body(w,'    void registerShader(IDirect3DVertexShader9* shader,uint64_t hash){')
 checks.update({
  'capture: the inputs filled just before a selected skinned draw joins replays, published right after':
-    'if(p->shadowSelected&&p->shadowSkinned)prepareFill(*p,metadata); /* 0.3.177: the stable selection\'s inputs */\n        replays.emplace_back(p.release());preparePublish();' in capture,
+    'if(handoff)prepareFill(*p,metadata); /* 0.3.177: the stable selection\'s inputs */\n        replays.emplace_back(p.release());preparePublish();' in capture,
  'the join is the first statement of selectShadowReplays':select.split('{',1)[1].lstrip().startswith('prepareJoin();'),
  'quiesce before recycling: endFrame, reset (endFrame, releaseGPU), releaseGPU, trimMemory':
     end.index('prepareQuiesce();prepareEndFrame();')<end.index('recycleReplay(')
@@ -88,6 +88,12 @@ checks.update({
     (lambda h:'slots_[n]={record,index};published_.store(n+1,std::memory_order_release);\n        if(n+1-done_.load(std::memory_order_relaxed)>=wakeBatch_){std::atomic_thread_fence(std::memory_order_seq_cst);if(wakeable_.exchange(false))notify();}' in h
         and 'blocked_=true;wakeable_.store(true,std::memory_order_relaxed);std::atomic_thread_fence(std::memory_order_seq_cst);\n            wake_.wait(lock,' in h
         and h.count('std::atomic_thread_fence(std::memory_order_seq_cst)')==2 and 'published_.store(n+1,std::memory_order_seq_cst)' not in h)(fp.src('prepare_worker.h').read_text()),
+ 'M1/M2 (0.3.179): one span per sampled record around fill and publish in captureModel; the meter and the warm re-run gated by profileSampled()':
+    'const bool handoff=p->shadowSelected&&p->shadowSkinned,timedHandoff=handoff&&prepareHandoffSample();' in capture
+    and capture.index('prepareMeter.start()')<capture.index('prepareFill(*p,metadata);')<capture.index('replays.emplace_back(p.release());preparePublish();if(timedHandoff)prepareMeter.stop(handoffStart);')
+    and 'prepareMeter.beginFrame(profileSampled(),prepareFrameSerial);' in x and 'if(profileSampled()&&r.published)prepareWarmHandoff(r.published);' in x
+    and 'steady_clock' not in body(x,'    void prepareFill(Replay& p,const CaptureShader& metadata){') and 'steady_clock' not in body(x,'    void preparePublish(){')
+    and 'handoffUs=%.1f handoffRawUs=%.1f pairNs=%.1f handoffSamples=%u handoffWarmUs=%.1f' in x,
  'diagnostics only with RenderProfile (the fields and every clock)':
     'if(NorthlightRenderThreadProbe::profiling())std::snprintf(prepareFields,' in x and 'prepareTimed=profileSampled();' in x,
  'the worker is destroyed (joined) before the replays, caches and quarantine it reads':

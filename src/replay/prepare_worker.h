@@ -116,6 +116,28 @@ struct Frame {float inverseView[16]={},camera[3]={};bool timed=false;};
 struct Prepare {template<class Record> void operator()(State& s,const Record& p,std::size_t index,Caches& c,const Frame& f,Output& out)const{
     prepareRecord(s,p,index,c,f.inverseView,f.camera,out);}};
 
+// 0.3.179 (M1): the capture-side handoff (fill + publish) timed as one span per sampled record, 1 in
+// Stride from a per-frame phase, minus the cost of the clock read pair itself (pairNs: the median delta
+// of 33 back-to-back reads, taken once per measured frame at its first sampled record). rawUs and
+// correctedUs are frame estimates (x Stride). Off: no clock read.
+template<class Clock> class HandoffMeter {
+    bool on_=false;unsigned phase_=0,count_=0,samples_=0;double pairNs_=-1,rawNs_=0,correctedNs_=0;
+    static double ns(typename Clock::duration d){return std::chrono::duration<double,std::nano>(d).count();}
+    void calibrate(){typename Clock::time_point t[33];for(auto& x:t)x=Clock::now();double d[32];
+        for(unsigned i=0;i<32;++i)d[i]=ns(t[i+1]-t[i]);std::nth_element(d,d+16,d+32);pairNs_=d[16];}
+public:
+    static constexpr unsigned Stride=16;
+    void beginFrame(bool on,unsigned phase){on_=on;phase_=phase%Stride;count_=samples_=0;pairNs_=-1;rawNs_=correctedNs_=0;}
+    bool on()const{return on_;}
+    // Per selected skinned record, in capture order: whether it is timed.
+    bool sample(){if(!on_)return false;const bool s=(count_++ +phase_)%Stride==0;if(s&&pairNs_<0)calibrate();return s;}
+    typename Clock::time_point start()const{return Clock::now();}
+    void stop(typename Clock::time_point t){const double span=ns(Clock::now()-t);rawNs_+=span;correctedNs_+=std::max(0.,span-pairNs_);++samples_;}
+    double rawUs()const{return Stride*rawNs_/1000;}
+    double correctedUs()const{return Stride*correctedNs_/1000;}
+    double pairNs()const{return pairNs_;}
+    unsigned samples()const{return samples_;}
+};
 inline void pause(){
 #if defined(__i386__)||defined(__x86_64__)
     __builtin_ia32_pause();
