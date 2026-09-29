@@ -64,7 +64,7 @@ LEGACY = r"""        const auto start=std::chrono::steady_clock::now();
                     if(program==actorPrograms.end())return {};
                     const D3DVERTEXELEMENT9* elements=nullptr;UINT count=0;
                     if(!declarationCache.get(p->decl,elements,count))return {};
-                    return NorthlightReplayBounds::EnvelopeCache::prepareProgram(program->second,elements,count);
+                    return NorthlightReplayBounds::EnvelopeCache::prepareProgram(*program->second,elements,count);
                 });
             }
             NorthlightReplayBounds::Status status;
@@ -80,9 +80,9 @@ LEGACY = r"""        const auto start=std::chrono::steady_clock::now();
                 if(program==actorPrograms.end()){p->boundsWork.kind=WorkKind::Unsupported;return false;}
                 const D3DVERTEXELEMENT9* elements=nullptr;UINT count=0;
                 if(!declarationCache.get(p->decl,elements,count)){p->boundsWork.kind=WorkKind::Unsupported;return false;}
-                if(phase==0){++cheapVisited;status=replayBoundsCache.calculateCheap(program->second,p->mesh(),p->shared,elements,count,p->constants,context.inverseView,cheapBudget,p->pointBounds,p->boundsWork);}
-                else if(phase==1){++heavyVisited;status=replayBoundsCache.evaluateHeavy(program->second,p->mesh(),p->shared,elements,count,p->constants,context.inverseView,heavyBudget,p->pointBounds,p->boundsWork);}
-                else{++buildVisited;status=replayBoundsCache.buildEnclosed(program->second,p->mesh(),p->shared,elements,count,p->constants,context.inverseView,buildBudget,p->pointBounds);}
+                if(phase==0){++cheapVisited;status=replayBoundsCache.calculateCheap(*program->second,p->mesh(),p->shared,elements,count,p->constants,context.inverseView,cheapBudget,p->pointBounds,p->boundsWork);}
+                else if(phase==1){++heavyVisited;status=replayBoundsCache.evaluateHeavy(*program->second,p->mesh(),p->shared,elements,count,p->constants,context.inverseView,heavyBudget,p->pointBounds,p->boundsWork);}
+                else{++buildVisited;status=replayBoundsCache.buildEnclosed(*program->second,p->mesh(),p->shared,elements,count,p->constants,context.inverseView,buildBudget,p->pointBounds);}
             }
             if(status==NorthlightReplayBounds::Status::Valid)++pointBoundsValid;
             return status==NorthlightReplayBounds::Status::Budget;
@@ -148,13 +148,13 @@ struct Packet {
 struct DeclarationCache {bool get(IDirect3DVertexDeclaration9* d,const D3DVERTEXELEMENT9*& e,UINT& n){if(!d)return false;auto* f=static_cast<FakeDecl*>(d);e=f->elements.data();n=UINT(f->elements.size());return true;}};
 struct Context {float inverseView[16]={};};
 struct World {
-    std::unordered_map<IDirect3DVertexShader9*,Program>& actorPrograms;
+    std::unordered_map<IDirect3DVertexShader9*,std::shared_ptr<const Program>>& actorPrograms; /* 0.3.177: the renderer's program handles */
     std::vector<std::unique_ptr<Packet>> replays;
     NorthlightReplayBounds::Cache replayBoundsCache;
     NorthlightReplayMetadata::Cache<Prepared,IDirect3DVertexShader9,IDirect3DVertexDeclaration9> replayBoundsMetadata;
     DeclarationCache declarationCache;Context context;unsigned frames=0,logs=0;
     unsigned pointBoundsValid=0;size_t pointBoundVertices=0,pointBoundOperations=0;Totals visits;
-    explicit World(std::unordered_map<IDirect3DVertexShader9*,Program>& programs):actorPrograms(programs){}
+    explicit World(std::unordered_map<IDirect3DVertexShader9*,std::shared_ptr<const Program>>& programs):actorPrograms(programs){}
     void pointLogReplayBounds(const Totals& t,double,double,double,double,double,bool){visits=t;++logs;}
     void legacyPass(){
 """ + LEGACY + r"""
@@ -191,12 +191,12 @@ static Program rigid(){
     op={};op.code=2;op.destination=0x80070000;op.source[0].token=0x80e40000;op.source[1].token=0xa0e4000a;p.operations.push_back(op);return p;
 }
 struct Scene {
-    IDirect3DVertexShader9 shaders[4];FakeDecl decls[2];std::unordered_map<IDirect3DVertexShader9*,Program> programs;
+    IDirect3DVertexShader9 shaders[4];FakeDecl decls[2];std::unordered_map<IDirect3DVertexShader9*,std::shared_ptr<const Program>> programs;
     std::vector<std::shared_ptr<const Mesh>> pool;std::vector<unsigned> kinds;std::mt19937 rng{143};
     std::vector<std::array<float,1024>> banks;unsigned heavyBones=3,heavyShare=2;
     explicit Scene(const Program& skin,size_t meshes,unsigned bones=3,unsigned share=2):heavyBones(bones),heavyShare(share){
         Program heavy=skin;Operation copy;copy.code=1;copy.destination=0x80070001;copy.source[0].token=0x80e40001;heavy.operations.push_back(copy);
-        programs[&shaders[0]]=skin;programs[&shaders[1]]=heavy;programs[&shaders[2]]=rigid(); /* shaders[3]: unknown program */
+        programs[&shaders[0]]=std::make_shared<const Program>(skin);programs[&shaders[1]]=std::make_shared<const Program>(heavy);programs[&shaders[2]]=std::make_shared<const Program>(rigid()); /* shaders[3]: unknown program */
         for(auto& d:decls)d.elements.assign(declaration,declaration+4);
         for(size_t i=0;i<meshes;++i)add();
     }
@@ -219,7 +219,7 @@ struct Scene {
 };
 static void warm(World& w,Scene& s){ // metadata warm for every pair (<=4 new per frame)
     for(unsigned round=0;round<8;++round){w.replayBoundsMetadata.beginFrame();
-        for(unsigned sh=0;sh<3;++sh)for(auto& d:s.decls)w.replayBoundsMetadata.get(&s.shaders[sh],&d,[&]{return NorthlightReplayBounds::EnvelopeCache::prepareProgram(s.programs[&s.shaders[sh]],d.elements.data(),d.elements.size());});}
+        for(unsigned sh=0;sh<3;++sh)for(auto& d:s.decls)w.replayBoundsMetadata.get(&s.shaders[sh],&d,[&]{return NorthlightReplayBounds::EnvelopeCache::prepareProgram(*s.programs[&s.shaders[sh]],d.elements.data(),d.elements.size());});}
 }
 [[maybe_unused]] static void compareCaches(const World& a,const World& b,size_t n){
     const auto& x=a.replayBoundsCache;const auto& y=b.replayBoundsCache;
@@ -263,7 +263,7 @@ int main(int argc,char** argv){
                 if(!stress)assert(same(a.pointBounds,l.pointBounds)&&sameWork(a.boundsWork,l.boundsWork));
                 else{if(a.pointBounds.valid&&l.pointBounds.valid)assert(same(a.pointBounds,l.pointBounds));else differentValid+=a.pointBounds.valid!=l.pointBounds.valid;}
                 valid+=a.pointBounds.valid;unsupported+=a.boundsWork.kind==NorthlightReplayBounds::WorkKind::Unsupported;
-                if(a.pointBounds.valid&&pick()%97==0)enclosedVertices+=enclosed(scene.programs[a.originalShader],*a.shared,a.constants,async.context.inverseView,a.pointBounds);
+                if(a.pointBounds.valid&&pick()%97==0)enclosedVertices+=enclosed(*scene.programs[a.originalShader],*a.shared,a.constants,async.context.inverseView,a.pointBounds);
             }
             budgetFrames+=legacy.replayBoundsCache.envelopeStats().timeDeferred>0;
             if(!stress)scene.churn(2); /* after both passes: identical expiry for both caches */

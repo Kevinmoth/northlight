@@ -135,7 +135,7 @@
             if(program==actorPrograms.end())return {};
             const D3DVERTEXELEMENT9* elements=nullptr;UINT count=0;
             if(!declarationCache.get(decl,elements,count))return {};
-            return NorthlightReplayBounds::EnvelopeCache::prepareProgram(program->second,elements,count);
+            return NorthlightReplayBounds::EnvelopeCache::prepareProgram(*program->second,elements,count);
         };
         auto prepared=replayBoundsMetadata.get(shader,decl,build);
         if(prepared||built)return prepared; /* built and still null: no program/declaration */
@@ -220,7 +220,7 @@
                     if(program==actorPrograms.end())return {};
                     const D3DVERTEXELEMENT9* elements=nullptr;UINT count=0;
                     if(!declarationCache.get(p->decl,elements,count))return {};
-                    return NorthlightReplayBounds::EnvelopeCache::prepareProgram(program->second,elements,count);
+                    return NorthlightReplayBounds::EnvelopeCache::prepareProgram(*program->second,elements,count);
                 });
             }
             NorthlightReplayBounds::Status status;
@@ -236,9 +236,9 @@
                 if(program==actorPrograms.end()){p->boundsWork.kind=WorkKind::Unsupported;return false;}
                 const D3DVERTEXELEMENT9* elements=nullptr;UINT count=0;
                 if(!declarationCache.get(p->decl,elements,count)){p->boundsWork.kind=WorkKind::Unsupported;return false;}
-                if(phase==0){++cheapVisited;status=replayBoundsCache.calculateCheap(program->second,p->mesh(),p->shared,elements,count,p->constants,context.inverseView,cheapBudget,p->pointBounds,p->boundsWork);}
-                else if(phase==1){++heavyVisited;status=replayBoundsCache.evaluateHeavy(program->second,p->mesh(),p->shared,elements,count,p->constants,context.inverseView,heavyBudget,p->pointBounds,p->boundsWork);}
-                else{++buildVisited;status=replayBoundsCache.buildEnclosed(program->second,p->mesh(),p->shared,elements,count,p->constants,context.inverseView,buildBudget,p->pointBounds);}
+                if(phase==0){++cheapVisited;status=replayBoundsCache.calculateCheap(*program->second,p->mesh(),p->shared,elements,count,p->constants,context.inverseView,cheapBudget,p->pointBounds,p->boundsWork);}
+                else if(phase==1){++heavyVisited;status=replayBoundsCache.evaluateHeavy(*program->second,p->mesh(),p->shared,elements,count,p->constants,context.inverseView,heavyBudget,p->pointBounds,p->boundsWork);}
+                else{++buildVisited;status=replayBoundsCache.buildEnclosed(*program->second,p->mesh(),p->shared,elements,count,p->constants,context.inverseView,buildBudget,p->pointBounds);}
             }
             if(status==NorthlightReplayBounds::Status::Valid)++pointBoundsValid;
             return status==NorthlightReplayBounds::Status::Budget;

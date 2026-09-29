@@ -40,7 +40,7 @@
                         ++distanceTests;const auto program=actorPrograms.find(p.originalShader);
                         const D3DVERTEXELEMENT9* elements=nullptr;UINT count=0;
                         item.known=program!=actorPrograms.end()&&declarationCache.get(p.decl,elements,count)&&
-                            sampledVertices.distance(program->second,p.mesh(),p.shared,p.decl,elements,count,
+                            sampledVertices.distance(*program->second,p.mesh(),p.shared,p.decl,elements,count,
                                 p.constants,context.inverseView,context.camera,item.distanceSquared);
                     }
                     previousGroup=p.constantGroup;previousShader=p.originalShader;previousDecl=p.decl;
@@ -98,14 +98,14 @@
                 item.known=previousKnown;item.distanceSquared=previousDistance;std::memcpy(item.at,previousAt,sizeof item.at);++distanceReused;
             }else{
                 ++distanceTests;
-                item.known=declared()&&sampledVertices.distance(program->second,p.mesh(),p.shared,p.decl,elements,count,
+                item.known=declared()&&sampledVertices.distance(*program->second,p.mesh(),p.shared,p.decl,elements,count,
                     p.constants,context.inverseView,context.camera,item.distanceSquared,item.at);
             }
             // A group is rigid only if every draw is: after its first multi-bone
             // draw the remaining draws need no palette test. Only a group's first
             // draw supplies the actor identity key.
             const bool first=p.constantGroup!=previousGroup;if(first)groupRigid=true;
-            item.bone=groupRigid&&declared()?rigidBones.bone(program->second,p.mesh(),p.shared,p.decl,elements,count):NAN;item.rigid=!std::isnan(item.bone);
+            item.bone=groupRigid&&declared()?rigidBones.bone(*program->second,p.mesh(),p.shared,p.decl,elements,count):NAN;item.rigid=!std::isnan(item.bone);
             {Replay& stored=*replays[index];stored.boneKnown=groupRigid&&declared();stored.bone=item.bone;} /* 0.3.176 (S2): rigidObserveGroup reuses it */
             groupRigid=item.rigid;
             if(tuning.stableIdentity){
@@ -120,8 +120,8 @@
                 if(first){if(program==actorPrograms.end())program=actorPrograms.find(p.originalShader);
                     // Only the audited palette template (c31.. row-major 3x4 bones, translation
                     // in w: the skin-envelope specialization) has a provable root.
-                    item.hasRoot=program!=actorPrograms.end()&&NorthlightReplayBounds::SkinEnvelope::supports(program->second)&&program->second.paletteBase==31&&
-                        NorthlightActorDeformation::rootWorld(program->second,p.constants,context.inverseView,item.root);}}
+                    item.hasRoot=program!=actorPrograms.end()&&NorthlightReplayBounds::SkinEnvelope::supports(*program->second)&&program->second->paletteBase==31&&
+                        NorthlightActorDeformation::rootWorld(*program->second,p.constants,context.inverseView,item.root);}}
             else if(first){std::uint64_t key=14695981039346656037ull;auto mix=[&](uint64_t n){key=(key^n)*1099511628211ull;};
                 mix(reinterpret_cast<uintptr_t>(p.originalShader));mix(reinterpret_cast<uintptr_t>(p.decl));mix(p.mesh().vertexCount);mix(p.mesh().primitiveCount);mix(item.bytes);
                 item.key=key;groupDraw=0;
@@ -130,7 +130,7 @@
                 groupStationary=tuning.stationary&&!item.rigid&&item.known&&actorShadowHistory.stationaryHint(key,item.at);}
             if(!tuning.stableIdentity){
                 if(groupStationary&&groupDraw<2&&declared())for(unsigned x=0;x<2;++x)
-                    if(NorthlightActorDeformation::sampledExtraWorld(program->second,p.mesh(),elements,count,x,p.constants,context.inverseView,item.extra[item.extras]))++item.extras;
+                    if(NorthlightActorDeformation::sampledExtraWorld(*program->second,p.mesh(),elements,count,x,p.constants,context.inverseView,item.extra[item.extras]))++item.extras;
                 ++groupDraw;}
             previousGroup=p.constantGroup;previousShader=p.originalShader;previousDecl=p.decl;
             previousKnown=item.known;previousDistance=item.distanceSquared;std::memcpy(previousAt,item.at,sizeof previousAt);actorShadowDraws.push_back(item);

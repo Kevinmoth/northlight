@@ -596,7 +596,10 @@ private:
     IDirect3DVertexBuffer9* replayVerticesGPU[4]={};
     IDirect3DIndexBuffer9* replayIndicesGPU=nullptr;
     UINT replayVertexBytes[4]={},replayIndexBytes=0;
-    std::unordered_map<IDirect3DVertexShader9*,NorthlightActorDeformation::Program> actorPrograms,actorUVPrograms;
+    // 0.3.177 (r83): shared handles: a replay captured with a program keeps it for the frame even if
+    // registerShader() erases the entry (the prepare worker reads it without the map).
+    std::unordered_map<IDirect3DVertexShader9*,std::shared_ptr<const NorthlightActorDeformation::Program>> actorPrograms;
+    std::unordered_map<IDirect3DVertexShader9*,NorthlightActorDeformation::Program> actorUVPrograms;
     std::shared_ptr<NorthlightActorGeometry::ActorJob> actorJob=std::make_shared<NorthlightActorGeometry::ActorJob>();
     std::shared_ptr<const NorthlightActorGeometry::ActorJob> actorJobComplete;
     uint64_t actorJobSerial_=0;DWORD lastActorCapture=0;bool actorCaptureDecided=false,actorCaptureDue=false;std::string actorSceneMap_;
@@ -1797,7 +1800,7 @@ public:
     }
     bool recognizesWmo(IDirect3DVertexShader9* shader)const{return wmoShaders.count(shader)!=0;}
     bool isWorldShader(IDirect3DVertexShader9* shader)const{return terrainShaders.count(shader)||captureShaders.count(shader)||wmoShaders.count(shader);}
-    bool isSkinnedShader(IDirect3DVertexShader9* shader)const{auto it=actorPrograms.find(shader);return it!=actorPrograms.end()&&it->second.skinned;}
+    bool isSkinnedShader(IDirect3DVertexShader9* shader)const{auto it=actorPrograms.find(shader);return it!=actorPrograms.end()&&it->second->skinned;}
     bool wmoContext(IDirect3DVertexShader9* shader){
         if(failed)return false;if(valid)return true;
         auto it=wmoShaders.find(shader);if(it==wmoShaders.end())return false;
@@ -2005,7 +2008,7 @@ public:
             NorthlightActorDeformation::Program program;
             if(NorthlightActorDeformation::compile(words.data(),words.size(),program)){
                 metadata.skinned=program.skinned;metadata.sm1=program.major==1;
-                actorPrograms.emplace(shader,std::move(program));
+                actorPrograms.emplace(shader,std::make_shared<const NorthlightActorDeformation::Program>(std::move(program)));
             }
             if(NorthlightActorDeformation::compile(words.data(),words.size(),program,true))actorUVPrograms.emplace(shader,std::move(program));
             // Publish only complete metadata. RAII retains ownership on any
@@ -2169,7 +2172,7 @@ public:
         if(!actorCaptureDecided){actorCaptureDecided=true;actorCaptureDue=!lastActorCapture||GetTickCount()-lastActorCapture>=200;}if(actorCaptureDue&&!actorJob)actorJob=std::make_shared<NorthlightActorGeometry::ActorJob>();return actorCaptureDue;}
     void appendActor(IDirect3DVertexShader9* original,const Replay& replay,bool sample=false){
         if(!actorCaptureEnabled())return;
-        auto it=actorPrograms.find(original);if(it==actorPrograms.end())return;const auto& program=it->second;
+        auto it=actorPrograms.find(original);if(it==actorPrograms.end())return;const auto& program=*it->second;
         if(!program.skinned&&!replay.mesh().dynamic)return;
         if(actorJob->packets.size()>=128)return;
         if(actorVerticesEvaluated+replay.mesh().vertexCount>16384)return;
@@ -2219,13 +2222,13 @@ public:
             for(size_t j=0;j<replays.size()&&!budget.expired()&&evaluated<1024;++j){
                 auto& p=*replays[(start+j)%replays.size()];const auto& mesh=p.mesh();
                 auto program=actorPrograms.find(p.originalShader);
-                if(!recognizesWmo(p.originalShader)||program==actorPrograms.end()||program->second.skinned||mesh.dynamic||p.cutoff>=0||!mesh.vertexCount||mesh.vertexCount>256||mesh.primitiveCount>512)continue;
-                if(program->second.operations.size()*mesh.vertexCount>8192)continue;
+                if(!recognizesWmo(p.originalShader)||program==actorPrograms.end()||program->second->skinned||mesh.dynamic||p.cutoff>=0||!mesh.vertexCount||mesh.vertexCount>256||mesh.primitiveCount>512)continue;
+                if(program->second->operations.size()*mesh.vertexCount>8192)continue;
                 const D3DVERTEXELEMENT9* elements=nullptr;UINT count=0;
                 if(!declarationCache.get(p.decl,elements,count))continue;
                 evaluated+=mesh.vertexCount;++staticDedupAttempts;
                 std::vector<NorthlightActorDeformation::Position> positions;
-                if(!NorthlightActorDeformation::worldPositions(program->second,mesh,elements,count,p.constants,context.inverseView,positions)||budget.expired())continue;
+                if(!NorthlightActorDeformation::worldPositions(*program->second,mesh,elements,count,p.constants,context.inverseView,positions)||budget.expired())continue;
                 std::vector<StaticShadowDedup::Triangle> triangles;
                 if(!StaticShadowDedup::makeTriangles(positions,mesh.indices,mesh.indexed,mesh.primitiveCount,mesh.topology==D3DPT_TRIANGLESTRIP,triangles,512))continue;
                 auto proof=staticMatcher.match(*staticScene,triangles,{true,false,false,false},budget,
@@ -2270,8 +2273,8 @@ public:
     // device mirror. Null: not a palette program, or the rows cannot be read.
     const NorthlightActorDeformation::Program* paletteRows(IDirect3DVertexShader9* shader,float* rows){
         auto program=actorPrograms.find(shader);
-        if(program==actorPrograms.end()||program->second.paletteBase<0||program->second.paletteBase+2>=256||FAILED(d->GetVertexShaderConstantF(UINT(program->second.paletteBase),rows,3)))return nullptr;
-        return &program->second;
+        if(program==actorPrograms.end()||program->second->paletteBase<0||program->second->paletteBase+2>=256||FAILED(d->GetVertexShaderConstantF(UINT(program->second->paletteBase),rows,3)))return nullptr;
+        return program->second.get();
     }
     // Palette root (bone 0 origin, world) of the draw about to be issued: paletteRows() through
     // the capture's inverse view. False: not a palette program, or the rows cannot be read.

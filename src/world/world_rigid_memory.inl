@@ -42,7 +42,7 @@
     // and the one-influence program (oneBoneTemplate). Cached per original shader.
     const NorthlightActorDeformation::Program* rigidProgram(IDirect3DVertexShader9* shader){
         auto program=actorPrograms.find(shader);if(program==actorPrograms.end())return nullptr;
-        auto audited=rigidAudited.find(shader);const auto& p=program->second;
+        auto audited=rigidAudited.find(shader);const auto& p=*program->second;
         if(audited==rigidAudited.end())audited=rigidAudited.emplace(shader,(NorthlightReplayBounds::SkinEnvelope::supports(p)&&p.paletteBase==31)||NorthlightRigidGeometry::oneBoneTemplate(p)).first;
         return audited->second?&p:nullptr;
     }
@@ -94,7 +94,7 @@
             if(o.draws<=rigidMemory.tuning().maxDraws)rigidGroupDraws.push_back(&p);}
         if(!head){rigidGroupDraws.resize(copies);return;}
         if(!rigid){rigidGroupDraws.resize(copies);auto program=actorPrograms.find(head->originalShader);float root[3];
-            if(program!=actorPrograms.end()&&NorthlightActorDeformation::rootWorld(program->second,head->constants,context.inverseView,root))rigidBodies.insert(rigidBodies.end(),root,root+3);
+            if(program!=actorPrograms.end()&&NorthlightActorDeformation::rootWorld(*program->second,head->constants,context.inverseView,root))rigidBodies.insert(rigidBodies.end(),root,root+3);
             return;}
         if(!(bone>=0&&bone<=74&&std::floor(bone)==bone)){rigidGroupDraws.resize(copies);return;}
         if(selectedHead){

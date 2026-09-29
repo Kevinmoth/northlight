@@ -44,7 +44,7 @@ drawn='if(!rigidDrawKeys.empty()&&rigidDrawKeys.contains(current,count))rigidMem
 checks['0.3.173 drawn test: only with entries, right after the shader lookup, before the 4096 cap, budget, blend and projection checks']=(capture.count(drawn)==1
     and capture.index('const auto& metadata=it->second;')<capture.index(drawn)<capture.index('if(replays.size()>=4096)')<capture.index('if(replaySnapshots.captureExhausted(priority))')
     and capture.index(drawn)<capture.index('D3DRS_ALPHABLENDENABLE')<capture.index('kind==1?4:2,q,4'))
-checks['drawn test reuses the mirror-answered palette rows of drawRoot (one read site), bone 0 at c31']=(w.count('GetVertexShaderConstantF(UINT(program->second.paletteBase),rows,3)')==1
+checks['drawn test reuses the mirror-answered palette rows of drawRoot (one read site), bone 0 at c31']=(w.count('GetVertexShaderConstantF(UINT(program->second->paletteBase),rows,3)')==1
     and 'float rows[12];const auto* program=paletteRows(shader,rows);if(!program)return false;' in w and 'const auto* program=paletteRows(shader,rows);' in m and 'program->paletteBase!=31' in m)
 observe=m[m.index('    void rigidMemoryObserve(){'):m.index('    void rigidMemoryInject(){')]
 checks['key set rebuilt after store every capture frame, cleared with the memory; drawn marks per frame']=(observe.index('rigidMemory.store(o,rigidCopy(n),now);')<observe.index('rigidDrawKeysRebuild();')
@@ -61,7 +61,7 @@ checks['placement index stepped while incomplete with tracks (doodad bodies afte
     and re.search(r'bool rigidIndexCurrent\(\)const\{\s*return staticScene&&staticScene->map==lastRequest.map&&rigidIndex.scene==staticScene.get\(\)&&rigidIndex.revision==rigidSceneRevision\(\*staticScene\)&&rigidIndex.complete;\}',m) is not None)
 sel=x[x.index('    NorthlightActorShadowSelection::Result selectStableActors('):]
 checks['S2 (0.3.176): selection stores exactly the draws it tested; reset at capture and without the stable selection; observe uses it only behind the audit gate, else the 0.3.175 call']=(
-    'item.bone=groupRigid&&declared()?rigidBones.bone(program->second,p.mesh(),p.shared,p.decl,elements,count):NAN;item.rigid=!std::isnan(item.bone);\n            {Replay& stored=*replays[index];stored.boneKnown=groupRigid&&declared();stored.bone=item.bone;}' in sel
+    'item.bone=groupRigid&&declared()?rigidBones.bone(*program->second,p.mesh(),p.shared,p.decl,elements,count):NAN;item.rigid=!std::isnan(item.bone);\n            {Replay& stored=*replays[index];stored.boneKnown=groupRigid&&declared();stored.bone=item.bone;}' in sel
     and 'p->shadowSkinned=priority;p->shadowSelected=!smallShadow;p->shadowSmall=smallShadow;p->boneKnown=false;' in capture
     and 'if(!stableRan)for(auto& p:replays)p->boneKnown=false;' in select and select.index('if(!stableRan)')<select.index('rigidMemoryObserve();')
     and select.count('stableRan=true;stable=selectStableActors(')==2 and select.count('selectStableActors(')==2

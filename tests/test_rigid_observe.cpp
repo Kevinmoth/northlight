@@ -19,7 +19,7 @@
 #include <random>
 #include <unordered_map>
 struct IDirect3DVertexShader9;
-using NorthlightActorDeformation::Program;
+using NorthlightActorDeformation::Program;using Handle=std::shared_ptr<const Program>; /* 0.3.177: the renderer's program handles */
 static const D3DVERTEXELEMENT9 gameLayout[]={{0,0,2,0,0,0},{0,12,8,0,1,0},{0,16,5,0,2,0},{0xff,0,17,0,0,0}};
 struct Replay {
     bool shadowSkinned=true,shadowSelected=true,shadowSmall=false,boneKnown=false;float bone=NAN;unsigned constantGroup=0;UINT count=0;
@@ -31,13 +31,13 @@ struct Payload {int unused=0;};
 struct Declarations {std::unordered_map<const void*,int> known;
     bool get(IDirect3DVertexDeclaration9* d,const D3DVERTEXELEMENT9*& elements,UINT& count){if(!known.count(d))return false;elements=gameLayout;count=4;return true;}};
 struct Base {
-    std::vector<std::unique_ptr<Replay>>& replays;std::unordered_map<IDirect3DVertexShader9*,Program>& actorPrograms;Declarations& declarationCache;
+    std::vector<std::unique_ptr<Replay>>& replays;std::unordered_map<IDirect3DVertexShader9*,Handle>& actorPrograms;Declarations& declarationCache;
     struct {float inverseView[16]={};} context;
     NorthlightRigidMemory::Registry<Payload> rigidMemory;NorthlightActorDeformation::RigidBoneCache rigidBones;
     std::vector<NorthlightRigidMemory::Observation> rigidObservations;std::vector<float> rigidBodies;
     std::vector<const Replay*> rigidGroupDraws;std::vector<std::pair<size_t,unsigned>> rigidGroups;
     std::unordered_map<IDirect3DVertexShader9*,bool> rigidAudited;
-    Base(std::vector<std::unique_ptr<Replay>>& r,std::unordered_map<IDirect3DVertexShader9*,Program>& p,Declarations& d,const float* inverse):replays(r),actorPrograms(p),declarationCache(d){std::memcpy(context.inverseView,inverse,64);}
+    Base(std::vector<std::unique_ptr<Replay>>& r,std::unordered_map<IDirect3DVertexShader9*,Handle>& p,Declarations& d,const float* inverse):replays(r),actorPrograms(p),declarationCache(d){std::memcpy(context.inverseView,inverse,64);}
 };
 // test_rigid_memory.py writes each harness as struct Name:Base{using Base::Base; <the two methods> OBSERVE_LOOP};
 #define OBSERVE_LOOP \
@@ -68,14 +68,14 @@ int main(int argc,char** argv){
     assert(argc>1);
     auto shader=[](unsigned k){return reinterpret_cast<IDirect3DVertexShader9*>(std::uintptr_t(0x1000+16*k));};
     auto declaration=[](unsigned k){return reinterpret_cast<IDirect3DVertexDeclaration9*>(std::uintptr_t(0x9000+16*k));};
-    std::unordered_map<IDirect3DVertexShader9*,Program> programs;
-    programs[shader(0)]=CLIENT_PROGRAM(OneBoneVs3);                              /* audited: the one-influence template */
-    {auto words=load(argv[1]);Program four;assert(NorthlightActorDeformation::compile(words.data(),words.size(),four));programs[shader(1)]=four;} /* audited: skin envelope */
-    {Program p=CLIENT_PROGRAM(OneBoneVs3);p.paletteBase=34;programs[shader(2)]=p;} /* reads BLENDINDICES, not audited */
-    programs[shader(3)]=CLIENT_PROGRAM(NoBoneVs3);                               /* no BLENDINDICES */
+    std::unordered_map<IDirect3DVertexShader9*,Handle> programs;auto handle=[](Program p){return std::make_shared<const Program>(std::move(p));};
+    programs[shader(0)]=handle(CLIENT_PROGRAM(OneBoneVs3));                              /* audited: the one-influence template */
+    {auto words=load(argv[1]);Program four;assert(NorthlightActorDeformation::compile(words.data(),words.size(),four));programs[shader(1)]=handle(four);} /* audited: skin envelope */
+    {Program p=CLIENT_PROGRAM(OneBoneVs3);p.paletteBase=34;programs[shader(2)]=handle(p);} /* reads BLENDINDICES, not audited */
+    programs[shader(3)]=handle(CLIENT_PROGRAM(NoBoneVs3));                               /* no BLENDINDICES */
     /* shader(4): not an actor program */
-    assert(NorthlightRigidGeometry::oneBoneTemplate(programs[shader(0)])&&NorthlightReplayBounds::SkinEnvelope::supports(programs[shader(1)])&&programs[shader(1)].paletteBase==31);
-    assert(!NorthlightRigidGeometry::oneBoneTemplate(programs[shader(2)])&&!NorthlightReplayBounds::SkinEnvelope::supports(programs[shader(2)]));
+    assert(NorthlightRigidGeometry::oneBoneTemplate(*programs[shader(0)])&&NorthlightReplayBounds::SkinEnvelope::supports(*programs[shader(1)])&&programs[shader(1)]->paletteBase==31);
+    assert(!NorthlightRigidGeometry::oneBoneTemplate(*programs[shader(2)])&&!NorthlightReplayBounds::SkinEnvelope::supports(*programs[shader(2)]));
     Declarations declarations;declarations.known[declaration(0)]=1; /* declaration(1): unknown */
     std::mt19937 rng(1762);float inverse[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, -8850,620,100,1};
     NorthlightActorDeformation::RigidBoneCache selectionBones; /* the renderer's rigidBones, used by selection first */
@@ -101,7 +101,7 @@ int main(int argc,char** argv){
                 const bool first=p.constantGroup!=previousGroup;if(first)groupRigid=true;
                 auto program=programs.find(p.originalShader);const D3DVERTEXELEMENT9* elements=nullptr;UINT count=0;
                 const bool declared=program!=programs.end()&&declarations.get(p.decl,elements,count);
-                const float bone=groupRigid&&declared?selectionBones.bone(program->second,p.mesh(),p.shared,p.decl,elements,count):NAN;
+                const float bone=groupRigid&&declared?selectionBones.bone(*program->second,p.mesh(),p.shared,p.decl,elements,count):NAN;
                 flags[i]={groupRigid&&declared,bone};stored+=flags[i].first;groupRigid=!std::isnan(bone);previousGroup=p.constantGroup;}
             for(auto& p:replays)if(p->shadowSelected&&rng()%7==0)p->shadowSelected=false;} /* dropped by the quota or the radius */
         Gated reference(replays,programs,declarations,inverse);reference.observe(); /* every flag clear: the 0.3.175 path */
