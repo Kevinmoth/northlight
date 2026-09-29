@@ -293,7 +293,7 @@ struct Prop {std::uint64_t key=0;float M[9]={},t[3]={};std::shared_ptr<Northligh
 static void propConstants(const Prop& p,const Camera& c,const double* eye,std::mt19937& rng,std::vector<float>& constants){
     constants.assign(1024,0.f);std::uniform_real_distribution<float> junk(-50,50);for(unsigned r=34;r<256;++r)for(unsigned k=0;k<4;++k)constants[4*r+k]=junk(rng);
     constants[0]=3;constants[1]=1;slot(c,eye,p.M,p.t,constants.data()+4*31);}
-// rigidMemoryObserve for props: the bone (RigidBoneCache, the renderer's rigidBones), W (worldBone), the
+// rigidMemoryObserve for props: the bone (RigidBoneCache, the renderer's rigid bone cache), W (worldBone), the
 // shape (mixShape), the static screen (the index), then store() of a copy (the constant bank).
 struct PropScene {
     const Program& program;Reg reg;const PlacementIndex& index;const std::vector<std::array<float,12>>& placements;std::vector<Prop>& props;

@@ -3,6 +3,8 @@
 // generator) and the client's one-influence and four-bone programs: groups of 1-8 draws, shared and owned
 // snapshots, rigid and multi-bone meshes, unknown programs, undeclared layouts, repeated shader and
 // declaration, declaration copies taken through the real 128-slot declaration cache.
+//   - prepareRecord equals a verbatim copy of the 0.3.176 selectStableActors loop (draws, stored rigid
+//     bones, distance counters) over the same records and the live declaration cache.
 //   - Handover at every index (worker prefix, inline tail from the last output's state, the same caches)
 //     equals fully inline, bit for bit, distance counters included; cold and pre-warmed caches agree.
 //   - The threaded Worker: random publish delays, stops before the first publish, mid-record and after

@@ -83,7 +83,7 @@
                 // 0.3.176 (S2): selection's value when it tested this draw (same program, snapshot and
                 // declaration: the same answer); the audit gate (shared, audited program) still applies.
                 if(program&&p.boneKnown)b=p.bone;
-                else if(program&&declarationCache.get(p.decl,elements,count))b=rigidBones.bone(*program,p.mesh(),p.shared,p.decl,elements,count);
+                else if(program&&declarationCache.get(p.decl,elements,count))b=prepareCaches->bones.bone(*program,p.mesh(),p.shared,p.decl,elements,count);
                 rigid=!std::isnan(b)&&(std::isnan(bone)||b==bone);bone=b;}
             if(!p.shadowSelected){if(p.shadowSmall)continue; /* small at capture: never observed */
                 if(!unselectedHead)unselectedHead=&p;++u.draws;u.triangles+=p.count;u.bytes+=p.mesh().byteSize();

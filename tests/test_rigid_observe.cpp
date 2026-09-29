@@ -33,7 +33,8 @@ struct Declarations {std::unordered_map<const void*,int> known;
 struct Base {
     std::vector<std::unique_ptr<Replay>>& replays;std::unordered_map<IDirect3DVertexShader9*,Handle>& actorPrograms;Declarations& declarationCache;
     struct {float inverseView[16]={};} context;
-    NorthlightRigidMemory::Registry<Payload> rigidMemory;NorthlightActorDeformation::RigidBoneCache rigidBones;
+    NorthlightRigidMemory::Registry<Payload> rigidMemory;
+    struct Caches {NorthlightActorDeformation::RigidBoneCache bones;};std::unique_ptr<Caches> prepareCaches=std::make_unique<Caches>(); /* the renderer's (0.3.177) */
     std::vector<NorthlightRigidMemory::Observation> rigidObservations;std::vector<float> rigidBodies;
     std::vector<const Replay*> rigidGroupDraws;std::vector<std::pair<size_t,unsigned>> rigidGroups;
     std::unordered_map<IDirect3DVertexShader9*,bool> rigidAudited;
@@ -78,7 +79,7 @@ int main(int argc,char** argv){
     assert(!NorthlightRigidGeometry::oneBoneTemplate(*programs[shader(2)])&&!NorthlightReplayBounds::SkinEnvelope::supports(*programs[shader(2)]));
     Declarations declarations;declarations.known[declaration(0)]=1; /* declaration(1): unknown */
     std::mt19937 rng(1762);float inverse[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, -8850,620,100,1};
-    NorthlightActorDeformation::RigidBoneCache selectionBones; /* the renderer's rigidBones, used by selection first */
+    NorthlightActorDeformation::RigidBoneCache selectionBones; /* the renderer's rigid bone cache, used by selection first */
     size_t frames=0,stableFrames=0,stored=0,observations=0,bodies=0,differ=0;
     for(unsigned frame=0;frame<2500;++frame,++frames){
         std::vector<std::unique_ptr<Replay>> replays;std::vector<std::shared_ptr<NorthlightDrawSnapshot::Mesh>> keep;

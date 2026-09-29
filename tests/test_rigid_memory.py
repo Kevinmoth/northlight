@@ -61,12 +61,15 @@ checks['placement index stepped while incomplete with tracks (doodad bodies afte
     and re.search(r'bool rigidIndexCurrent\(\)const\{\s*return staticScene&&staticScene->map==lastRequest.map&&rigidIndex.scene==staticScene.get\(\)&&rigidIndex.revision==rigidSceneRevision\(\*staticScene\)&&rigidIndex.complete;\}',m) is not None)
 sel=x[x.index('    NorthlightActorShadowSelection::Result selectStableActors('):]
 checks['S2 (0.3.176): selection stores exactly the draws it tested; reset at capture and without the stable selection; observe uses it only behind the audit gate, else the 0.3.175 call']=(
-    'item.bone=groupRigid&&declared()?rigidBones.bone(*program->second,p.mesh(),p.shared,p.decl,elements,count):NAN;item.rigid=!std::isnan(item.bone);\n            {Replay& stored=*replays[index];stored.boneKnown=groupRigid&&declared();stored.bone=item.bone;}' in sel
+    # 0.3.177 (r83): the stable path's prepareRecord reports the tested bone; the selection writes it back.
+    'out.tested=s.groupRigid&&declared;\n    item.bone=out.tested?caches.bones.bone(*program,p.mesh(),p.shared,p.decl,elements,count):NAN;' in fp.src('prepare_worker.h').read_text()
+    and 'actorShadowDraws.push_back(out.item);Replay& stored=*replays[out.item.index];stored.boneKnown=out.tested;stored.bone=out.item.bone;' in x
+    and 'item.bone=groupRigid&&declared()?prepareCaches->bones.bone(*program->second,p.mesh(),p.shared,p.decl,elements,count):NAN;item.rigid=!std::isnan(item.bone);\n            {Replay& stored=*replays[index];stored.boneKnown=groupRigid&&declared();stored.bone=item.bone;}' in sel
     and 'p->shadowSkinned=priority;p->shadowSelected=!smallShadow;p->shadowSmall=smallShadow;p->boneKnown=false;' in capture
     and 'if(!stableRan)for(auto& p:replays)p->boneKnown=false;' in select and select.index('if(!stableRan)')<select.index('rigidMemoryObserve();')
     and select.count('stableRan=true;stable=selectStableActors(')==2 and select.count('selectStableActors(')==2
     and 'const auto* program=p.shared?rigidProgram(p.originalShader):nullptr;' in m
-    and 'if(program&&p.boneKnown)b=p.bone;\n                else if(program&&declarationCache.get(p.decl,elements,count))b=rigidBones.bone(*program,p.mesh(),p.shared,p.decl,elements,count);' in m)
+    and 'if(program&&p.boneKnown)b=p.bone;\n                else if(program&&declarationCache.get(p.decl,elements,count))b=prepareCaches->bones.bone(*program,p.mesh(),p.shared,p.decl,elements,count);' in m)
 checks["S3' (0.3.176): Refresh rewrites the entry's copy in place (Registry::refresh), Remember stores a fresh copy; store's Refresh goes through refresh"]=(
     "if(o.action==NorthlightRigidMemory::Observation::Refresh)rigidMemory.refresh(o,[&](RigidPayload& payload){rigidRefresh(n,payload);});\n            else if(o.action!=NorthlightRigidMemory::Observation::None)rigidMemory.store(o,rigidCopy(n),now);}" in observe
     and 'if(o.action==Observation::Refresh)return refresh(o,[&](Payload& p){p=std::move(payload);});' in fp.src('rigid_memory.h').read_text()

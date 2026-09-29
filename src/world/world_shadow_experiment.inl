@@ -7,7 +7,7 @@
         if(shadowSelectionDone)return;shadowSelectionDone=true;
         auto finishFate=[this]{finishShadowFate();};struct FateGuard {decltype(finishFate)& finish;~FateGuard(){finish();}} fateGuard{finishFate};
         const auto start=captureSampled?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
-        sampledVertices.beginFrame();
+        prepareCaches->sampled.beginFrame();
         const size_t captured=replays.size(),budget=size_t(actorShadowBudgetMiB)*1048576;
         size_t actorBytes=0,actors=0,small=0,distanceTests=0,distanceReused=0;
         for(const auto& p:replays){small+=!p->shadowSelected;
@@ -40,7 +40,7 @@
                         ++distanceTests;const auto program=actorPrograms.find(p.originalShader);
                         const D3DVERTEXELEMENT9* elements=nullptr;UINT count=0;
                         item.known=program!=actorPrograms.end()&&declarationCache.get(p.decl,elements,count)&&
-                            sampledVertices.distance(*program->second,p.mesh(),p.shared,p.decl,elements,count,
+                            prepareCaches->sampled.distance(*program->second,p.mesh(),p.shared,p.decl,elements,count,
                                 p.constants,context.inverseView,context.camera,item.distanceSquared);
                     }
                     previousGroup=p.constantGroup;previousShader=p.originalShader;previousDecl=p.decl;
@@ -64,10 +64,10 @@
         }
         if(captureSampled){const double ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
             if(stable.actors+stable.rigidActors){deferLogf("MODEL shadow actors ranked=%zu kept=%zu toggles=%zu togglesSinceLog=%zu rankedFramesSinceLog=%u matched=%zu retained=%zu rigidActors=%zu rigidDraws=%zu rigidBytes=%zu attached=%zu attachedBytes=%zu orphans=%zu freeNearBody=%zu attachRadius=%.1f rigidHits=%u rigidMisses=%u rigidScannedVertices=%zu history=%zu cut=prefix margin=%.2f origin=%s rigidNew=%zu prepareMs=%.3f chooseMs=%.3f exemptActors=%zu exemptDraws=%zu exemptBytes=%zu cappedExempt=%zu stillRankedSmall=%zu exemptCapBindsSinceLog=%u rooted=%zu rootFallback=%zu rootRejected=%zu locked=%zu exemptNpcLike=%zu",
-                stable.actors,stable.actorsKept,stable.toggles,actorShadowToggles,actorShadowFrames,stable.matched,stable.retained,stable.rigidActors,stable.rigidDraws,stable.rigidBytes,stable.attached,stable.attachedBytes,stable.orphans,stable.rigidStuck,double(NorthlightActorShadowSelection::AttachRadius),rigidBones.hits,rigidBones.misses,rigidBones.scannedVertices,actorShadowHistory.size(),double(NorthlightActorShadowSelection::active().margin),NorthlightActorShadowSelection::FlickerFixes&&actorShadowOriginValid?"pivot":"camera",stable.rigidNew,actorShadowPrepareMs,actorShadowChooseMs,stable.exemptActors,stable.exemptDraws,stable.exemptBytes,stable.cappedExempt,stable.stillRankedSmall,actorShadowCapBinds,stable.rooted,stable.rootFallback,stable.rootRejected,stable.locked,stable.exemptNpcLike);actorShadowCapBinds=0;
+                stable.actors,stable.actorsKept,stable.toggles,actorShadowToggles,actorShadowFrames,stable.matched,stable.retained,stable.rigidActors,stable.rigidDraws,stable.rigidBytes,stable.attached,stable.attachedBytes,stable.orphans,stable.rigidStuck,double(NorthlightActorShadowSelection::AttachRadius),prepareCaches->bones.hits,prepareCaches->bones.misses,prepareCaches->bones.scannedVertices,actorShadowHistory.size(),double(NorthlightActorShadowSelection::active().margin),NorthlightActorShadowSelection::FlickerFixes&&actorShadowOriginValid?"pivot":"camera",stable.rigidNew,actorShadowPrepareMs,actorShadowChooseMs,stable.exemptActors,stable.exemptDraws,stable.exemptBytes,stable.cappedExempt,stable.stillRankedSmall,actorShadowCapBinds,stable.rooted,stable.rootFallback,stable.rootRejected,stable.locked,stable.exemptNpcLike);actorShadowCapBinds=0;
                 actorShadowToggles=0;actorShadowFrames=0;}
             deferLogf("MODEL shadow selection captured=%zu selected=%zu smallGIExcluded=%zu actorCandidates=%zu actorKept=%zu actorDropped=%zu actorBytes=%zu keptActorBytes=%zu droppedActorBytes=%zu budgetBytes=%zu unknownDistance=%zu distanceTests=%zu distanceReused=%zu selectionMs=%.3f inputCacheHits=%u inputCacheMisses=%u scope=captured-actors distance=sampled-pose-vertex captureBudgetMiB=%u budgetTransitionsSinceLog=%u ranking=%d radius=%u radiusDropped=%zu radiusDroppedDraws=%zu radiusDroppedBytes=%zu radiusTogglesSinceLog=%zu radiusFlickerSinceLog=%zu radiusRekeyedSinceLog=%zu radiusCharacters=%zu radiusSelf=%zu radiusCompanions=%zu radiusInsideBytes=%zu radiusNoPivot=%zu",
-                captured,replays.size(),small,actors,result.kept+stable.rigidDraws,result.dropped,actorBytes,result.keptBytes+stable.rigidBytes,result.droppedBytes,budget,result.unknown,distanceTests,distanceReused,ms,sampledVertices.hits,sampledVertices.misses,captureBudgetMiB,actorShadowTransitions,int(ranked&&stable.actors+stable.rigidActors>0),
+                captured,replays.size(),small,actors,result.kept+stable.rigidDraws,result.dropped,actorBytes,result.keptBytes+stable.rigidBytes,result.droppedBytes,budget,result.unknown,distanceTests,distanceReused,ms,prepareCaches->sampled.hits,prepareCaches->sampled.misses,captureBudgetMiB,actorShadowTransitions,int(ranked&&stable.actors+stable.rigidActors>0),
                 quality.actorShadowRadius,stable.radiusDropped,stable.radiusDroppedDraws,stable.radiusDroppedBytes,actorShadowRadiusToggles,actorShadowRadiusFlicker,actorShadowRadiusRekeyed,stable.radiusCharacters,stable.radiusSelf,stable.radiusCompanions,stable.radiusInsideBytes,stable.radiusUnreferenced);
             actorShadowTransitions=0;actorShadowRadiusToggles=actorShadowRadiusFlicker=actorShadowRadiusRekeyed=0;
         }
@@ -78,15 +78,40 @@
         // ShadowFateDiagnostics=1 only: 0.2-0.5 ms per sampled window otherwise.
         shadowFate.beginFrame(actorShadowBudgetMiB>0&&shadowFateDiagnostics);
     }
+    // 0.3.177 (r83): the prepare inputs of a selected skinned draw, at capture (just before it joins
+    // replays): its program handle and a copy of its declaration; declared: program && the declaration
+    // was read (the stable selection's declared()).
+    void prepareFill(Replay& p){
+        auto program=actorPrograms.find(p.originalShader);p.program=program!=actorPrograms.end()?program->second:nullptr;
+        const D3DVERTEXELEMENT9* elements=nullptr;UINT count=0;
+        p.declared=p.program&&declarationCache.get(p.decl,elements,count)&&count<=p.elements.size();
+        p.elementCount=p.declared?count:0;if(p.declared)std::copy(elements,elements+count,p.elements.begin());
+    }
+    // One prepared draw into the selection: its draw, and (0.3.176 S2) the rigid bone it tested.
+    void prepareConsume(const NorthlightActorPrepare::Output& out){
+        actorShadowDraws.push_back(out.item);Replay& stored=*replays[out.item.index];stored.boneKnown=out.tested;stored.bone=out.item.bone;
+    }
+    // The stable selection's prepare: prepareRecord over the selected skinned draws in replays order.
+    void prepareStable(size_t& distanceTests,size_t& distanceReused){
+        NorthlightActorPrepare::State state;NorthlightActorPrepare::Output out;
+        for(size_t index=0;index<replays.size();++index){const Replay& p=*replays[index];
+            if(!p.shadowSelected||!p.shadowSkinned)continue;
+            NorthlightActorPrepare::prepareRecord(state,p,index,*prepareCaches,context.inverseView,context.camera,out);prepareConsume(out);}
+        distanceTests+=state.distanceTests;distanceReused+=state.distanceReused;
+    }
     // Stable per-actor quota (see actor_shadow_selection.h). Distances reuse the
     // same sampled-vertex rule as the legacy ranking; rigid palette tests are
     // cached per immutable snapshot owner.
     NorthlightActorShadowSelection::Result selectStableActors(size_t budget,size_t& distanceTests,size_t& distanceReused){
         const auto started=captureSampled?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
-        rigidBones.beginFrame();actorShadowDraws.clear();actorShadowDraws.reserve(replays.size());
+        prepareCaches->bones.beginFrame();actorShadowDraws.clear();actorShadowDraws.reserve(replays.size());
+        const auto tuning=selectionTuning();
+        // 0.3.177 (r83): the stable identity path is prepareRecord (prepare_worker.h) per selected skinned
+        // draw in replays order, the same function the prepare worker runs.
+        if(tuning.stableIdentity)prepareStable(distanceTests,distanceReused);
+        else{ /* the legacy tuning (FlickerFixes=false): the 0.3.139 loop */
         unsigned previousGroup=UINT_MAX;IDirect3DVertexShader9* previousShader=nullptr;
         IDirect3DVertexDeclaration9* previousDecl=nullptr;float previousDistance=0,previousAt[3]={};bool previousKnown=false,groupRigid=true,groupStationary=false;unsigned groupDraw=0;
-        const auto tuning=selectionTuning();
         for(size_t index=0;index<replays.size();++index){const auto& p=*replays[index];
             if(!p.shadowSelected||!p.shadowSkinned)continue;
             NorthlightActorShadowSelection::Draw item;item.index=index;item.bytes=p.mesh().byteSize();item.group=p.constantGroup;
@@ -98,43 +123,28 @@
                 item.known=previousKnown;item.distanceSquared=previousDistance;std::memcpy(item.at,previousAt,sizeof item.at);++distanceReused;
             }else{
                 ++distanceTests;
-                item.known=declared()&&sampledVertices.distance(*program->second,p.mesh(),p.shared,p.decl,elements,count,
+                item.known=declared()&&prepareCaches->sampled.distance(*program->second,p.mesh(),p.shared,p.decl,elements,count,
                     p.constants,context.inverseView,context.camera,item.distanceSquared,item.at);
             }
             // A group is rigid only if every draw is: after its first multi-bone
             // draw the remaining draws need no palette test. Only a group's first
             // draw supplies the actor identity key.
             const bool first=p.constantGroup!=previousGroup;if(first)groupRigid=true;
-            item.bone=groupRigid&&declared()?rigidBones.bone(*program->second,p.mesh(),p.shared,p.decl,elements,count):NAN;item.rigid=!std::isnan(item.bone);
+            item.bone=groupRigid&&declared()?prepareCaches->bones.bone(*program->second,p.mesh(),p.shared,p.decl,elements,count):NAN;item.rigid=!std::isnan(item.bone);
             {Replay& stored=*replays[index];stored.boneKnown=groupRigid&&declared();stored.bone=item.bone;} /* 0.3.176 (S2): rigidObserveGroup reuses it */
             groupRigid=item.rigid;
-            if(tuning.stableIdentity){
-                // Stable per-draw identity: the snapshot-cache entry (VB/IB identity,
-                // range, base, declaration) with the shader; a shape hash only for
-                // uncached draws. The actor key is the smallest key of its draws.
-                std::uint64_t key=14695981039346656037ull;auto mix=[&](uint64_t n){key=(key^n)*1099511628211ull;};
-                mix(reinterpret_cast<uintptr_t>(p.originalShader));mix(reinterpret_cast<uintptr_t>(p.decl));
-                if(p.shared)mix(reinterpret_cast<uintptr_t>(p.shared.get()));else{mix(p.mesh().vertexCount);mix(p.mesh().primitiveCount);mix(item.bytes);}
-                item.key=key;
-                // One palette root per constant group (its draws share the pose).
-                if(first){if(program==actorPrograms.end())program=actorPrograms.find(p.originalShader);
-                    // Only the audited palette template (c31.. row-major 3x4 bones, translation
-                    // in w: the skin-envelope specialization) has a provable root.
-                    item.hasRoot=program!=actorPrograms.end()&&NorthlightReplayBounds::SkinEnvelope::supports(*program->second)&&program->second->paletteBase==31&&
-                        NorthlightActorDeformation::rootWorld(*program->second,p.constants,context.inverseView,item.root);}}
-            else if(first){std::uint64_t key=14695981039346656037ull;auto mix=[&](uint64_t n){key=(key^n)*1099511628211ull;};
+            if(first){std::uint64_t key=14695981039346656037ull;auto mix=[&](uint64_t n){key=(key^n)*1099511628211ull;};
                 mix(reinterpret_cast<uintptr_t>(p.originalShader));mix(reinterpret_cast<uintptr_t>(p.decl));mix(p.mesh().vertexCount);mix(p.mesh().primitiveCount);mix(item.bytes);
                 item.key=key;groupDraw=0;
                 // Two extra world samples per draw (first two draws) only for actors
                 // the history marks as possibly stationary: the idle-pose check.
                 groupStationary=tuning.stationary&&!item.rigid&&item.known&&actorShadowHistory.stationaryHint(key,item.at);}
-            if(!tuning.stableIdentity){
-                if(groupStationary&&groupDraw<2&&declared())for(unsigned x=0;x<2;++x)
-                    if(NorthlightActorDeformation::sampledExtraWorld(*program->second,p.mesh(),elements,count,x,p.constants,context.inverseView,item.extra[item.extras]))++item.extras;
-                ++groupDraw;}
+            if(groupStationary&&groupDraw<2&&declared())for(unsigned x=0;x<2;++x)
+                if(NorthlightActorDeformation::sampledExtraWorld(*program->second,p.mesh(),elements,count,x,p.constants,context.inverseView,item.extra[item.extras]))++item.extras;
+            ++groupDraw;
             previousGroup=p.constantGroup;previousShader=p.originalShader;previousDecl=p.decl;
             previousKnown=item.known;previousDistance=item.distanceSquared;std::memcpy(previousAt,item.at,sizeof previousAt);actorShadowDraws.push_back(item);
-        }
+        }}
         // Stable identity judges stillness by the palette root: no extra vertex samples.
         const auto prepared=captureSampled?std::chrono::steady_clock::now():std::chrono::steady_clock::time_point{};
         // Radius: the eye and the pivot (origin) find the player on the centre ray; the quota
