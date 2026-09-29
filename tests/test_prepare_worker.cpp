@@ -303,6 +303,28 @@ static void staleDeclaration(World& world){
         crossFrame.reset();}
     assert(stale>frames/2);std::printf("stale declaration: a cross-frame pointer-keyed copy differs in %zu of %zu reused-address frames; the per-frame arena is equal\n",stale,frames);
 }
+// 0.3.179 (T3): the release publish and the fence-fence wake at WakeBatch=1 with producer pauses long
+// enough for the worker to sleep between records: every published record is prepared without the
+// join's help (a lost wakeup leaves one waiting: bounded wait, then assert), equal to inline.
+static void wakeStress(World& world,unsigned frames){
+    std::mt19937 rng(1794);NorthlightActorPrepare::Worker<Rec> worker;worker.setWakeBatch(1);worker.setWatchdogMs(2000);
+    auto caches=std::make_unique<Caches>(),referenceCaches=std::make_unique<Caches>();std::size_t records=0,slept=0;unsigned wakes=0;
+    for(unsigned f=0;f<frames;++f){
+        auto replays=world.frame(rng,1+rng()%4);const auto p=published(replays);const std::size_t n=p.records.size();const Camera c=camera(rng);
+        std::vector<Output> reference(n);prepare(p,0,n,*referenceCaches,c.inverseView,c.camera,reference);
+        NorthlightActorPrepare::Frame frame;std::memcpy(frame.inverseView,c.inverseView,64);std::memcpy(frame.camera,c.camera,12);
+        bool ok=worker.begin(frame,*caches);assert(ok);(void)ok;
+        for(std::size_t k=0;k<n;++k){
+            if(rng()%3==0){std::this_thread::sleep_for(std::chrono::microseconds(40+rng()%80));++slept;} /* past the 30 us spin: the worker sleeps */
+            else for(unsigned i=rng()%500;i;--i)NorthlightActorPrepare::pause();
+            worker.publish(p.records[k],p.index[k]);}
+        for(unsigned i=0;i<20000&&worker.done()<n;++i)std::this_thread::sleep_for(std::chrono::microseconds(25)); /* bounded: 0.5 s */
+        assert(worker.done()==n); /* no lost wakeup */
+        const auto r=worker.stop();assert(!r.timedOut&&r.done==n);wakes+=worker.wakes();
+        std::vector<Output> out(n);for(std::size_t k=0;k<n;++k)out[k]=worker.outputs()[k];assert(equal(out,reference,n));records+=n;
+    }
+    std::printf("wake stress (WakeBatch=1, release publish, fence-fence wake): %u frames, %zu records all prepared by the worker, %zu producer pauses past the spin, %u notifies; equal to inline\n",frames,records,slept,wakes);
+}
 // Test processes: a throw on one index, or a stall (the watchdog).
 static std::atomic<std::size_t> throwAt{SIZE_MAX},stallAt{SIZE_MAX};
 struct Faulty {template<class R> void operator()(State& s,const R& p,std::size_t index,Caches& c,const NorthlightActorPrepare::Frame& f,Output& out)const{
@@ -510,6 +532,7 @@ int main(int argc,char** argv){
     if(std::string(argv[2])=="lifetime-counterfactual"){programLifetime(world,true);return 0;}
     loopIdentity(world,tsan?40:600);layouts(world,tsan?20:200);staleDeclaration(world);handover(world,tsan?4:24);evictedDeclaration(world);
     threaded<NorthlightActorPrepare::Prepare>(world,tsan?10000:3000,tsan?3:12,false);
+    wakeStress(world,tsan?600:1500);
     threaded<Faulty>(world,tsan?2000:1500,tsan?3:12,true);
     integration(world,tsan?3000:2000,tsan?4:16);
     rearmCap(world);

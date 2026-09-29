@@ -143,7 +143,7 @@ private:
     std::mutex mutex_;std::condition_variable wake_;bool blocked_=false,shutdown_=false; /* under mutex_ */
     std::thread thread_;
     Frame frame_;Caches* caches_=nullptr;Process process_;
-    std::uint64_t serial_=0;bool open_=false,abandoned_=false;double watchdogMs_=WatchdogMs; /* render thread */
+    std::uint64_t serial_=0;bool open_=false,abandoned_=false;double watchdogMs_=WatchdogMs;std::uint32_t wakeBatch_=WakeBatch; /* render thread */
     // Producer-side counters of the open frame (render thread).
     std::uint32_t wakes_=0;double notifyUs_=0;
     void notify(){
@@ -174,7 +174,9 @@ private:
                     if(!(i&63)&&std::chrono::duration<double,std::micro>(Clock::now()-spinStart).count()>=SpinUs)break;}}
             if(arrived)continue;
             std::unique_lock<std::mutex> lock(mutex_);
-            blocked_=true;wakeable_.store(true,std::memory_order_seq_cst);
+            // 0.3.179 (T3): the fence pairs with publish()'s at the wake threshold (fence-fence Dekker): either
+            // this re-check sees the record or the producer sees wakeable_ and notifies.
+            blocked_=true;wakeable_.store(true,std::memory_order_relaxed);std::atomic_thread_fence(std::memory_order_seq_cst);
             wake_.wait(lock,[&]{return shutdown_||word_.load(std::memory_order_seq_cst)!=open||(!failed&&published_.load(std::memory_order_seq_cst)>d);});
             blocked_=false;wakeable_.store(false,std::memory_order_relaxed);
             if(shutdown_)return;
@@ -208,6 +210,8 @@ public:
     // caller may take it back into use. false: not abandoned, not settled, or no thread.
     bool rearm(){if(!abandoned_||!thread_.joinable()||!settled())return false;abandoned_=false;return true;}
     void setWatchdogMs(double ms){watchdogMs_=ms;}
+    void setWakeBatch(std::uint32_t n){wakeBatch_=n?n:1;} /* tests (the wake stress at 1) */
+    std::uint32_t done()const{return done_.load(std::memory_order_acquire);} /* records the worker finished (tests) */
     bool open()const{return open_;}
     Process& process(){return process_;}
     // Opens a frame: the caches belong to the worker until stop() returns.
@@ -223,8 +227,10 @@ public:
     // prepares the rest inline).
     bool publish(const Record* record,std::size_t index){
         const std::uint32_t n=published_.load(std::memory_order_relaxed);if(!open_||n>=Capacity)return false;
-        slots_[n]={record,index};published_.store(n+1,std::memory_order_seq_cst);
-        if(n+1-done_.load(std::memory_order_relaxed)>=WakeBatch&&wakeable_.exchange(false,std::memory_order_seq_cst))notify();
+        // 0.3.179 (T3): a release store (a plain store on x86 TSO), the slot written before it; the full
+        // fence only at the wake threshold, paired with the worker's before it sleeps.
+        slots_[n]={record,index};published_.store(n+1,std::memory_order_release);
+        if(n+1-done_.load(std::memory_order_relaxed)>=wakeBatch_){std::atomic_thread_fence(std::memory_order_seq_cst);if(wakeable_.exchange(false))notify();}
         return true;
     }
     std::uint32_t published()const{return published_.load(std::memory_order_relaxed);}

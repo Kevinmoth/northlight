@@ -84,6 +84,10 @@ checks.update({
     and x.count('prepareDecls->reset()')==1 and 'prepareQuarantinedDecls.push_back(std::move(prepareDecls));' in body(x,'    void prepareFrameRelease(){')
     and 'const NorthlightActorPrepare::DeclCopy* declCopy=nullptr;' in w and 'program=nullptr;declCopy=nullptr;' in w
     and w.index('std::unique_ptr<NorthlightActorPrepare::DeclArena> prepareDecls=')<w.index('NorthlightActorPrepare::Worker<Replay> prepareWorker;'),
+ 'T3 (0.3.179): a release publish; the seq_cst fence only at the wake threshold, and before the worker sleeps':
+    (lambda h:'slots_[n]={record,index};published_.store(n+1,std::memory_order_release);\n        if(n+1-done_.load(std::memory_order_relaxed)>=wakeBatch_){std::atomic_thread_fence(std::memory_order_seq_cst);if(wakeable_.exchange(false))notify();}' in h
+        and 'blocked_=true;wakeable_.store(true,std::memory_order_relaxed);std::atomic_thread_fence(std::memory_order_seq_cst);\n            wake_.wait(lock,' in h
+        and h.count('std::atomic_thread_fence(std::memory_order_seq_cst)')==2 and 'published_.store(n+1,std::memory_order_seq_cst)' not in h)(fp.src('prepare_worker.h').read_text()),
  'diagnostics only with RenderProfile (the fields and every clock)':
     'if(NorthlightRenderThreadProbe::profiling())std::snprintf(prepareFields,' in x and 'prepareTimed=profileSampled();' in x,
  'the worker is destroyed (joined) before the replays, caches and quarantine it reads':
