@@ -211,8 +211,9 @@ static void foreignWaits(){
  std::thread foreign;
  {MirrorGuard outer(g);assert(outer.elided());
   foreign=std::thread([&]{MirrorGuard call(g);entered=true;DWORD v=0;assert(SUCCEEDED(game.GetRenderState(40,&v)));});
-  while(!g.foreignActive.load())std::this_thread::yield();
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  // Until the foreign call is announced (or, in a broken build, has already entered), then a margin.
+  while(!g.foreignActive.load()&&!entered)std::this_thread::yield();
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
   assert(!entered);assert(SUCCEEDED(game.SetRenderState(40,7)));assert(!entered);}
  foreign.join();assert(entered&&g.foreignActive==0);
  {MirrorGuard again(g);assert(again.elided());}

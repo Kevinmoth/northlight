@@ -27,6 +27,7 @@ def stub():
 HARNESS=r'''
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
@@ -44,8 +45,9 @@ struct CheckedGateMutex {
  void unlock(){assert(owner.load()==std::this_thread::get_id()&&depth);if(!--depth)owner.store(std::thread::id());mutex.unlock();}
 };
 #define NORTHLIGHT_GATE_MUTEX CheckedGateMutex
-// A resource call body, entered under the gate: never two at once (D1 stress).
+// A resource call body, entered under the gate: never two at once (D1 stress); and the count of entries.
 static std::atomic<int>* resourceBody=nullptr;
+static std::atomic<unsigned> resourceEntries{0};
 static int allocationFailure=-1;
 void* operator new(std::size_t n){if(allocationFailure==0)throw std::bad_alloc();if(allocationFailure>0)--allocationFailure;if(void* p=std::malloc(n?n:1))return p;throw std::bad_alloc();}
 void operator delete(void* p)noexcept{std::free(p);}
@@ -73,7 +75,7 @@ template<class T>struct Resource:T {
  HRESULT GetSurfaceLevel(UINT,IDirect3DSurface9** out){if(!out)return D3DERR_INVALIDCALL;*out=surface;if(surface)surface->AddRef();return D3D_OK;}
  HRESULT GetCubeMapSurface(D3DCUBEMAP_FACES,UINT,IDirect3DSurface9** out){return GetSurfaceLevel(0,out);}
  HRESULT GetVolumeLevel(UINT,IDirect3DVolume9** out){if(!out)return D3DERR_INVALIDCALL;*out=volume;if(volume)volume->AddRef();return D3D_OK;}
- HRESULT GetPrivateData(REFGUID,void* data,DWORD* size){assert(!mustDisable||*mustDisable);if(resourceBody){assert(resourceBody->fetch_add(1)==0);resourceBody->fetch_sub(1);}++calls;if(size)*size=4;if(data)*static_cast<unsigned*>(data)=123;return S_OK;}
+ HRESULT GetPrivateData(REFGUID,void* data,DWORD* size){assert(!mustDisable||*mustDisable);if(resourceBody){assert(resourceBody->fetch_add(1)==0);resourceBody->fetch_sub(1);}++resourceEntries;++calls;if(size)*size=4;if(data)*static_cast<unsigned*>(data)=123;return S_OK;}
  HRESULT GetFunction(void* data,UINT* size){++calls;if(size)*size=4;if(data)*static_cast<unsigned*>(data)=456;return S_OK;}
  HRESULT GetDeclaration(D3DVERTEXELEMENT9*,UINT* count){++calls;if(count)*count=17;return S_OK;}
  HRESULT Issue(DWORD){++calls;return S_OK;}
@@ -199,6 +201,13 @@ static void ownerElision(unsigned rounds){
  {MirrorGuard call(g);assert(call.elided());d.registry.wrap(&t);assert(d.registry.unwrap(t)==&texture);assert(t->GetSurfaceLevel(0,&s)==S_OK&&s!=&surface);
   DWORD size=0;s->GetPrivateData(1,nullptr,&size);s->AddRef();s->Release();assert(MirrorGuard::heldByThisThread(g)&&g.inside==1);}
  assert(CheckedGateMutex::acquisitions==locks&&g.inside==0&&!MirrorGuard::heldByThisThread(g));
+ // Deterministic: a foreign resource call announced during an elided owner call does not enter it.
+ {std::thread other;
+  {MirrorGuard call(g);assert(call.elided());const unsigned before=resourceEntries;
+   other=std::thread([&]{DWORD size=0;s->GetPrivateData(1,nullptr,&size);});
+   while(!g.foreignActive.load()&&resourceEntries==before)std::this_thread::yield();
+   std::this_thread::sleep_for(std::chrono::milliseconds(200));assert(resourceEntries==before);}
+  other.join();}
  std::atomic<int> body{0};resourceBody=&body;std::atomic<bool> stop{false};std::atomic<unsigned long> foreignCalls{0};unsigned long elided=0;
  std::vector<std::thread> foreign;
  for(unsigned k=0;k<2;++k)foreign.emplace_back([&,k]{unsigned n=k;while(!stop.load(std::memory_order_relaxed)){
@@ -236,10 +245,11 @@ def main():
         tmp=Path(tmp);(tmp/'d3d9.h').write_text(stub());(tmp/'test.cpp').write_text(HARNESS)
         for label,flags in [('O2',['-O2']),('ASan+UBSan',['-O1','-g','-fsanitize=address,undefined','-fno-sanitize-recover=all']),('TSan',['-O1','-g','-fsanitize=thread'])]:
             binary=tmp/label.replace('+','-');command=['clang++','-std=c++17','-pthread',*flags,'-Wno-inconsistent-missing-override','-I'+str(tmp),*fp.test_include_flags(),str(tmp/'test.cpp'),'-o',str(binary)]
-            subprocess.run(command,check=True);run=subprocess.run([str(binary)],capture_output=True,text=True,check=True);report['runs'].append({'build':label,'stdout':run.stdout,'stderr':run.stderr,'status':'pass'})
+            subprocess.run(command,check=True);run=subprocess.run([str(binary)],capture_output=True,text=True,check=True,timeout=900);report['runs'].append({'build':label,'stdout':run.stdout,'stderr':run.stderr,'status':'pass'})
         # 0.3.182 (D1) counterfactual: a foreign thread that skips the wait on inside overlaps the owner's body.
         binary=tmp/'skip-wait';subprocess.run(['clang++','-std=c++17','-pthread','-O2','-DNORTHLIGHT_GATE_ELISION_COUNTERFACTUAL=2','-Wno-inconsistent-missing-override','-I'+str(tmp),*fp.test_include_flags(),str(tmp/'test.cpp'),'-o',str(binary)],check=True)
-        run=subprocess.run([str(binary),'elision'],capture_output=True,text=True);caught=run.returncode!=0 # an assertion, or a crash in the unguarded maps
+        # Deterministic: the pinned elided call is entered (an assertion). A hang is never a detection.
+        run=subprocess.run([str(binary),'elision'],capture_output=True,text=True,timeout=300);caught=run.returncode!=0 and 'Assertion failed' in run.stderr
         print('elision counterfactual (foreign skips the wait): '+('overlap detected (expected failure)' if caught else 'NOT DETECTED'),flush=True);assert caught,(run.returncode,run.stdout,run.stderr)
         report['runs'].append({'build':'O2 -DNORTHLIGHT_GATE_ELISION_COUNTERFACTUAL=2','mode':'elision','exit_code':run.returncode,'expected':'failure'})
     assert all('ThreadSanitizer' not in run['stderr'] for run in report['runs'] if run.get('status')=='pass')

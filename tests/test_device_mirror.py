@@ -17,18 +17,18 @@ with tempfile.TemporaryDirectory(prefix='device-mirror-') as tmp:
   executable=Path(tmp)/'test'
   command=['clang++','-std=c++17','-Wall','-Wextra','-Werror','-pthread',*flags,*fp.test_include_flags(),str(HERE/'test_device_mirror.cpp'),'-o',str(executable)]
   subprocess.run(command,check=True)
-  run=subprocess.run([str(executable)],capture_output=True,text=True)
+  run=subprocess.run([str(executable)],capture_output=True,text=True,timeout=900)
   print(run.stdout,run.stderr,flush=True);run.check_returncode()
   report['runs'].append({'compile_command':command,'flags':flags,'exit_code':run.returncode,'stdout':run.stdout,'stderr':run.stderr})
  # 0.3.180 (D0): the census and the threaded tests under TSan; the census keyed on held_ must fail.
  executable=Path(tmp)/'tsan'
  subprocess.run(['clang++','-std=c++17','-Wall','-Wextra','-Werror','-pthread','-O1','-g','-fsanitize=thread',*fp.test_include_flags(),str(HERE/'test_device_mirror.cpp'),'-o',str(executable)],check=True)
- run=subprocess.run([str(executable),'threads'],capture_output=True,text=True)
+ run=subprocess.run([str(executable),'threads'],capture_output=True,text=True,timeout=900)
  print(run.stdout,run.stderr,flush=True);run.check_returncode();assert 'ThreadSanitizer' not in run.stderr
  report['runs'].append({'flags':['-fsanitize=thread'],'mode':'threads','exit_code':run.returncode,'stdout':run.stdout})
  executable=Path(tmp)/'census-by-held'
  subprocess.run(['clang++','-std=c++17','-pthread','-O2','-DNORTHLIGHT_GATE_CENSUS_BY_HELD=1',*fp.test_include_flags(),str(HERE/'test_device_mirror.cpp'),'-o',str(executable)],check=True)
- run=subprocess.run([str(executable),'census'],capture_output=True,text=True)
+ run=subprocess.run([str(executable),'census'],capture_output=True,text=True,timeout=300)
  missed=run.returncode!=0 and 'Assertion failed' in run.stderr
  print('census counterfactual (keyed on held_): '+('misses the foreign calls (expected failure)' if missed else 'NOT DETECTED'),flush=True);assert missed,(run.returncode,run.stdout,run.stderr)
  report['runs'].append({'flags':['-DNORTHLIGHT_GATE_CENSUS_BY_HELD=1'],'mode':'census','exit_code':run.returncode,'expected':'failure'})
@@ -39,7 +39,8 @@ with tempfile.TemporaryDirectory(prefix='device-mirror-') as tmp:
   executable=Path(tmp)/f'elision-counterfactual-{n}'
   flags=['-O1','-g','-fsanitize=thread'] if sanitize else ['-O2']
   subprocess.run(['clang++','-std=c++17','-pthread',*flags,f'-DNORTHLIGHT_GATE_ELISION_COUNTERFACTUAL={n}',*fp.test_include_flags(),str(HERE/'test_device_mirror.cpp'),'-o',str(executable)],check=True)
-  run=subprocess.run([str(executable),mode,'3000'],capture_output=True,text=True)
+  # A hang is never a detection: TimeoutExpired fails the test.
+  run=subprocess.run([str(executable),mode,'3000'],capture_output=True,text=True,timeout=300)
   caught=run.returncode!=0 and expect in run.stderr
   print(f'elision counterfactual {n} ({mode}): '+('fails (expected)' if caught else 'NOT DETECTED'),flush=True);assert caught,(n,run.returncode,run.stdout,run.stderr[-2000:])
   report['runs'].append({'flags':[*flags,f'-DNORTHLIGHT_GATE_ELISION_COUNTERFACTUAL={n}'],'mode':mode,'exit_code':run.returncode,'expected':'failure'})
