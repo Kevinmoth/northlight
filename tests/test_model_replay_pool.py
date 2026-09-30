@@ -38,7 +38,7 @@ template<class T>void drop(T*& pointer){if(pointer){pointer->Release();pointer=n
 class WorldRenderer {public:
 '''+replay+r'''
  std::vector<std::unique_ptr<Replay>> replays,freeReplays;size_t pooledSnapshotBytes=0;
- std::vector<std::unique_ptr<Replay>> prepareQuarantine;bool prepareUnsettled()const{return false;} /* 0.3.177: no abandoned prepare worker */
+ std::vector<std::unique_ptr<Replay>> prepareQuarantine;bool prepareHeld(const Replay&)const{return false;} /* 0.3.183: no abandoned prepare worker */
  size_t replayPoolLimit()const{return 48u*1024u*1024u;} /* memory guard: full cap outside pressure */
 '''+methods+r'''
 };

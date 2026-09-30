@@ -14,9 +14,13 @@
 //   - The renderer's prepare block (fill, publish, join, consumption, quiesce, endFrame), pasted from
 //     world_shadow_experiment.inl, equals inline over random frames with delays and A/B windows.
 //   - The watchdog re-arm: a settled abandoned worker returns after 10 s, at most 4 times a session.
+//   - 0.3.183: an abandoned worker held in its record for 32 more frames: only the abandoned frame's replays
+//     (a constant donor never published and a replay moved to held included), one arena and the programs
+//     pinned at the abandon stay held; everything goes at settle.
 //   - Counterfactuals that must fail: the carried state reset at the handover, unfiltered records
 //     published, declaration elements read through the live cache after an eviction, the camera taken
-//     at the join.
+//     at the join; (0.3.183) every replay held while unsettled, only the published ones held, the programs
+//     not pinned.
 // Built by test_prepare_worker.py (O2, ASan+UBSan, TSan). Native, no game or GPU.
 #include "prepare_worker.h"
 #include "vertex_declaration_cache.h"
@@ -39,6 +43,7 @@ struct Rec {
     unsigned constantGroup=0;IDirect3DVertexShader9* originalShader=nullptr;IDirect3DVertexDeclaration9* decl=nullptr;
     std::shared_ptr<const Mesh> shared;Mesh snapshot;const float* constants=nullptr;std::vector<float> storage;
     const Program* program=nullptr; /* 0.3.179 (T1): the capture metadata's program */
+    std::uint64_t prepareStamp=0; /* 0.3.183: the prepare epoch at capture */
     const NorthlightActorPrepare::DeclCopy* declCopy=nullptr; /* 0.3.179 (T2): the frame's copy; null: the per-record copy */
     std::array<D3DVERTEXELEMENT9,MAXD3DDECLLENGTH+1> elements{};UINT elementCount=0;bool declared=false;
     bool shadowSelected=true,shadowSkinned=true,boneKnown=false;float bone=NAN;
@@ -346,10 +351,10 @@ static void handoffMeter(){
     std::printf("handoff meter: corrected within %.2f %% of the true cost over %u synthetic frames (clock reads 100-400 ns); raw inflated past 20 %% in all\n",100*worst,frames);
 }
 // Test processes: a throw on one index, or a stall (the watchdog).
-static std::atomic<std::size_t> throwAt{SIZE_MAX},stallAt{SIZE_MAX};
+static std::atomic<std::size_t> throwAt{SIZE_MAX},stallAt{SIZE_MAX};static std::atomic<bool> stallHold{false}; /* 0.3.183: the stalled record waits on after 20 ms */
 struct Faulty {template<class R> void operator()(State& s,const R& p,std::size_t index,Caches& c,const NorthlightActorPrepare::Frame& f,Output& out)const{
     if(index==throwAt.load())throw std::bad_alloc();
-    if(index==stallAt.load())std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    if(index==stallAt.load()){std::this_thread::sleep_for(std::chrono::milliseconds(20));while(stallHold.load())std::this_thread::sleep_for(std::chrono::milliseconds(1));} /* the record is read after it */
     NorthlightActorPrepare::prepareRecord(s,p,index,c,f.inverseView,f.camera,out);}};
 static void delay(std::mt19937& rng){switch(rng()%6){case 0:std::this_thread::sleep_for(std::chrono::microseconds(rng()%80));break;
     case 1:for(unsigned i=rng()%2000;i;--i)NorthlightActorPrepare::pause();break;case 2:std::this_thread::yield();break;default:break;}}
@@ -422,6 +427,7 @@ struct Renderer {
     std::unordered_map<IDirect3DVertexShader9*,std::shared_ptr<const Program>> actorPrograms;
     struct CaptureShader {std::shared_ptr<const Program> program;};std::unordered_map<IDirect3DVertexShader9*,CaptureShader> captureShaders;
     std::vector<std::shared_ptr<const Program>> retiredPrograms;
+    std::vector<std::shared_ptr<const Program>> prepareQuarantinedPrograms; /* 0.3.183: after the worker, as the maps (shutdownOrder's counterfactual) */
     std::unique_ptr<NorthlightActorPrepare::DeclArena> prepareDecls=std::make_unique<NorthlightActorPrepare::DeclArena>();
     std::vector<std::unique_ptr<NorthlightActorPrepare::DeclArena>> prepareQuarantinedDecls;
 /*RETIRE_PROGRAM*/
@@ -436,7 +442,14 @@ struct Renderer {
     std::unique_ptr<Caches> prepareAbandonedCaches,prepareCheckCaches;
     std::vector<std::unique_ptr<Rec>> prepareQuarantine;
     explicit Renderer(NorthlightVertexDeclarations::Cache& d):declarationCache(d){prepareWorker.setWatchdogMs(2000);}
-    void recycleReplay(Rec* raw){if(prepareUnsettled()){prepareQuarantine.emplace_back(raw);return;}delete raw;}
+    // 0.3.183: Tagged is the production predicate; All (0.3.182: every replay while unsettled) and Published
+    // (only the records the worker was given) are counterfactuals.
+    enum class Keep {Tagged,All,Published} keep=Keep::Tagged;
+    bool held(const Rec& p)const{
+        if(keep==Keep::All)return prepareUnsettled();
+        if(keep==Keep::Published){if(!prepareUnsettled())return false;for(std::uint32_t k=0;k<prepareWorker.published();++k)if(prepareWorker.record(k)==&p)return true;return false;}
+        return prepareHeld(p);}
+    void recycleReplay(Rec* raw){if(held(*raw)){prepareQuarantine.emplace_back(raw);return;}delete raw;}
     // registerShader's program part: the erased entries' programs are retired (0.3.179 T1), or (the
     // counterfactual) freed at once.
     void reregister(IDirect3DVertexShader9* shader,bool deferred){
@@ -517,7 +530,7 @@ static void rearmCap(World& world){
         mode=frame(false);assert(mode=="inline");
         std::this_thread::sleep_for(std::chrono::milliseconds(40)); /* the stalled record ends: settled */
         tickNow+=5000;mode=frame(false);assert(mode=="inline"&&r.prepareWorker.abandoned()); /* settled, but not 10 s yet */
-        assert(r.prepareQuarantine.empty()&&!r.prepareAbandonedCaches); /* released once settled */
+        assert(r.prepareQuarantine.empty()&&!r.prepareAbandonedCaches&&r.prepareQuarantinedDecls.empty()&&r.prepareQuarantinedPrograms.empty()); /* released once settled */
         tickNow+=5001;mode=frame(false);assert(mode=="inline"); /* this frame's end re-arms (within the budget) */
         mode=frame(false);assert(mode==(cycle<4?"worker":"inline"));
         assert(r.prepareRearms==std::min(cycle+1,4u));}
@@ -548,11 +561,70 @@ static void programLifetime(World& world,bool counterfactual){
     prepare(p,0,n,*referenceCaches,c.inverseView,c.camera,reference);
     for(std::size_t k=0;k<n;++k){Output got;got.item=r.actorShadowDraws[k];got.tested=p.records[k]->boneKnown;got.after=reference[k].after;assert(NorthlightActorPrepare::same(got,reference[k]));}
     r.prepareQuiesce();r.prepareEndFrame();for(auto& rec:r.replays)r.recycleReplay(rec.release());r.replays.clear();r.prepareFrameRelease();
-    assert(!r.retiredPrograms.empty()); /* the worker is still inside a record that points at it */
+    assert(r.retiredPrograms.empty()&&!r.prepareQuarantinedPrograms.empty()); /* 0.3.183: pinned at the abandon; the worker is still inside a record that points at it */
     std::this_thread::sleep_for(std::chrono::milliseconds(40));stallAt=SIZE_MAX;
     r.prepareQuiesce();r.prepareEndFrame();r.prepareFrameRelease(); /* settled: quarantine recycled, then the programs go */
     assert(r.retiredPrograms.empty()&&r.prepareQuarantine.empty());
     std::printf("program lifetime: a program re-registered mid-frame stays alive for the frame's records and the abandoned worker's record, released once settled\n");
+}
+// 0.3.183: the quarantine is bounded to the abandoned frame. Frame A: the stalled record S (a group's first
+// selected skinned draw with a program: it reads its program, constants and declaration copy) borrows its
+// constants from an earlier record D that is never published (F1); the worker is held in S for 32 more
+// inline frames (one re-registers a shader). Held: exactly frame A's replays (D and a replay moved to held
+// included), one arena, the programs pinned at the abandon; all four released after settle. Counterfactuals:
+// All (every replay while unsettled: the quarantine grows), Published (only the published records: D is
+// freed), Unpinned (the pins dropped: S's retired program is freed); ASan or the assert reports them.
+enum class Bound {Tagged,All,Published,Unpinned};
+static void abandonedBound(World& world,Bound mode){
+    std::mt19937 rng(1831);Renderer r(world.declarationCache);auto referenceCaches=std::make_unique<Caches>();
+    for(unsigned k=0;k<world.programs.size();++k)if(world.programs[k]){auto own=std::make_shared<const Program>(*world.programs[k]);r.actorPrograms[World::shader(k)]=r.captureShaders[World::shader(k)].program=own;}
+    r.keep=mode==Bound::All?Renderer::Keep::All:mode==Bound::Published?Renderer::Keep::Published:Renderer::Keep::Tagged;
+    r.prepareWorker.setWatchdogMs(5);NorthlightRenderThreadProbe::on=false;tickNow=1000;
+    auto capture=[&](std::vector<std::unique_ptr<Rec>>& records){
+        for(std::size_t i=0;i<records.size();++i){auto rec=std::move(records[i]);rec->program=nullptr;rec->declCopy=nullptr;rec->declared=false;rec->elementCount=0;
+            if(rec->shadowSelected&&rec->shadowSkinned)r.prepareFill(*rec,r.captureShaders[rec->originalShader]);
+            r.replays.emplace_back(std::move(rec));r.preparePublish();}};
+    auto select=[&](const Camera& c){std::size_t tests=0,reused=0;r.actorShadowDraws.clear();r.prepareStable(tests,reused);
+        const auto p=published(r.replays);const std::size_t n=p.records.size();std::vector<Output> reference(n);
+        prepare(p,0,n,*referenceCaches,c.inverseView,c.camera,reference);assert(r.actorShadowDraws.size()==n);
+        for(std::size_t k=0;k<n;++k){Output got;got.item=r.actorShadowDraws[k];got.tested=p.records[k]->boneKnown;got.after=reference[k].after;assert(NorthlightActorPrepare::same(got,reference[k]));}};
+    auto endFrame=[&](std::vector<std::unique_ptr<Rec>>& held){r.prepareQuiesce();r.prepareEndFrame();
+        for(auto& rec:r.replays)r.recycleReplay(rec.release());r.replays.clear();for(auto& rec:held)r.recycleReplay(rec.release());held.clear();r.prepareFrameRelease();};
+    // Frame A: D (index 0, unselected: never published) donates S's constants.
+    std::vector<std::unique_ptr<Rec>> records;std::size_t s=0,sPublished=0;
+    for(;;){records=world.frame(rng,10);records[0]->shadowSelected=false;s=0;
+        std::size_t published_=0;unsigned previousGroup=UINT_MAX;
+        for(std::size_t i=0;i<records.size();++i){const Rec& x=*records[i];if(!x.shadowSelected||!x.shadowSkinned)continue;
+            if(!s&&x.constantGroup!=records[0]->constantGroup&&x.constantGroup!=previousGroup&&x.decl==&world.decls[0]&&r.captureShaders[x.originalShader].program){s=i;sPublished=published_;}
+            previousGroup=x.constantGroup;++published_;}
+        if(s&&published_>=4)break;}
+    Rec& D=*records[0];Rec& S=*records[s];const std::vector<float> bank(S.constants,S.constants+1024);D.storage=bank;S.constants=D.storage.data(); /* D's group reads the same buffer */
+    IDirect3DVertexShader9* retired=S.originalShader;IDirect3DVertexShader9* later=nullptr;for(unsigned k=0;k<world.programs.size()&&!later;++k)if(world.programs[k]&&World::shader(k)!=retired)later=World::shader(k);
+    const Camera c=camera(rng);std::memcpy(r.context.inverseView,c.inverseView,64);std::memcpy(r.context.camera,c.camera,12);
+    stallAt=s;stallHold=true;capture(records);
+    for(unsigned i=0;i<2000&&r.prepareWorker.done()<sPublished;++i)std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    std::this_thread::sleep_for(std::chrono::milliseconds(2)); /* the worker is inside S */
+    r.prepareJoin();assert(std::string(r.prepareStats.mode)=="watchdog"&&r.prepareUnsettled());
+    if(mode==Bound::Unpinned)r.prepareQuarantinedPrograms.clear();
+    const std::size_t nA=r.replays.size(),p0=r.prepareQuarantinedPrograms.size();
+    select(c);
+    std::vector<std::unique_ptr<Rec>> held;for(std::size_t i=r.replays.size();i--;)if(i!=s&&r.replays[i]->shadowSelected&&r.replays[i]->shadowSkinned){held.push_back(std::move(r.replays[i]));r.replays.erase(r.replays.begin()+std::ptrdiff_t(i));break;} /* retainSelected */
+    r.reregister(retired,true); /* S's program leaves the maps after the abandon: retired */
+    endFrame(held);
+    auto settle=[&]{stallHold=false;for(unsigned i=0;i<2000&&!r.prepareWorker.settled();++i)std::this_thread::sleep_for(std::chrono::milliseconds(1));stallAt=SIZE_MAX;};
+    if(mode==Bound::Published||mode==Bound::Unpinned){settle();return;} /* ASan reports the worker's read of the freed donor or program */
+    if(mode==Bound::Tagged)assert(r.prepareQuarantine.size()==nA&&r.retiredPrograms.empty()&&r.prepareQuarantinedDecls.size()==1&&r.prepareQuarantinedPrograms.size()==p0);
+    for(unsigned f=0;f<32;++f){ /* inline: the worker is still held in S */
+        do records=world.frame(rng,1+rng()%8);while(records.empty());const Camera d=camera(rng);std::memcpy(r.context.inverseView,d.inverseView,64);std::memcpy(r.context.camera,d.camera,12);
+        capture(records);r.prepareJoin();assert(std::string(r.prepareStats.mode)=="inline");select(d);
+        if(f==16)r.reregister(later,true); /* retired after the abandon: released at this frame's end */
+        endFrame(held);
+        assert(r.prepareQuarantine.size()==nA); /* I1: the abandoned frame's replays only */
+        assert(r.prepareQuarantinedDecls.size()<=1&&r.prepareQuarantinedPrograms.size()==p0&&r.retiredPrograms.empty()&&r.prepareUnsettled()); /* I2 */}
+    settle();assert(r.prepareWorker.settled());
+    do records=world.frame(rng,4);while(records.empty());std::memcpy(r.context.inverseView,c.inverseView,64);std::memcpy(r.context.camera,c.camera,12);capture(records);r.prepareJoin();select(c);endFrame(held);
+    assert(r.prepareQuarantine.empty()&&r.prepareQuarantinedDecls.empty()&&r.prepareQuarantinedPrograms.empty()&&!r.prepareAbandonedCaches&&r.retiredPrograms.empty()); /* I4 */
+    std::printf("abandoned bound: frame A's %zu replays (a never-published constant donor and a held replay included), 1 arena and %zu pinned programs held through 32 more frames and a re-register; all released at settle\n",nA,p0);
 }
 // 0.3.179: destruction with an abandoned, unsettled worker still inside a record whose program only the
 // renderer's maps own. The explicit join (first in ~WorldRenderer, and in the harness) waits for that
@@ -576,6 +648,9 @@ int main(int argc,char** argv){
     assert(argc>2);World world(argv[1]);const bool tsan=std::string(argv[2])=="tsan";
     if(std::string(argv[2])=="lifetime-counterfactual"){programLifetime(world,true);return 0;}
     if(std::string(argv[2])=="shutdown-counterfactual"){shutdownOrder(world,true);return 0;}
+    if(std::string(argv[2])=="quarantine-all-counterfactual"){abandonedBound(world,Bound::All);return 0;}
+    if(std::string(argv[2])=="quarantine-published-counterfactual"){abandonedBound(world,Bound::Published);return 0;}
+    if(std::string(argv[2])=="unpinned-counterfactual"){abandonedBound(world,Bound::Unpinned);return 0;}
     handoffMeter();
     loopIdentity(world,tsan?40:600);layouts(world,tsan?20:200);staleDeclaration(world);handover(world,tsan?4:24);evictedDeclaration(world);
     threaded<NorthlightActorPrepare::Prepare>(world,tsan?10000:3000,tsan?3:12,false);
@@ -584,6 +659,7 @@ int main(int argc,char** argv){
     integration(world,tsan?3000:2000,tsan?4:16);
     rearmCap(world);
     programLifetime(world,false);
+    abandonedBound(world,Bound::Tagged);
     shutdownOrder(world,false);
     watchdog(world);
     std::puts("PASS prepare worker: handover at every index, threaded worker and join, exception and watchdog takeover equal to inline; counterfactuals fail");
