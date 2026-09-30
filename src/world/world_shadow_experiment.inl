@@ -105,8 +105,12 @@
     // most PrepareRearms times a session (a one-off scheduler stall must not cost the whole session).
     static constexpr unsigned PrepareRearms=4;static constexpr DWORD PrepareRearmAfterMs=10000;
     unsigned prepareRearms=0;DWORD prepareAbandonTick=0;
+    // 0.3.183: the prepare epoch advances only at an abandon; a replay stamped with the abandoned epoch was
+    // captured in the abandoned frame before the abandon (the only replays the abandoned worker can reach).
+    std::uint64_t prepareEpoch=1,prepareAbandonedEpoch=0;
     bool prepareOffload()const{return prepareCores>=6&&quality.actorShadows&&selectionTuning().stableIdentity&&!prepareWorker.abandoned();}
     bool prepareUnsettled()const{return prepareWorker.abandoned()&&!prepareWorker.settled();}
+    bool prepareHeld(const Replay& p)const{return prepareUnsettled()&&p.prepareStamp==prepareAbandonedEpoch;}
     // The caches' owner opens them: a deferred clear (registerShader), then this frame's statistics.
     void prepareCachesOpen(){
         prepareOpened=true;
@@ -126,6 +130,7 @@
     }
     // captureModel, right after a draw joined replays: publish it if selected and skinned.
     void preparePublish(){
+        replays.back()->prepareStamp=prepareEpoch; /* 0.3.183: every accepted capture (constant donors too) */
         if(prepareFrame==PrepareFrame::Joined)return; /* captured after the selection: never selected */
         const Replay& p=*replays.back();if(!p.shadowSelected||!p.shadowSkinned)return;
         if(prepareFrame==PrepareFrame::None)prepareOpen();
@@ -133,12 +138,19 @@
         prepareWorker.publish(&p,replays.size()-1); /* false (arena full): the join's check resyncs inline */
     }
     // The worker did not acknowledge within the watchdog: inline until it is re-armed (prepareEndFrame).
-    // It may still be in one record: its caches are set aside and the replays it may read are quarantined
-    // until it settles.
+    // It may still be in one record: until it settles, its caches are set aside, and (0.3.183) only this
+    // frame's replays captured so far (stamped with the abandoned epoch) are quarantined, its arena is
+    // moved aside and every program a record can point at is pinned.
     void prepareAbandon(){
-        std::unique_ptr<NorthlightActorPrepare::Caches> fresh;try{fresh=std::make_unique<NorthlightActorPrepare::Caches>();}catch(...){}
-        if(fresh){prepareAbandonedCaches=std::move(prepareCaches);prepareCaches=std::move(fresh);prepareCachesOpen();}
-        else while(!prepareWorker.settled())NorthlightActorPrepare::pause(); /* no memory for new caches: wait for the old ones */
+        std::unique_ptr<NorthlightActorPrepare::Caches> fresh;
+        try{fresh=std::make_unique<NorthlightActorPrepare::Caches>();prepareQuarantinedPrograms.reserve(captureShaders.size()+actorPrograms.size()+retiredPrograms.size());prepareQuarantinedDecls.reserve(1);}catch(...){fresh.reset();}
+        if(fresh){prepareAbandonedCaches=std::move(prepareCaches);prepareCaches=std::move(fresh);prepareCachesOpen();
+            for(const auto& s:captureShaders)if(s.second.program)prepareQuarantinedPrograms.push_back(s.second.program); /* reserved: no throw */
+            for(const auto& a:actorPrograms)if(a.second)prepareQuarantinedPrograms.push_back(a.second);
+            for(const auto& r:retiredPrograms)if(r)prepareQuarantinedPrograms.push_back(r);
+            if(prepareDecls){prepareQuarantinedDecls.push_back(std::move(prepareDecls));try{prepareDecls=std::make_unique<NorthlightActorPrepare::DeclArena>();}catch(...){}} /* none: per-record copies */
+        }else while(!prepareWorker.settled())NorthlightActorPrepare::pause(); /* no memory: wait for the old ones, hold nothing */
+        prepareAbandonedEpoch=prepareEpoch++;
         prepareStats.mode="watchdog";
         prepareAbandonTick=GetTickCount();
         logf("PREPARE worker watchdog: no acknowledgement within %.0f ms; actor prepare inline %s (re-arms %u of %u)",NorthlightActorPrepare::Worker<Replay>::WatchdogMs,
@@ -155,6 +167,7 @@
         prepareFrame=PrepareFrame::None;prepareOutputsReady=false;prepareOpened=false;prepareTimed=false;prepareCount=0;prepareMeterBegun=false;prepareMeter.beginFrame(false,0);++prepareFrameSerial;prepareStats=PrepareStats{};
         if(prepareWorker.abandoned()&&prepareWorker.settled()){
             if(!prepareQuarantine.empty()){auto held=std::move(prepareQuarantine);prepareQuarantine.clear();for(auto& p:held)recycleReplay(p.release());}
+            prepareQuarantinedDecls.clear();prepareQuarantinedPrograms.clear(); /* 0.3.183: the abandoned frame's arena and pins */
             prepareAbandonedCaches.reset();
             if(prepareRearms<PrepareRearms&&GetTickCount()-prepareAbandonTick>=PrepareRearmAfterMs&&prepareWorker.rearm()){
                 ++prepareRearms;logf("PREPARE worker re-armed after a watchdog (re-arms %u of %u)",prepareRearms,PrepareRearms);}}
@@ -192,14 +205,10 @@
             NorthlightActorPrepare::prepareRecord(state,*prepareWorker.record(k),prepareWorker.index(k),*prepareCheckCaches,frame.inverseView,frame.camera,check);
             prepareStats.mismatch+=!NorthlightActorPrepare::same(check,outputs[k]);}
     }
-    // 0.3.179: end of endFrame, after the recycle: what the frame's replays pointed at may go once the
-    // worker has settled (else at a later frame's end).
+    // 0.3.179: end of endFrame, after the recycle: what the frame's replays pointed at may go. 0.3.183: an
+    // abandoned worker reads only its frame's arena and pinned programs (prepareAbandon; released at settle).
     void prepareFrameRelease(){
-        if(prepareUnsettled()||!prepareQuarantine.empty()){ /* T2: a fresh arena; the old one stays with the quarantine */
-            if(prepareDecls&&prepareDecls->used()){try{prepareQuarantinedDecls.push_back(std::move(prepareDecls));}catch(...){new std::unique_ptr<NorthlightActorPrepare::DeclArena>(std::move(prepareDecls));}
-                try{prepareDecls=std::make_unique<NorthlightActorPrepare::DeclArena>();}catch(...){}} /* none: per-record copies */
-            return;}
-        retiredPrograms.clear();prepareQuarantinedDecls.clear();
+        retiredPrograms.clear();
         if(prepareDecls)prepareDecls->reset();else try{prepareDecls=std::make_unique<NorthlightActorPrepare::DeclArena>();}catch(...){}
     }
     // 0.3.177 (r83): the prepare inputs of a selected skinned draw, at capture (just before it joins

@@ -568,8 +568,10 @@ private:
         // selection's prepare, possibly on the prepare worker): the program (null: none) and a copy of
         // the declaration (the declaration cache may reuse its slot within the frame). 0.3.179 (T1): the
         // program is the capture metadata's, not a handle; a program retired while a frame may point at it
-        // lives in retiredPrograms until that frame is recycled and the worker has settled.
+        // lives in retiredPrograms until that frame is recycled (0.3.183: after a watchdog, pinned in
+        // prepareQuarantinedPrograms until the worker has settled).
         const NorthlightActorDeformation::Program* program=nullptr;
+        std::uint64_t prepareStamp=0; /* 0.3.183: the prepare epoch at capture (preparePublish); 0: pooled, rejected or injected */
         // 0.3.179 (T2): the frame's declaration copy (prepareDecls); null: the per-record copy below (the
         // arena was full) or not declared.
         const NorthlightActorPrepare::DeclCopy* declCopy=nullptr;
@@ -579,7 +581,7 @@ private:
         uint32_t staticProofMask=0;uint64_t staticProofRevision=0;std::string staticProofModel;
         V staticProofLow,staticProofHigh;
         D3DPRIMITIVETYPE type;INT base;UINT min,vertices,start,count;bool indexed;
-        void releaseResources(bool retainSnapshot=false){NorthlightReplayCaptureConstants::reset(*this);program=nullptr;declCopy=nullptr;declared=false;elementCount=0;drop(shader);drop(originalShader);pointBounds={};boundsWork={};boundsPrepared.reset();drop(decl);drop(index);drop(texture);for(auto& s:stream)drop(s);shared.reset();if(!retainSnapshot)snapshot=NorthlightDrawSnapshot::Mesh{};}
+        void releaseResources(bool retainSnapshot=false){NorthlightReplayCaptureConstants::reset(*this);program=nullptr;declCopy=nullptr;prepareStamp=0;declared=false;elementCount=0;drop(shader);drop(originalShader);pointBounds={};boundsWork={};boundsPrepared.reset();drop(decl);drop(index);drop(texture);for(auto& s:stream)drop(s);shared.reset();if(!retainSnapshot)snapshot=NorthlightDrawSnapshot::Mesh{};}
         ~Replay(){releaseResources();}
     };
     std::vector<std::unique_ptr<Replay>> replays,freeReplays,heldShadowReplays;
@@ -628,14 +630,16 @@ private:
     }
     std::unique_ptr<NorthlightActorPrepare::Caches> prepareCaches=std::make_unique<NorthlightActorPrepare::Caches>(); /* sampled vertex inputs and rigid bones (0.3.177: one owner at a time) */
     // 0.3.177 (r83): the prepare worker's state (world_shadow_experiment.inl; the worker itself is declared
-    // after retiredPrograms). After a watchdog the abandoned worker keeps its caches and the replays of its
-    // frame (quarantined, never recycled) until it settles.
+    // after retiredPrograms). After a watchdog the abandoned worker keeps its caches and (0.3.183) only the
+    // abandoned frame's replays (quarantined, never recycled), its arena and the programs pinned at the
+    // abandon, all until it settles.
     std::unique_ptr<NorthlightActorPrepare::Caches> prepareAbandonedCaches,prepareCheckCaches;
     // 0.3.179 (T2): this frame's declaration copies (null: allocation failed, per-record copies), and the
-    // arenas an abandoned worker's frame may still read.
+    // arena an abandoned worker's frame may still read (0.3.183: moved there at the abandon, at most one).
     std::unique_ptr<NorthlightActorPrepare::DeclArena> prepareDecls=std::make_unique<NorthlightActorPrepare::DeclArena>();
     std::vector<std::unique_ptr<NorthlightActorPrepare::DeclArena>> prepareQuarantinedDecls;
     std::vector<std::unique_ptr<Replay>> prepareQuarantine;
+    std::vector<std::shared_ptr<const NorthlightActorDeformation::Program>> prepareQuarantinedPrograms; /* 0.3.183: every program pinned at the abandon */
     NorthlightShadowFate::Tracker shadowFate;unsigned otherBlendRejected=0,otherBudgetRejected=0,otherProjectionRejected=0;
     NorthlightActorShadowSelection::History actorShadowHistory;
     std::vector<NorthlightActorShadowSelection::Draw> actorShadowDraws;
@@ -692,7 +696,7 @@ private:
         auto p=std::move(freeReplays.back());freeReplays.pop_back();pooledSnapshotBytes-=p->snapshot.capacityBytes();return p;
     }
     void recycleReplay(Replay* raw){
-        if(prepareUnsettled()){try{prepareQuarantine.emplace_back(raw);}catch(...){} return;} /* 0.3.177: an abandoned worker may read it; on failure it leaks */
+        if(prepareHeld(*raw)){try{prepareQuarantine.emplace_back(raw);}catch(...){} return;} /* 0.3.177: an abandoned worker may read it; on failure it leaks (0.3.183: its frame's only) */
         std::unique_ptr<Replay> p(raw);size_t capacity=p->snapshot.capacityBytes();
         bool keep=capacity<=replayPoolLimit()-std::min(replayPoolLimit(),pooledSnapshotBytes);p->releaseResources(keep);
         if(keep)pooledSnapshotBytes+=capacity;
@@ -709,15 +713,16 @@ private:
         std::shared_ptr<const NorthlightActorDeformation::Program> program; /* 0.3.179 (T1): actorPrograms' object (null: none) */
     };
     std::unordered_map<IDirect3DVertexShader9*,CaptureShader> captureShaders;
-    // 0.3.179 (T1): programs erased by registerShader while replays (or an abandoned prepare worker) may
-    // still point at them; released after endFrame's recycle once the worker has settled.
+    // 0.3.179 (T1): programs erased by registerShader while replays may still point at them; released after
+    // endFrame's recycle (0.3.183: an abandoned worker reads the copies pinned in prepareQuarantinedPrograms).
     std::vector<std::shared_ptr<const NorthlightActorDeformation::Program>> retiredPrograms;
     void retireProgram(std::shared_ptr<const NorthlightActorDeformation::Program>&& program){
         if(!program)return;
         try{retiredPrograms.push_back(std::move(program));}catch(...){new std::shared_ptr<const NorthlightActorDeformation::Program>(std::move(program));} /* no memory: leak it, never free it early */
     }
     // 0.3.177 (r83): the prepare worker. Declared after everything its records point at (replays, caches,
-    // declaration arenas, quarantine, and since 0.3.179 actorPrograms, captureShaders and retiredPrograms),
+    // declaration arenas, quarantine, since 0.3.179 actorPrograms, captureShaders and retiredPrograms, and
+    // since 0.3.183 prepareQuarantinedPrograms),
     // so it is destroyed first; ~WorldRenderer also joins it explicitly before anything else.
     NorthlightActorPrepare::Worker<Replay> prepareWorker;
     // Game terrain pixel shaders with their own shadow term neutralised
