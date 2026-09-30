@@ -1,4 +1,17 @@
 #include "test_device_mirror_api.h"
+#include <cassert>
+#include <thread>
+// 0.3.182 (D1): the gate's mutex, checked. An unlock by a thread that does not own it asserts, and every
+// real acquisition is counted (an elided owner call makes none).
+struct CheckedGateMutex {
+ std::recursive_mutex mutex;std::atomic<std::thread::id> owner{};unsigned depth=0;
+ static inline std::atomic<unsigned long> acquisitions{0};
+ void enter(){if(!depth++)owner.store(std::this_thread::get_id());acquisitions.fetch_add(1);}
+ void lock(){mutex.lock();enter();}
+ bool try_lock(){if(!mutex.try_lock())return false;enter();return true;}
+ void unlock(){assert(owner.load()==std::this_thread::get_id()&&depth);if(!--depth)owner.store(std::thread::id());mutex.unlock();}
+};
+#define NORTHLIGHT_GATE_MUTEX CheckedGateMutex
 #define NORTHLIGHT_DEVICE_MIRROR_TEST_API
 #include "device_mirror.h"
 #include "mirror_audit_schedule.h"
@@ -14,6 +27,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <stdexcept>
+#include <cstdlib>
 
 static std::atomic<unsigned> liveObjects{0};
 template<class T>struct Object final:T {
@@ -110,6 +124,149 @@ HRESULT Block::Apply(){Backend::Guard g(*owner);++owner->applies;
 }
 
 template<class F>static void cached(Backend& b,F read){read();const unsigned calls=b.gets;read();assert(b.gets==calls);}
+// 0.3.182 (D1): the owner's elided gate. A probe from another thread: does anyone hold the gate (an
+// elided owner call or the mutex)?
+static bool gateTaken(MirrorGate& g){if(g.inside.load(std::memory_order_seq_cst)||!g.mutex.try_lock())return true;g.mutex.unlock();return false;}
+static unsigned long gateLocks(){return CheckedGateMutex::acquisitions.load();}
+// Identity: one random single-thread sequence run elided, and locked (a foreign call pinned in flight
+// makes every owner entry take the mutex). Answers, mirror and backend counters, backend state and the
+// per-class entry counts are bit-equal; the elided run takes the mutex 0 times.
+static std::vector<std::uint64_t> ownerSequence(bool locked,unsigned long& locks,IUnknown* const* objects){
+ Backend b;DeviceMirror m;MirrorDevice game(&b,&m);ExtensionDevice ext(&b,&m);MirrorGate& g=m.gate;std::mt19937 rng(18201);
+ std::vector<std::uint64_t> trace;auto add=[&](std::uint64_t v){trace.push_back(v);};
+ auto indexOf=[&](const void* p){for(unsigned i=0;i<3;++i)if(p==objects[i])return std::uint64_t(i+1);return std::uint64_t(p?99:0);};
+ auto* shaders=reinterpret_cast<IDirect3DVertexShader9* const*>(objects);
+ float values[2048],out[256*4];for(unsigned i=0;i<2048;++i){std::uint32_t v=rng();std::memcpy(values+i,&v,4);} /* a span starts at values+0..255 and reads up to 256 registers */
+ IDirect3DStateBlock9* block=nullptr;assert(SUCCEEDED(game.CreateStateBlock(D3DSBT_ALL,&block)));
+ g.counting=true;if(locked)g.foreignActive.store(1);const unsigned long before=gateLocks();
+ for(unsigned n=0;n<6000;++n){
+  const unsigned op=rng()%12;DWORD v=0;const unsigned state=rng()%64,first=rng()%256,count=1+rng()%(256-first);
+  switch(op){
+  case 0:add(std::uint64_t(game.SetRenderState(state,rng()%5)));break;
+  case 1:add(std::uint64_t(ext.GetRenderState(state,&v)));add(v);break;
+  case 2:add(std::uint64_t(game.SetVertexShaderConstantF(first,values+rng()%256,count)));break;
+  case 3:{const HRESULT h=ext.GetVertexShaderConstantF(first,out,count);add(std::uint64_t(h));std::uint64_t hash=1469598103934665603ull;for(unsigned i=0;i<count*16;++i)hash=(hash^reinterpret_cast<unsigned char*>(out)[i])*1099511628211ull;add(hash);break;}
+  case 4:add(std::uint64_t(game.SetVertexShader(rng()%4?shaders[rng()%3]:nullptr)));break;
+  case 5:{IDirect3DVertexShader9* p=nullptr;add(std::uint64_t(ext.GetVertexShader(&p)));add(indexOf(p));if(p)p->Release();break;}
+  case 6:add(std::uint64_t(block->Capture()));if(rng()%2)add(std::uint64_t(block->Apply()));break;
+  case 7:{ExtensionDevice::RawScope scope(ext);add(std::uint64_t(ext.SetRenderState(state,n)));add(std::uint64_t(ext.GetRenderState(state,&v)));add(v);break;}
+  case 8:{MirrorGuard outer(g);add(std::uint64_t(game.SetRenderState(state,n%3)));add(std::uint64_t(ext.GetRenderState(state,&v)));add(v);add(std::uint64_t(ext.GetVertexShaderConstantF(first,out,1)));break;}
+  case 9:{NorthlightConstantEpoch::Stamp stamp;add(ext.constantStamp(stamp));break;}
+  case 10:if(rng()%8==0){D3DPRESENT_PARAMETERS p;add(std::uint64_t(game.Reset(&p)));}break;
+  case 11:{DWORD sampler=0;add(std::uint64_t(game.SetSamplerState(rng()%16,D3DSAMP_ADDRESSU,rng()%4)));add(std::uint64_t(ext.GetSamplerState(rng()%16,D3DSAMP_ADDRESSU,&sampler)));add(sampler);break;}
+  }
+ }
+ locks=gateLocks()-before;if(locked)g.foreignActive.store(0);
+ for(unsigned s=0;s<MirrorGate::Sites;++s)add(g.takeAcquired(MirrorSite(s)));
+ for(std::uint64_t c:{m.answered,m.forwarded,m.writeThrough,m.invalidations,m.rawScopes,m.rawCalls,m.mutations,m.learnedSlots,m.distrustedSlots})add(c);
+ for(unsigned c:{b.calls,b.gets,b.sets,b.applies,b.captures})add(c);add(b.floatReadRegisters);
+ for(unsigned i=0;i<256;++i)add(b.state.rs[i]);for(unsigned i=0;i<16;++i)add(b.state.sampler[i][D3DSAMP_ADDRESSU]);add(indexOf(b.state.vs.p));
+ for(unsigned i=0;i<256;++i){std::uint64_t w[2];std::memcpy(w,b.state.vf[i],16);add(w[0]);add(w[1]);}
+ add(g.ownerLocked.load());add(!g.inside.load()&&!MirrorGuard::heldByThisThread(g));
+ block->Release();return trace;
+}
+static void ownerIdentity(){
+ IUnknown* objects[3]={new Object<IDirect3DVertexShader9>(),new Object<IDirect3DVertexShader9>(),new Object<IDirect3DVertexShader9>()};
+ unsigned long elidedLocks=0,lockedLocks=0;
+ auto elided=ownerSequence(false,elidedLocks,objects),locked=ownerSequence(true,lockedLocks,objects);
+ assert(elidedLocks==0&&lockedLocks>1000);
+ // Everything but the owner-locked fallback count (the last-but-one entry) is identical.
+ assert(elided.size()==locked.size()&&elided[elided.size()-2]==0&&locked[locked.size()-2]==lockedLocks);
+ elided[elided.size()-2]=locked[locked.size()-2];assert(elided==locked);
+ for(IUnknown* o:objects)o->Release();
+ std::printf("PASS owner identity: 6000 random calls elided vs locked, %zu bit-equal trace words; mutex acquisitions elided=%lu locked=%lu\n",elided.size(),elidedLocks,lockedLocks);
+}
+// Nesting: an elided outer guard; nested device, state-block, RawScope (and its raw bypass) and second-
+// gate entries keep held and inside exact; the mutex is never taken; exceptions unwind the entry.
+static void ownerNesting(){
+ Backend b;DeviceMirror m;MirrorDevice game(&b,&m);ExtensionDevice ext(&b,&m);MirrorGate& g=m.gate;
+ IDirect3DStateBlock9* block=nullptr;assert(SUCCEEDED(game.CreateStateBlock(D3DSBT_ALL,&block)));
+ g.counting=true;for(unsigned s=0;s<MirrorGate::Sites;++s)g.takeAcquired(MirrorSite(s));const unsigned long locks=gateLocks();
+ {MirrorGuard outer(g);assert(outer.elided()&&g.inside==1&&MirrorGuard::heldByThisThread(g));
+  DWORD v=0;assert(SUCCEEDED(game.SetRenderState(40,1))&&SUCCEEDED(ext.GetRenderState(40,&v))&&v==1);assert(MirrorGuard::heldByThisThread(g));
+  assert(SUCCEEDED(block->Capture())&&MirrorGuard::heldByThisThread(g));
+  const auto rawCalls=m.rawCalls;{ExtensionDevice::RawScope scope(ext);assert(SUCCEEDED(ext.SetRenderState(40,2))&&m.rawCalls==rawCalls+1);assert(MirrorGuard::heldByThisThread(g)&&g.inside==1);}
+  {MirrorGuard again(g);assert(!again.elided()&&MirrorGuard::heldByThisThread(g));}
+  MirrorGate other;{MirrorGuard second(other);assert(second.elided()&&other.inside==1&&g.inside==1&&MirrorGuard::heldByThisThread(other));
+   // A -> B -> A: the inner entry of the first gate keeps the outer elided entry (inside stays 1).
+   {MirrorGuard back(g);assert(!back.elided()&&MirrorGuard::heldByThisThread(g)&&g.inside==1);DWORD w=0;assert(SUCCEEDED(ext.GetRenderState(40,&w)));}
+   assert(g.inside==1&&MirrorGuard::heldByThisThread(other));}
+  assert(other.inside==0&&MirrorGuard::heldByThisThread(g)&&g.inside==1);}
+ assert(!MirrorGuard::heldByThisThread(g)&&g.inside==0&&gateLocks()==locks);
+ assert(g.takeAcquired(MirrorSite::Device)==2);for(unsigned s=1;s<MirrorGate::Sites;++s)assert(!g.takeAcquired(MirrorSite(s))); // the outer and the A -> B -> A entry
+ {ExtensionDevice::RawScope scope(ext);assert(MirrorGuard::heldByThisThread(g)&&g.inside==1);assert(SUCCEEDED(ext.SetRenderState(40,3)));}
+ assert(!MirrorGuard::heldByThisThread(g)&&g.inside==0&&g.takeAcquired(MirrorSite::Raw)==1);
+ try{MirrorGuard guard(g);assert(g.inside==1);throw std::runtime_error("unwind");}catch(const std::runtime_error&){}
+ assert(!MirrorGuard::heldByThisThread(g)&&g.inside==0&&gateLocks()==locks&&g.ownerLocked==0);
+ block->Release();
+ std::puts("PASS owner nesting: elided outer guard; nested device, state-block, RawScope, raw bypass, second-gate and A -> B -> A entries; held and inside restored; mutex never taken; exceptions unwind.");
+}
+// A foreign call announced during an elided owner call waits until the owner's call returns; an owner
+// call while a foreign one runs takes the mutex (ownerLocked) and waits; afterwards the owner elides
+// again (not sticky). Each exit acts on its recorded mode: the owner's elided exit while a foreign call
+// is waiting must not unlock the mutex it never took.
+static void foreignWaits(){
+ Backend b;DeviceMirror m;MirrorDevice game(&b,&m);MirrorGate& g=m.gate;
+ std::atomic<bool> entered{false},holding{false},done{false};const unsigned long locks=gateLocks();
+ std::thread foreign;
+ {MirrorGuard outer(g);assert(outer.elided());
+  foreign=std::thread([&]{MirrorGuard call(g);entered=true;DWORD v=0;assert(SUCCEEDED(game.GetRenderState(40,&v)));});
+  while(!g.foreignActive.load())std::this_thread::yield();
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  assert(!entered);assert(SUCCEEDED(game.SetRenderState(40,7)));assert(!entered);}
+ foreign.join();assert(entered&&g.foreignActive==0);
+ {MirrorGuard again(g);assert(again.elided());}
+ foreign=std::thread([&]{MirrorGuard call(g);holding=true;std::this_thread::sleep_for(std::chrono::milliseconds(50));done=true;});
+ while(!holding)std::this_thread::yield();
+ const auto fallbacks=g.ownerLocked.load();
+ {MirrorGuard owner(g);assert(!owner.elided()&&done&&g.ownerLocked==fallbacks+1);DWORD v=0;assert(SUCCEEDED(game.GetRenderState(40,&v))&&v==7);}
+ foreign.join();
+ const unsigned long after=gateLocks();{MirrorGuard again(g);assert(again.elided());DWORD v=0;assert(SUCCEEDED(game.GetRenderState(40,&v)));}assert(gateLocks()==after);
+ assert(after==locks+3); // two foreign calls and one owner fallback
+ std::puts("PASS foreign waits: an announced foreign call waits for the elided owner call; an owner call during a foreign one locks and waits; elision resumes; exits act on the recorded mode.");
+}
+// Exclusion stress: the owner loops over elided calls of random length (outer guards with nested calls,
+// and bare device calls) while 1-3 foreign threads call device, state-block, raw-scope and guarded
+// bodies. A shared body counter never exceeds 1, the plain shared word is TSan's race target, and the
+// backend's own guard asserts no two calls overlap. Afterwards the owner takes the mutex 0 times.
+static void ownerStress(unsigned rounds){
+ unsigned long foreignTotal=0,fallbackTotal=0,elidedTotal=0;
+ for(unsigned threads=1;threads<=3;++threads){
+  Backend b;DeviceMirror m;MirrorDevice game(&b,&m);ExtensionDevice ext(&b,&m);MirrorGate& g=m.gate;
+  IDirect3DStateBlock9* block=nullptr;assert(SUCCEEDED(game.CreateStateBlock(D3DSBT_ALL,&block)));
+  std::atomic<int> body{0};unsigned long shared=0,elided=0;std::atomic<bool> stop{false};std::atomic<unsigned long> foreignCalls{0};
+  auto inBody=[&](unsigned spin){assert(body.fetch_add(1)==0);++shared;for(volatile unsigned i=0;i<spin;++i){}assert(body.fetch_sub(1)==1);};
+  std::vector<std::thread> foreign;
+  for(unsigned t=0;t<threads;++t)foreign.emplace_back([&,t]{std::mt19937 rng(t*7919+threads);
+   while(!stop.load(std::memory_order_relaxed)){DWORD v=0;
+    switch(rng()%5){
+    case 0:{MirrorGuard call(g);inBody(rng()%32);assert(SUCCEEDED(game.SetRenderState(41+t,rng()%4)));break;}
+    case 1:assert(SUCCEEDED(game.SetRenderState(41+t,rng()%4)));assert(SUCCEEDED(ext.GetRenderState(41+t,&v)));break;
+    case 2:assert(SUCCEEDED(block->Capture()));break;
+    case 3:{ExtensionDevice::RawScope scope(ext);inBody(rng()%8);assert(SUCCEEDED(ext.SetRenderState(45,rng()%4)));break;}
+    case 4:{float c[4]={float(t),1,2,3},o[4];assert(SUCCEEDED(game.SetVertexShaderConstantF(8+t,c,1)));assert(SUCCEEDED(ext.GetVertexShaderConstantF(8+t,o,1)));break;}
+    }
+    foreignCalls.fetch_add(1,std::memory_order_relaxed);
+    for(volatile unsigned i=0,gap=rng()%4096;i<gap;++i){} /* gaps: the owner alternates between elided and locked entries */}});
+  std::mt19937 rng(threads);const auto fallbacks=g.ownerLocked.load();
+  for(unsigned r=0;r<rounds;++r){DWORD v=0;
+   if(r%3){MirrorGuard call(g);elided+=call.elided();inBody(rng()%64);assert(SUCCEEDED(game.SetRenderState(40,r%5))&&SUCCEEDED(ext.GetRenderState(40,&v))&&v==r%5);
+    float c[4]={float(r),0,0,1},o[4];assert(SUCCEEDED(game.SetVertexShaderConstantF(4,c,1))&&SUCCEEDED(ext.GetVertexShaderConstantF(4,o,1))&&o[0]==float(r));}
+   else{assert(SUCCEEDED(game.SetRenderState(39,r%7))&&SUCCEEDED(ext.GetRenderState(39,&v))&&v==r%7);}
+   for(volatile unsigned i=0,gap=rng()%512;i<gap;++i){} /* owner work between calls, outside the gate */
+  }
+  while(foreignCalls.load()<threads*64)std::this_thread::yield();
+  stop=true;for(auto& t:foreign)t.join();
+  assert(g.foreignActive==0&&g.inside==0&&!b.entered);
+  const unsigned long locks=gateLocks();
+  for(unsigned r=0;r<1000;++r){{MirrorGuard call(g);assert(call.elided());inBody(0);}DWORD v=0;assert(SUCCEEDED(game.GetRenderState(40,&v)));}
+  assert(gateLocks()==locks);
+  foreignTotal+=foreignCalls;fallbackTotal+=g.ownerLocked-fallbacks;elidedTotal+=elided;
+  block->Release();
+ }
+ std::printf("PASS owner stress: %u owner rounds x 1-3 foreign threads, %lu foreign calls, %lu owner fallbacks to the mutex, %lu elided owner bodies; body never shared, owner back to 0 mutex acquisitions after the foreign threads stop.\n",rounds,foreignTotal,fallbackTotal,elidedTotal);
+ assert(elidedTotal&&fallbackTotal&&foreignTotal);
+}
 static void bindingsAndScalars(){
  Backend b;DeviceMirror m;MirrorDevice game(&b,&m);ExtensionDevice ext(&b,&m);
  static_assert(!std::is_copy_constructible<DeviceMirror>::value,"mutex/cache ownership must not copy");
@@ -499,7 +656,7 @@ static void rawScopeConcurrency(){
   // The scope owns the gate; foreign threads have no TLS bypass authority.
   // Independently probe the actual mutex from that thread, avoiding a speed-
   // dependent expectation that its setter has already reached the lock.
-  std::thread probe([&]{assert(!m.gate.mutex.try_lock());});probe.join();
+  std::thread probe([&]{assert(gateTaken(m.gate));});probe.join();
   assert(!finished&&b.calls==calls);assert(SUCCEEDED(ext.SetRenderState(40,55)));
  }
  foreign.join();assert(finished&&m.rawDepth==0&&m.rawCalls==1);
@@ -768,10 +925,10 @@ static void knownScan(){
 static void singleGate(){
  MirrorGate a,other;
  {MirrorGuard outer(a);assert(MirrorGuard::heldByThisThread(a));{MirrorGuard inner(a);{MirrorGuard b(other);assert(MirrorGuard::heldByThisThread(other));{MirrorGuard again(a);assert(MirrorGuard::heldByThisThread(a));}assert(MirrorGuard::heldByThisThread(other));}assert(MirrorGuard::heldByThisThread(a));}
-  std::thread probe([&]{assert(!a.mutex.try_lock());assert(!MirrorGuard::heldByThisThread(a));assert(other.mutex.try_lock());other.mutex.unlock();});probe.join();}
- assert(!MirrorGuard::heldByThisThread(a));std::thread free([&]{assert(a.mutex.try_lock());a.mutex.unlock();});free.join();
+  std::thread probe([&]{assert(gateTaken(a));assert(!MirrorGuard::heldByThisThread(a));assert(!gateTaken(other));});probe.join();}
+ assert(!MirrorGuard::heldByThisThread(a));std::thread free([&]{assert(!gateTaken(a));});free.join();
  try{MirrorGuard guard(a);throw std::runtime_error("unwind");}catch(const std::runtime_error&){}
- assert(!MirrorGuard::heldByThisThread(a));std::thread after([&]{assert(a.mutex.try_lock());a.mutex.unlock();});after.join();
+ assert(!MirrorGuard::heldByThisThread(a));std::thread after([&]{assert(!gateTaken(a));});after.join();
  std::puts("PASS single gate: nested same-mutex guards skip re-locking, interleaved mutexes restore ownership, exceptions unwind, other threads still excluded.");
 }
 
@@ -811,7 +968,15 @@ static void gateCensus(){
  std::puts("PASS gate census: one real acquisition per nested chain (device, RawScope, state blocks); owner calls never foreign; foreign device/state-block/raw/buffer entries counted per class, first {tid,site} recorded, one report per class.");
 }
 // A foreign thread's calls wait for, and never overlap, the owner's: TSan target together with concurrency().
+// 0.3.182 (D1): "owner" runs the elision tests; "nesting", "waits" and "stress N" run one each (the
+// counterfactual builds must fail them); "threads" is the TSan target.
 int main(int argc,char** argv){
- if(argc>1&&!std::strcmp(argv[1],"census")){gateCensus();return 0;}
- if(argc>1&&!std::strcmp(argv[1],"threads")){singleGate();gateCensus();rawScopeConcurrency();concurrency();std::puts("PASS threads");return 0;}
- gateCensus();assert(!liveObjects);knownScan();assert(!liveObjects);singleGate();writeThroughLearning();assert(!liveObjects);writeThroughImplicitState();assert(!liveObjects);writeThroughDifferential();assert(!liveObjects);rawScopeDispatchArguments();assert(!liveObjects);rawScopeBanksAndReentry();assert(!liveObjects);rawScopeRestoreAndControls();assert(!liveObjects);rawScopeConcurrency();assert(!liveObjects);rawScopeShadowWorkload();assert(!liveObjects);constantCertificates();assert(!liveObjects);auditCoverageAndSchedule();assert(!liveObjects);static_assert(!std::is_copy_constructible<DeviceMirror>::value,"mirror cannot copy mutex/state");bindingsAndScalars();assert(!liveObjects);constantBanks();assert(!liveObjects);constantCapabilities();assert(!liveObjects);recordingFailures();assert(!liveObjects);savedStateIntegration();assert(!liveObjects);crowdedWorkload();assert(!liveObjects);stateBlocks();assert(!liveObjects);implicitAndDisabled();assert(!liveObjects);auditChecks();assert(!liveObjects);auditEveryField();assert(!liveObjects);concurrency();assert(!liveObjects);std::puts("PASS actual device_mirror.h: authoritative cached queries; COM refs; normalized/failed setters; partial exact-bit banks; ALL/partial/recorded stateblocks including failed Apply; UP and Reset failures; target/FVF implicit changes; two proxies; disabled raw bypass; 30000 randomized banks; 8 threads x5000 iterations, serialized backend calls (80072 with learned write-through, 120008 read-through).");}
+ const auto mode=[&](const char* name){return argc>1&&!std::strcmp(argv[1],name);};
+ const unsigned rounds=argc>2?unsigned(std::atoi(argv[2])):10000;
+ if(mode("census")){gateCensus();return 0;}
+ if(mode("nesting")){ownerNesting();return 0;}
+ if(mode("waits")){foreignWaits();return 0;}
+ if(mode("stress")){ownerStress(rounds);return 0;}
+ if(mode("owner")){ownerIdentity();ownerNesting();foreignWaits();ownerStress(rounds);assert(!liveObjects);return 0;}
+ if(mode("threads")){singleGate();gateCensus();rawScopeConcurrency();concurrency();ownerNesting();foreignWaits();ownerStress(rounds);std::puts("PASS threads");return 0;}
+ ownerIdentity();assert(!liveObjects);ownerNesting();assert(!liveObjects);foreignWaits();assert(!liveObjects);ownerStress(rounds);assert(!liveObjects);gateCensus();assert(!liveObjects);knownScan();assert(!liveObjects);singleGate();writeThroughLearning();assert(!liveObjects);writeThroughImplicitState();assert(!liveObjects);writeThroughDifferential();assert(!liveObjects);rawScopeDispatchArguments();assert(!liveObjects);rawScopeBanksAndReentry();assert(!liveObjects);rawScopeRestoreAndControls();assert(!liveObjects);rawScopeConcurrency();assert(!liveObjects);rawScopeShadowWorkload();assert(!liveObjects);constantCertificates();assert(!liveObjects);auditCoverageAndSchedule();assert(!liveObjects);static_assert(!std::is_copy_constructible<DeviceMirror>::value,"mirror cannot copy mutex/state");bindingsAndScalars();assert(!liveObjects);constantBanks();assert(!liveObjects);constantCapabilities();assert(!liveObjects);recordingFailures();assert(!liveObjects);savedStateIntegration();assert(!liveObjects);crowdedWorkload();assert(!liveObjects);stateBlocks();assert(!liveObjects);implicitAndDisabled();assert(!liveObjects);auditChecks();assert(!liveObjects);auditEveryField();assert(!liveObjects);concurrency();assert(!liveObjects);std::puts("PASS actual device_mirror.h: authoritative cached queries; COM refs; normalized/failed setters; partial exact-bit banks; ALL/partial/recorded stateblocks including failed Apply; UP and Reset failures; target/FVF implicit changes; two proxies; disabled raw bypass; 30000 randomized banks; 8 threads x5000 iterations, serialized backend calls (80072 with learned write-through, 120008 read-through).");}

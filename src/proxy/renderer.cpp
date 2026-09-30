@@ -253,9 +253,9 @@ class Device final : public GuardedMirrorDevice {
         const MirrorGate& g=mirrorState.gate;const bool first=g.firstReady.load(std::memory_order_acquire);
         auto foreign=[&](MirrorSite s){return unsigned(g.foreign[unsigned(s)].load(std::memory_order_relaxed));};
         auto tid=[](const std::atomic<std::uint32_t>& t){return (unsigned long)t.load(std::memory_order_relaxed);};
-        if(NorthlightDiagnostics::enabled())logf("GATE threads device=%ld owner=%lu presentTid=%lu swapPresentTid=%lu drawTid=%lu foreignDevice=%u foreignRegistry=%u foreignResource=%u foreignStateBlock=%u foreignSwapChain=%u foreignRaw=%u foreignBuffer=%u first=%lu/%s/%u frame=%u event=%s",
+        if(NorthlightDiagnostics::enabled())logf("GATE threads device=%ld owner=%lu presentTid=%lu swapPresentTid=%lu drawTid=%lu foreignDevice=%u foreignRegistry=%u foreignResource=%u foreignStateBlock=%u foreignSwapChain=%u foreignRaw=%u foreignBuffer=%u ownerLocked=%u first=%lu/%s/%u frame=%u event=%s",
             diagnosticId,(unsigned long)g.ownerTid,tid(g.presentTid),tid(g.swapPresentTid),tid(g.drawTid),foreign(MirrorSite::Device),foreign(MirrorSite::Registry),foreign(MirrorSite::Resource),
-            foreign(MirrorSite::StateBlock),foreign(MirrorSite::SwapChain),foreign(MirrorSite::Raw),foreign(MirrorSite::Buffer),
+            foreign(MirrorSite::StateBlock),foreign(MirrorSite::SwapChain),foreign(MirrorSite::Raw),foreign(MirrorSite::Buffer),unsigned(g.ownerLocked.load(std::memory_order_relaxed)),
             first?(unsigned long)g.firstTid:0ul,mirrorSiteName(first?g.firstSite:MirrorGate::Sites),first?unsigned(g.firstFrame):0u,unsigned(g.frame.load(std::memory_order_relaxed)),event);
     }
 
@@ -311,7 +311,7 @@ class Device final : public GuardedMirrorDevice {
     GateCounts gateCounts;GateStart gateStart;
     LARGE_INTEGER gateSceneEnd={};LONGLONG gatePresentDone=0;unsigned gateSceneDraws=0;unsigned long long gateSceneReads=0;
     std::recursive_mutex gateBenchLock; /* private, uncontended: the microbenchmark's lock */
-    MirrorGate gateBenchGate;std::atomic<unsigned> gateBenchInside{0},gateBenchForeign{0}; /* 0.3.180: private, for ownerNs */
+    MirrorGate gateBenchGate; /* 0.3.180: private, for ownerNs (0.3.182: the real owner entry and exit on it) */
     const int debugMode = 0;int worldDebug=0;
     NorthlightEffectSwitches::Hotkeys effectKeys;
     float nearZ = .1f, farZ = 1000.f, scaleX = 1.f, scaleY = 1.f;
@@ -812,8 +812,9 @@ public:
         LARGE_INTEGER t0={},t1={},t={};
         QueryPerformanceCounter(&t0);for(unsigned i=0;i<GateBenchIters;++i){gateBenchLock.lock();gateBenchLock.unlock();}QueryPerformanceCounter(&t1);
         b.lockNs=double(t1.QuadPart-t0.QuadPart)*ns/GateBenchIters;
-        // 0.3.180 (D0): r88 §3.3's owner fast path (MirrorGuard::ownerProbe) on the private gate: D1's cost next to lockNs.
-        QueryPerformanceCounter(&t0);for(unsigned i=0;i<GateBenchIters;++i)MirrorGuard::ownerProbe(gateBenchGate,gateBenchInside,gateBenchForeign);QueryPerformanceCounter(&t1);
+        // 0.3.182 (D1): a MirrorGuard on the private gate, the owner's elided entry and exit as every game call
+        // takes it (tid compare, xchg, seq_cst load, TLS held set/restore, census check, release store).
+        QueryPerformanceCounter(&t0);for(unsigned i=0;i<GateBenchIters;++i){MirrorGuard probe(gateBenchGate);}QueryPerformanceCounter(&t1);
         b.ownerNs=double(t1.QuadPart-t0.QuadPart)*ns/GateBenchIters;
         IDirect3DVertexShader9* bound=nullptr;ext->GetVertexShader(&bound);IDirect3DVertexShader9* volatile key=bound;std::size_t hits=0;
         QueryPerformanceCounter(&t0);for(unsigned i=0;i<GateBenchIters;++i){IDirect3DVertexShader9* k=key;hits+=vsTags.find(k)!=vsTags.end();}QueryPerformanceCounter(&t1);
@@ -829,7 +830,8 @@ public:
     void logDrawGate(unsigned sampleFrame,bool frameApplied,double qpcNs,unsigned long long frameReads){
         const double ms=1000.0/double(cpuFrequency.QuadPart);const bool timed=!gateUntimed;
         const bool scene=gateSceneEnd.QuadPart&&gatePresentDone&&gateSceneEnd.QuadPart>=gatePresentDone;
-        // 0.3.180 (D0): the owner's real gate acquisitions by site class; gameCalls is their sum (every lock site is a MirrorGuard now).
+        // 0.3.180 (D0): the owner's outer gate entries by site class; gameCalls is their sum (every lock site is a MirrorGuard now).
+        // 0.3.182 (D1): they are elided (the mutex only while a foreign call is in flight: GATE threads ownerLocked).
         MirrorGate& gate=mirrorState.gate;
         const unsigned acqDevice=gate.takeAcquired(MirrorSite::Device),acqRegistry=gate.takeAcquired(MirrorSite::Registry),acqResource=gate.takeAcquired(MirrorSite::Resource),
             acqOther=gate.takeAcquired(MirrorSite::StateBlock)+gate.takeAcquired(MirrorSite::SwapChain)+gate.takeAcquired(MirrorSite::Raw);

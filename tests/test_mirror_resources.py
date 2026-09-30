@@ -29,9 +29,23 @@ HARNESS=r'''
 #include <cassert>
 #include <cstdlib>
 #include <cstdio>
+#include <cstring>
+#include <mutex>
 #include <new>
 #include <thread>
 #include <vector>
+// 0.3.182 (D1): the gate's mutex asserts ownership on unlock and counts real acquisitions.
+struct CheckedGateMutex {
+ std::recursive_mutex mutex;std::atomic<std::thread::id> owner{};unsigned depth=0;
+ static inline std::atomic<unsigned long> acquisitions{0};
+ void enter(){if(!depth++)owner.store(std::this_thread::get_id());acquisitions.fetch_add(1);}
+ void lock(){mutex.lock();enter();}
+ bool try_lock(){if(!mutex.try_lock())return false;enter();return true;}
+ void unlock(){assert(owner.load()==std::this_thread::get_id()&&depth);if(!--depth)owner.store(std::thread::id());mutex.unlock();}
+};
+#define NORTHLIGHT_GATE_MUTEX CheckedGateMutex
+// A resource call body, entered under the gate: never two at once (D1 stress).
+static std::atomic<int>* resourceBody=nullptr;
 static int allocationFailure=-1;
 void* operator new(std::size_t n){if(allocationFailure==0)throw std::bad_alloc();if(allocationFailure>0)--allocationFailure;if(void* p=std::malloc(n?n:1))return p;throw std::bad_alloc();}
 void operator delete(void* p)noexcept{std::free(p);}
@@ -59,7 +73,7 @@ template<class T>struct Resource:T {
  HRESULT GetSurfaceLevel(UINT,IDirect3DSurface9** out){if(!out)return D3DERR_INVALIDCALL;*out=surface;if(surface)surface->AddRef();return D3D_OK;}
  HRESULT GetCubeMapSurface(D3DCUBEMAP_FACES,UINT,IDirect3DSurface9** out){return GetSurfaceLevel(0,out);}
  HRESULT GetVolumeLevel(UINT,IDirect3DVolume9** out){if(!out)return D3DERR_INVALIDCALL;*out=volume;if(volume)volume->AddRef();return D3D_OK;}
- HRESULT GetPrivateData(REFGUID,void* data,DWORD* size){assert(!mustDisable||*mustDisable);++calls;if(size)*size=4;if(data)*static_cast<unsigned*>(data)=123;return S_OK;}
+ HRESULT GetPrivateData(REFGUID,void* data,DWORD* size){assert(!mustDisable||*mustDisable);if(resourceBody){assert(resourceBody->fetch_add(1)==0);resourceBody->fetch_sub(1);}++calls;if(size)*size=4;if(data)*static_cast<unsigned*>(data)=123;return S_OK;}
  HRESULT GetFunction(void* data,UINT* size){++calls;if(size)*size=4;if(data)*static_cast<unsigned*>(data)=456;return S_OK;}
  HRESULT GetDeclaration(D3DVERTEXELEMENT9*,UINT* count){++calls;if(count)*count=17;return S_OK;}
  HRESULT Issue(DWORD){++calls;return S_OK;}
@@ -174,7 +188,39 @@ static void census(){
  unsigned before=devicesDestroyed;auto* e=new Device;e->selfDelete=true;Resource<IDirect3DVertexShader9> raw(*e);IDirect3DVertexShader9* p=&raw;e->registry.wrap(&p);e->Release();assert(devicesDestroyed==before);
  p->Release();assert(raw.refs==0&&devicesDestroyed==before+1&&!MirrorGuard::heldByThisThread(g));
 }
-int main(){
+// 0.3.182 (D1): the owner's elided calls over the registry and resource proxies. Registry and resource
+// entries nested in an elided device call take no mutex. Foreign resource calls (GetPrivateData,
+// GetDevice, AddRef/Release) never overlap the owner's elided bodies (a body counter; TSan on the fake's
+// plain counters and the registry's refs); the owner elides again, with no mutex, once they stop.
+static void ownerElision(unsigned rounds){
+ Device d;MirrorGate& g=d.gate;
+ Resource<IDirect3DTexture9> texture(d);texture.type=D3DRTYPE_TEXTURE;Resource<IDirect3DSurface9> surface(d);surface.type=D3DRTYPE_SURFACE;texture.surface=&surface;surface.container=&texture;
+ IDirect3DTexture9* t=&texture;IDirect3DSurface9* s=nullptr;const unsigned long locks=CheckedGateMutex::acquisitions;
+ {MirrorGuard call(g);assert(call.elided());d.registry.wrap(&t);assert(d.registry.unwrap(t)==&texture);assert(t->GetSurfaceLevel(0,&s)==S_OK&&s!=&surface);
+  DWORD size=0;s->GetPrivateData(1,nullptr,&size);s->AddRef();s->Release();assert(MirrorGuard::heldByThisThread(g)&&g.inside==1);}
+ assert(CheckedGateMutex::acquisitions==locks&&g.inside==0&&!MirrorGuard::heldByThisThread(g));
+ std::atomic<int> body{0};resourceBody=&body;std::atomic<bool> stop{false};std::atomic<unsigned long> foreignCalls{0};unsigned long elided=0;
+ std::vector<std::thread> foreign;
+ for(unsigned k=0;k<2;++k)foreign.emplace_back([&,k]{unsigned n=k;while(!stop.load(std::memory_order_relaxed)){
+   switch(n++%3){case 0:{DWORD size=0;s->GetPrivateData(1,nullptr,&size);break;}case 1:{IDirect3DDevice9* o=nullptr;s->GetDevice(&o);o->Release();break;}default:s->AddRef();s->Release();break;}
+   foreignCalls.fetch_add(1);for(volatile unsigned i=0,gap=(n*2654435761u)%4096;i<gap;++i){}}});
+ for(unsigned r=0;r<rounds;++r){
+  {MirrorGuard call(g);elided+=call.elided();assert(body.fetch_add(1)==0);assert(d.registry.unwrap(t)==&texture);assert(body.fetch_sub(1)==1);
+   DWORD size=0;s->GetPrivateData(1,nullptr,&size);s->AddRef();s->Release();}
+  for(volatile unsigned i=0,gap=(r*2654435761u)%512;i<gap;++i){}
+ }
+ while(foreignCalls<64)std::this_thread::yield();
+ stop=true;for(auto& f:foreign)f.join();resourceBody=nullptr;
+ assert(g.foreignActive==0&&g.inside==0&&elided&&foreignCalls);
+ const unsigned long after=CheckedGateMutex::acquisitions;
+ for(unsigned r=0;r<1000;++r){MirrorGuard call(g);assert(call.elided());assert(d.registry.unwrap(t)==&texture);s->AddRef();s->Release();}
+ assert(CheckedGateMutex::acquisitions==after);
+ s->Release();t->Release();assert(d.registry.size()==0);
+ std::printf("PASS owner elision: nested registry/resource entries take no mutex; %u owner rounds (%lu elided) vs %lu foreign resource calls, bodies never overlap, elision resumes.\n",rounds,elided,(unsigned long)foreignCalls);
+}
+int main(int argc,char** argv){
+ if(argc>1&&!std::strcmp(argv[1],"elision")){ownerElision(10000);return 0;}
+ ownerElision(10000);
  census();
  shapeUnwrap();
  lifetime<IDirect3DSurface9>(D3DRTYPE_SURFACE);lifetime<IDirect3DTexture9>(D3DRTYPE_TEXTURE);lifetime<IDirect3DCubeTexture9>(D3DRTYPE_CUBETEXTURE);lifetime<IDirect3DVolumeTexture9>(D3DRTYPE_VOLUMETEXTURE);lifetime<IDirect3DVolume9>();lifetime<IDirect3DVertexShader9>();lifetime<IDirect3DPixelShader9>();lifetime<IDirect3DVertexDeclaration9>();lifetime<IDirect3DQuery9>();
@@ -191,7 +237,12 @@ def main():
         for label,flags in [('O2',['-O2']),('ASan+UBSan',['-O1','-g','-fsanitize=address,undefined','-fno-sanitize-recover=all']),('TSan',['-O1','-g','-fsanitize=thread'])]:
             binary=tmp/label.replace('+','-');command=['clang++','-std=c++17','-pthread',*flags,'-Wno-inconsistent-missing-override','-I'+str(tmp),*fp.test_include_flags(),str(tmp/'test.cpp'),'-o',str(binary)]
             subprocess.run(command,check=True);run=subprocess.run([str(binary)],capture_output=True,text=True,check=True);report['runs'].append({'build':label,'stdout':run.stdout,'stderr':run.stderr,'status':'pass'})
-    assert all('ThreadSanitizer' not in run['stderr'] for run in report['runs'])
+        # 0.3.182 (D1) counterfactual: a foreign thread that skips the wait on inside overlaps the owner's body.
+        binary=tmp/'skip-wait';subprocess.run(['clang++','-std=c++17','-pthread','-O2','-DNORTHLIGHT_GATE_ELISION_COUNTERFACTUAL=2','-Wno-inconsistent-missing-override','-I'+str(tmp),*fp.test_include_flags(),str(tmp/'test.cpp'),'-o',str(binary)],check=True)
+        run=subprocess.run([str(binary),'elision'],capture_output=True,text=True);caught=run.returncode!=0 # an assertion, or a crash in the unguarded maps
+        print('elision counterfactual (foreign skips the wait): '+('overlap detected (expected failure)' if caught else 'NOT DETECTED'),flush=True);assert caught,(run.returncode,run.stdout,run.stderr)
+        report['runs'].append({'build':'O2 -DNORTHLIGHT_GATE_ELISION_COUNTERFACTUAL=2','mode':'elision','exit_code':run.returncode,'expected':'failure'})
+    assert all('ThreadSanitizer' not in run['stderr'] for run in report['runs'] if run.get('status')=='pass')
     # 0.3.180 (D0): the forwarders are regenerated MirrorGuard sites (restored byte for byte afterwards).
     import generate_mirror_resource_forwarders
     generated=fp.GENERATED/'mirror_resource_forwarders.h';before=generated.read_text();generate_mirror_resource_forwarders.generate();regenerated=generated.read_text();generated.write_text(before)
