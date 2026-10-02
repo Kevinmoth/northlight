@@ -21,7 +21,11 @@ validated build replaces <output>, by renames (the previous cache is deleted aft
 folder and swapped in folder by folder. <output>/install-manifest.json is written last. A manifest
 from before the per-step digests is migrated: its recorded chain and sources give the digests it
 was built with (our art letter in its chain is ignored). A rerun with the same digests does
-nothing (--force rebuilds).
+nothing (--force rebuilds). A cache built with a builder source listed in SOURCE_EQUIVALENTS counts
+as built with today's when its reports show that the change made no difference there (clamp_free).
+
+What the builders tolerated (a WMO group's oversized MOGP clamped, a WMO fog could not read) goes to
+the manifest's 'tolerated' and one 'tolerated' progress line; more than 5% unreadable WMOs fails.
 
 A killed run resumes from its staging folder when the digests still match (stale *.tmp files are
 swept first), and a staging folder whose build had finished completes its swap. On Windows,
@@ -68,6 +72,15 @@ STEP_SOURCES = {
 }
 TOP_LEVEL = ['client_archives.py', 'mpq.py']   # at the repository root, outside fp.tracked()'s namespace
 SOURCES = sorted({n for names in STEP_SOURCES.values() for n in names} | {'validate_world_cache.py'})
+# Earlier bytes of a source whose output equals the current one's: a cache built with them is not
+# stale for that source. These are 0.3.183's (unchanged since 0.3.166); 0.3.184 clamps an oversized
+# top-level MOGP of a WMO group file, so its output differs only where 0.3.183 hit such an overrun
+# (clamp_free() checks the cache's reports for one). Revisit whenever either file changes again.
+SOURCE_EQUIVALENTS = {
+    'world_scene_builder.py': {'a54e08fe2774cd79702c04cf6e3dfd17854a12da4b6305ca38a4ade0545f0484'},
+    'regional_fog_builder.py': {'30a2af943dd0f758c1bd6067b9d58bd6b6e2f64b85af2394f2f9e6fc01daa7e3'},
+}
+PGOM_OVERRUN = "Chunk exceeds file: b'PGOM'"   # 0.3.183's error for an oversized top-level MOGP
 # Memory budget of one world_scene_builder process per continent (the builder keeps every mesh and
 # texture of its map). Measured peak RSS, stock 3.3.5a, 2026-09-26: Northrend 4.8 GB, Azeroth 3.2,
 # Expansion01 3.0, Kalimdor 2.3; the budgets leave room for HD textures.
@@ -116,6 +129,9 @@ def human(f):
         return f"Removed {f['path']} left by an interrupted swap"
     if event == 'recovered_previous_cache':
         return f"Restored {f['path']} after an interrupted swap"
+    if event == 'tolerated':
+        return (f"Tolerated: {f['clamped_wmo_groups']} WMO groups with an oversized MOGP (clamped), "
+                f"{f['fog_unreadable_wmos']} unreadable WMOs left out of the fog")
     if event == 'low_memory':
         return (f"Warning: {f['available_gb']} GB of free memory, {what} needs about {f['needs_gb']} GB; "
                 'the build may be slow. Close other programs if you can.')
@@ -211,6 +227,46 @@ def present(output, step, maps):
     return all((output / 'celestial' / f'{b}.fct').is_file() for b in ('sun', 'moon'))
 
 
+def clamp_free(output, built):
+    """True when <output>'s scene reports cover every built tile and neither they nor the fog manifest
+    record an oversized MOGP (a killed and resumed build, or unreadable JSON, is not clamp free)."""
+    for m in built:
+        covered = set()
+        for report in output.glob(f'build-{m}-*.json'):
+            data = read_json(report)
+            try:
+                covered |= {f'{x}_{y}' for x, y in (r['tile'] for r in data['generated'])}
+                if PGOM_OVERRUN in json.dumps([data['unsupported_assets'], data['failures']]):
+                    return False
+            except (KeyError, TypeError, ValueError):
+                return False
+        if not {p.stem for p in (output / m).glob('*.fg3')} <= covered:
+            return False
+    fog = read_json(output / 'fog' / 'manifest.json')
+    return fog is not None and PGOM_OVERRUN not in json.dumps(fog.get('unsupported'))
+
+
+def equivalent_digests(recorded, digests, output, without, built):
+    """The recorded inputs' digests with SOURCE_EQUIVALENTS sources taken as today's, or None when that
+    changes nothing, their scenes still differ, or the cache is not provably clamp free."""
+    inputs = recorded.get('inputs')
+    try:
+        if not isinstance(inputs, dict) or step_digests(inputs, without) != recorded_digests(recorded, without):
+            return None
+        sources = dict(inputs['sources'])
+        for n, equal in SOURCE_EQUIVALENTS.items():
+            if sources.get(n) in equal:
+                sources[n] = hashlib.sha256(source_path(n).read_bytes()).hexdigest()
+        if sources == inputs['sources']:
+            return None
+        new = step_digests(dict(inputs, sources=sources), without)
+    except (KeyError, TypeError, AttributeError):
+        return None
+    if any(new.get(k) != v for k, v in digests.items() if k.startswith('scene:')) or not clamp_free(output, built):
+        return None
+    return new
+
+
 def plan(digests, recorded, output, force, without):
     """('full', POST) | ('partial', stale post steps) | ('up_to_date', [])."""
     if force or recorded is None:
@@ -218,6 +274,8 @@ def plan(digests, recorded, output, force, without):
     old = recorded_digests(recorded, without)
     scenes = [k for k in digests if k.startswith('scene:')]
     built = recorded.get('maps_built') or recorded.get('inputs', {}).get('maps') or []
+    if old != digests:
+        old = equivalent_digests(recorded, digests, output, without, built) or old
     if sorted(k for k in old if k.startswith('scene:')) != sorted(scenes) or \
             any(old[k] != digests[k] for k in scenes) or not all((output / m).is_dir() for m in built):
         return 'full', POST
@@ -400,7 +458,21 @@ def post_problems(staging, steps, built):
         problems += [f'fog {m}: {v["tiles"]}/{v["expected"]} tiles' for m, v in fog.get('maps', {}).items()
                      if v['tiles'] != v['expected']]
         problems += [] if fog else ['missing fog/manifest.json']
+        unreadable, roots = len(fog.get('unreadable_wmos', {})), fog.get('stats', {}).get('wmo_roots', 0)
+        problems += [f'fog: {unreadable} unreadable WMOs of {roots}'] if unreadable * 20 > roots else []
     return problems
+
+
+def tolerated(staging, scene_steps, steps):
+    """What this run's builders tolerated: WMO groups whose oversized MOGP was clamped (scene reports and
+    the fog manifest) and the WMOs fog could not read (their buildings may have fog inside)."""
+    clamped = set()
+    for step in scene_steps:
+        for report in staging.glob(f'build-{step.map}-*-{step.proc.pid}.json'):
+            clamped.update((read_json(report) or {}).get('clamped_wmo_groups', []))
+    fog = (read_json(staging / 'fog' / 'manifest.json') or {}) if 'fog' in steps else {}
+    clamped.update(fog.get('clamped_wmo_groups', []))
+    return {'clamped_wmo_groups': sorted(clamped), 'fog_unreadable_wmos': fog.get('unreadable_wmos', {})}
 
 
 def swap(staging, output, keep_previous):
@@ -574,9 +646,9 @@ def main(argv=None):
         if failed or not built:
             return final('failed', 1, step='scene', maps=failed or args.maps, staging=str(staging),
                          problems=[f'scene {m} failed' for m in failed or args.maps])
-        cache, previous_steps = staging, []
+        cache, previous_steps, scene_steps = staging, [], ran
     else:
-        ran, tile_failures = [], recorded.get('tile_failures', {})
+        ran, tile_failures, scene_steps = [], recorded.get('tile_failures', {}), []
         built = recorded.get('maps_built') or recorded['inputs']['maps']
         cache, previous_steps = output, [s for s in recorded.get('steps', []) if s.get('step') not in (*steps, 'validate')]
     ran += run_parallel(post_specs(steps, cache, staging, built, common), jobs, budget)
@@ -586,10 +658,14 @@ def main(argv=None):
     problems = [f'{s.name} exit {s.proc.returncode}' for s in ran if s.proc.returncode]
     problems += post_problems(staging, steps, built)
     problems += [f'scene {m}: {len(f)} tile failures' for m, f in tile_failures.items()]
+    tolerance = tolerated(staging, scene_steps, steps)
+    if any(tolerance.values()):
+        emit(event='tolerated', **{k: len(v) for k, v in tolerance.items()})
     manifest = {'format': FORMAT, 'fingerprint': digest, 'digests': digests, 'inputs': inputs, 'maps_built': built,
                 'swap': 'full' if mode == 'full' else steps, 'built_unix': time.time(),
                 'seconds': round(time.time() - started, 1), 'jobs': jobs,
-                'steps': previous_steps + [s.record() for s in ran], 'tile_failures': tile_failures, 'problems': problems}
+                'steps': previous_steps + [s.record() for s in ran], 'tile_failures': tile_failures, 'tolerated': tolerance,
+                'problems': problems}
     (staging / 'install-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     if problems:
         return final('failed', 1, problems=problems, staging=str(staging))

@@ -116,6 +116,40 @@ code, last = run(['--client', str(client), '--output', str(cache), '--without', 
 iwc.total_memory = real_total
 assert (code, last['event'], last['stage']) == (2, 'failed', 'preflight'), last  # the foreign z is an input
 
+# 2b. A cache built with the 0.3.183 scene/fog builders stays up to date when its reports cover every
+# tile and record no oversized MOGP; anything else is a full rebuild, other stale inputs still count.
+def built_with(sources, overrun=False, report=True):
+    old_inputs = iwc.gather_inputs(client, 'all', 'enUS', iwc.MAPS, None, 'z')
+    old_inputs['sources'] = dict(old_inputs['sources'], **sources)
+    recorded = fake_cache(cache, {'inputs': old_inputs, 'digests': iwc.step_digests(old_inputs)})
+    (cache / 'fog/manifest.json').write_text(json.dumps({'unsupported': {}}))
+    for m in iwc.MAPS if report else []:
+        unsupported = ["wmo:x.wmo:Chunk exceeds file: b'PGOM'"] if overrun and m == 'Azeroth' else []
+        (cache / f'build-{m}-1-1.json').write_text(json.dumps({'generated': [{'tile': [1, 1]}], 'failures': [],
+                                                                'unsupported_assets': unsupported}))
+    return recorded
+
+
+v183 = {n: next(iter(h)) for n, h in iwc.SOURCE_EQUIVALENTS.items()}
+assert iwc.plan(base, built_with(v183), cache, False, 'z') == ('up_to_date', [])
+assert iwc.plan(base, built_with(v183, overrun=True), cache, False, 'z')[0] == 'full'
+assert iwc.plan(base, built_with(v183, report=False), cache, False, 'z')[0] == 'full'
+assert iwc.plan(base, built_with(dict(v183, **{'world_scene_builder.py': 'f' * 64})), cache, False, 'z')[0] == 'full'
+assert iwc.plan(lights_only, built_with(v183), cache, False, 'z') == ('partial', ['lights'])
+recorded = built_with(v183)
+(cache / 'Azeroth/2_2.fg3').write_text('resumed after a kill')                    # no report covers it
+assert iwc.plan(base, recorded, cache, False, 'z')[0] == 'full'
+# A few unreadable WMOs are tolerated and reported; more than 5% (or a tile short) is a problem.
+fog_staging = out / 'fog-staging'
+for unreadable, tiles, problem in [(1, 1, False), (6, 1, True), (0, 0, True)]:
+    (fog_staging / 'fog').mkdir(parents=True, exist_ok=True)
+    (fog_staging / 'fog/manifest.json').write_text(json.dumps({
+        'maps': {'Azeroth': {'tiles': tiles, 'expected': 1}}, 'stats': {'wmo_roots': 100},
+        'unreadable_wmos': {f'w{i}.wmo': 'Chunk exceeds file' for i in range(unreadable)}, 'clamped_wmo_groups': ['w_000.wmo']}))
+    assert bool(iwc.post_problems(fog_staging, ['fog'], ['Azeroth'])) == problem, (unreadable, tiles)
+assert iwc.tolerated(fog_staging, [], ['fog']) == {'clamped_wmo_groups': ['w_000.wmo'], 'fog_unreadable_wmos': {}}
+shutil.rmtree(fog_staging)
+
 # 3. A run killed after its build finished completes the swap on rerun, without building.
 staging = out / 'world-cache.staging'
 fake_cache(staging, {'digests': base, 'swap': 'full'})
