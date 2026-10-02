@@ -37,14 +37,30 @@ def unpack(fmt,b,offset=0):
     if offset<0 or offset+struct.calcsize(fmt)>len(b):raise ValueError('Truncated binary structure')
     return struct.unpack_from(fmt,b,offset)
 
-def chunks(b,start=0):
+def chunks(b,start=0,clamp=None):
+    """(tag, payload) pairs. Only a chunk tagged `clamp` may declare an end past the file: its payload is
+    the rest of the file and iteration ends. Any other overrun raises."""
     offset=start
     while offset+8<=len(b):
         tag,size=unpack('<4sI',b,offset)
-        if offset+8+size>len(b):raise ValueError('Chunk exceeds file: '+repr(tag))
+        if offset+8+size>len(b):
+            if clamp is None or tag[::-1]!=clamp.encode('ascii'):raise ValueError('Chunk exceeds file: '+repr(tag))
+            yield tag[::-1].decode('ascii'),b[offset+8:];return
         yield tag[::-1].decode('ascii'),b[offset+8:offset+8+size]
         offset+=8+size
     if offset!=len(b):raise ValueError('Trailing chunk data')
+
+def wmo_group(blob):
+    """(top-level chunks, overrun bytes) of a WMO group file. Some modified clients have group files whose
+    top-level MOGP size passes the end of the file, and the 3.3.5a client evidently loads them; it is believed
+    (unverified) to read the MOGP header and sub-chunks in fixed order without bounding them by MOGP's size.
+    The MOGP is clamped to the file; its sub-chunks stay strict, so a truly truncated group still raises."""
+    top={};offset=0;overrun=0
+    for tag,payload in chunks(blob,clamp='MOGP'):
+        size=unpack('<I',blob,offset+4)[0];overrun=max(overrun,offset+8+size-len(blob))
+        top[tag]=payload;offset+=8+len(payload)
+    if overrun and len(top['MOGP'])<68:raise ValueError('Truncated MOGP header')
+    return top,overrun
 
 def string(b,offset):
     if offset<0 or offset>=len(b):raise ValueError('Invalid string offset')
@@ -102,7 +118,7 @@ class Assets:
         self.providers={}
         for index,a in enumerate(self.archives):
             for name in a.names():self.providers[name.lower()]=index
-        self.stats=collections.Counter();self.missing=set();self.unsupported=set()
+        self.stats=collections.Counter();self.missing=set();self.unsupported=set();self.clamped=set()
     @classmethod
     def from_args(cls,args):
         return cls(args.client,args.archives,args.locale,getattr(args,'without',''))
@@ -253,8 +269,9 @@ class Builder:
         vertices=[];triangles=[]
         for group in range(groups):
             name=path[:-4]+'_%03d.wmo'%group
-            try:g=dict(chunks(self.assets.read(name)))
+            try:g,overrun=wmo_group(self.assets.read(name))
             except FileNotFoundError:self.assets.missing.add(name);continue
+            if overrun:self.assets.clamped.add(name)
             sub={}
             for tag,payload in chunks(g['MOGP'],68):sub.setdefault(tag,payload)
             pos=array(sub['MOVT'],0,len(sub['MOVT'])//12,'<3f')
@@ -361,7 +378,7 @@ class Builder:
             try:
                 mesh=self.wmo(path);matrix,translation=placement(entry[2:5],entry[5:8],1.)
                 self.add_mesh(mesh[:3],matrix,translation,'wmo',uid);self.wmo_doodads(mesh[3],entry[15],matrix,translation,uid)
-            except (ValueError,FileNotFoundError,IndexError) as exc:self.assets.unsupported.add('wmo:'+path+':'+str(exc))
+            except (ValueError,FileNotFoundError,IndexError,KeyError) as exc:self.assets.unsupported.add('wmo:'+path+':'+str(exc))
         if not self.vertices or not self.triangles:raise ValueError('Empty world tile')
         self.write_scene(destination)
         return {'map':mapname,'tile':[x,y],'vertices':len(self.vertices),'triangles':len(self.triangles),
@@ -452,14 +469,14 @@ def main():
                 except (ValueError,FileNotFoundError,IndexError,KeyError) as exc:
                     failures.append({'map':mapname,'tile':[x,y],'error':str(exc)});print('ERROR',failures[-1],flush=True)
         report={'format':'FGS3' if args.instanced else 'FGS2','generated':records,'failures':failures,'deleted_source_tiles':deleted,'missing_assets':sorted(assets.missing),
-                'unsupported_assets':sorted(assets.unsupported),'statistics':dict(assets.stats),'elapsed_seconds':time.time()-start,
+                'unsupported_assets':sorted(assets.unsupported),'clamped_wmo_groups':sorted(assets.clamped),'statistics':dict(assets.stats),'elapsed_seconds':time.time()-start,
                 'limitations':['Static M2 bind pose; animated characters absent.','Terrain albedo is first-layer texture mean; terrain geometry is exact including 4x4 holes.',
                 'BLP2 selected mip up to 128px; alpha cutout threshold 0.5.','Additive/translucent batches excluded from opaque lighting geometry.',
                 'M2 active world geosets use first opaque/cutout material per submesh.','Cross-tile placed object duplicates may exist; runtime should deduplicate triangle geometry.'],
                 'archive_priority':[p.relative_to(assets.client).as_posix() for p in assets.paths],'archive_fingerprint':assets.fingerprint()}
         args.output.mkdir(parents=True,exist_ok=True)
         (args.output/f'build-{args.map}-{int(time.time())}-{os.getpid()}.json').write_text(json.dumps(report,indent=2)+'\n')
-        print(json.dumps({'generated':len(records),'failures':len(failures),'unsupported':len(assets.unsupported),'seconds':round(time.time()-start,1)}))
+        print(json.dumps({'generated':len(records),'failures':len(failures),'unsupported':len(assets.unsupported),'clamped_wmo_groups':len(assets.clamped),'seconds':round(time.time()-start,1)}))
     finally:assets.close()
 
 
