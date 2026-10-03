@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Northlight renderer player installer for macOS (WoWSilicon) and Windows. Never starts the game.
 
-    northlight_install.py install   [--client C] [--locale xxXX] [--cache ZIP|DIR] [--backend dxvk|native|legacy]
+    northlight_install.py install   [--client C] [--locale xxXX] [--cache ZIP|DIR] [--backend dxvk|dxvk2|native|legacy]
                                  [--no-art-layer] [--no-world-cache] [--jobs N] [--yes]
     northlight_install.py uninstall [--client C] [--yes]
     northlight_install.py status    [--client C]
@@ -417,8 +417,10 @@ class Installer:
             raise Refusal(f'Cannot write into {client}. Check the folder permissions.')
         return locale
 
-    def check_payload(self):
-        """The package's own files match its manifest (a damaged download is refused)."""
+    def check_payload(self, backend='dxvk'):
+        """The package's own files match its manifest (a damaged download is refused). The files of a DXVK
+        backend other than the selected one may be missing or damaged (antivirus products remove DXVK builds):
+        they are reported and skipped by install.payload_plan."""
         manifest = read_json(self.pkg.root / 'payload-manifest.json')
         if manifest is None or not self.pkg.dll.is_file():
             raise Refusal('The package is incomplete (payload-manifest.json or payload/d3d9.dll missing). '
@@ -426,6 +428,11 @@ class Installer:
         for e in manifest:
             path = self.pkg.payload / e['path']
             if not path.is_file() or sha(path) != e['sha256']:
+                other = [n for n, folder in INSTALL.DXVK_FOLDERS.items() if e['path'].startswith(folder) and n != backend]
+                if self.platform == 'windows' and other:
+                    self.say(f'Note: payload/{e["path"]} is missing or damaged (an antivirus product may have removed it); '
+                             f'backend {other[0]} will not be available.')
+                    continue
                 raise Refusal(f'Package file damaged: payload/{e["path"]}. Download and unzip the package again.')
         expected = self.pkg.info.get('dll_sha256')
         if expected and sha(self.pkg.dll) != expected:
@@ -692,7 +699,7 @@ class Installer:
             self.say('Removing world-cache.previous left by an interrupted run...')
             remove_tree(previous)
 
-    def install(self, client, locale=None, cache=None, backend='dxvk', art=True, world_cache=True, jobs=None):
+    def install(self, client, locale=None, cache=None, backend=None, art=True, world_cache=True, jobs=None):
         client = self.resolve_client(client)
         plan = self.plan_install(client, locale, cache, backend, art, world_cache)
         with locked(client):   # S5: taken once the read-only checks have passed
@@ -701,13 +708,23 @@ class Installer:
     def plan_install(self, client, locale, cache, backend, art, world_cache):
         """Every check, read-only: returns what apply_install does. Raises Refusal."""
         self.say(f'Northlight renderer {self.pkg.version} installer; game folder: {client}')
+        explicit = backend is not None
+        if backend is None:   # the one place that resolves the default: keep an installed dxvk2, else dxvk
+            backend = 'dxvk2' if INSTALL.config_backend(client / INSTALL.CONFIG) == 'dxvk2' else 'dxvk'
         locale = self.preflight(client, locale)
-        self.check_payload()
+        self.check_payload(backend)
+        marker = client / INSTALL.DXVK3_MARKER
+        if self.platform == 'windows' and backend == 'dxvk' and not explicit and marker.is_file():
+            self.say('Note: DXVK 2.7.1 (dxvk2) is in use because DXVK 3 failed to start earlier. To try DXVK 3 again '
+                     'run Install.cmd --backend dxvk (or delete renderer-backends\\dxvk\\northlight-dxvk3-init.pending).')
+        elif self.platform == 'windows' and backend == 'dxvk':
+            self.say('Graphics backend: DXVK 3.1.1. On AMD RX 5000/6000 cards or drivers DXVK 3 does not support, '
+                     'run Install.cmd --backend dxvk2 (DXVK 2.7.1).')
         if self.platform == 'windows' and backend == 'legacy':
             proxy = client / INSTALL.PROXY
             if not ((proxy.is_file() and not INSTALL.is_ours(client)) or (client / INSTALL.LEGACY).is_file()):
                 raise Refusal('--backend legacy keeps the d3d9.dll found in the game folder as the backend, '
-                              'but there is none. Use --backend dxvk or native.')
+                              'but there is none. Use --backend dxvk, dxvk2 or native.')
         if self.platform == 'mac':
             try:
                 migrate().plan(client, self.pkg.dll, roots=[self.mac_backups(client)])
@@ -762,7 +779,7 @@ class Installer:
                 raise Refusal(refusal[0].upper() + refusal[1:] + '. Run again with --no-world-cache to install the '
                               'renderer without static world shadows and GI.')
         self.say('Checks passed.')
-        return {'client': client, 'locale': locale, 'backend': backend, 'art': art, 'old': old, 'foreign': foreign,
+        return {'client': client, 'locale': locale, 'backend': backend, 'retry_dxvk3': explicit and backend == 'dxvk', 'art': art, 'old': old, 'foreign': foreign,
                 'without': without, 'variant': variant, 'manifest': manifest, 'source': source, 'action': action}
 
     def apply_install(self, p, jobs):
@@ -810,6 +827,8 @@ class Installer:
         else:
             plan, staged, _ = INSTALL.payload_plan(client, self.pkg.root, backend=p['backend'], extra=layer)
         files = [e['path'] for e in plan if e['path'] not in layer]
+        if self.platform == 'windows' and p['retry_dxvk3']:   # an explicit --backend dxvk tries DXVK 3 again
+            (client / INSTALL.DXVK3_MARKER).unlink(missing_ok=True)
         if plan:
             self.still_closed('installing the renderer files')
             backups.append(INSTALL.commit(client, plan, staged, self.pkg.payload, self.pkg.version))
@@ -858,7 +877,8 @@ class Installer:
                                       (leftover / 'install-manifest.json').exists()):
                 remove_tree(leftover)
         if self.platform == 'windows':
-            for folder in ('renderer-backends/dxvk', 'renderer-backends/legacy', 'renderer-backends'):
+            (client / INSTALL.DXVK3_MARKER).unlink(missing_ok=True)   # the renderer's own marker; no record holds it
+            for folder in ('renderer-backends/dxvk', 'renderer-backends/dxvk2', 'renderer-backends/legacy', 'renderer-backends'):
                 try:
                     (client / folder).rmdir()   # only when empty
                 except OSError:
@@ -926,9 +946,10 @@ def main(argv=None):
     ap.add_argument('--client', help='the game folder (the folder with wow.exe); asked when missing')
     ap.add_argument('--locale', help='the game language, e.g. enUS (default: WTF/Config.wtf, else the only one)')
     ap.add_argument('--cache', help='the Northlight-cache-<variant>-<digest>.zip (or its expanded folder)')
-    ap.add_argument('--backend', choices=['dxvk', 'native', 'legacy'], default='dxvk',
-                    help='Windows: the Direct3D 9 behind the renderer (default dxvk; legacy = the d3d9.dll found in '
-                         'the game folder)')
+    ap.add_argument('--backend', choices=['dxvk', 'dxvk2', 'native', 'legacy'], default=None,
+                    help='Windows: the Direct3D 9 behind the renderer (default dxvk = DXVK 3.1.1, or the dxvk2 already '
+                         'installed; dxvk2 = DXVK 2.7.1 for AMD RX 5000/6000 or drivers DXVK 3 does not support; '
+                         'legacy = the d3d9.dll found in the game folder)')
     ap.add_argument('--no-art-layer', action='store_true', help='do not install the lighting art layer (patch-z)')
     ap.add_argument('--no-world-cache', action='store_true', help='install the renderer without a world cache')
     ap.add_argument('--jobs', type=int, help='parallel builders for a local cache build (default: by memory)')

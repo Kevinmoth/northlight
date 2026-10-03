@@ -90,7 +90,8 @@ class Base(unittest.TestCase):
         files = {'celestial-profiles.ini': b'[Sun]\n', 'shadow-range-profiles.ini': b'[Range]\n',
                  'northlight-quality.ini': b'[Quality]\nPreset=Quality\n'}
         if self.platform == 'windows':
-            files.update({'d3d9.dll': PROXY, 'renderer-backends/dxvk/dxvk_d3d9.dll': b'MZ DXVK: \0v2.7.1\0'})
+            files.update({'d3d9.dll': PROXY, 'renderer-backends/dxvk/dxvk_d3d9.dll': b'MZ DXVK: \0v3.1.1\0',
+                          'renderer-backends/dxvk2/dxvk2_d3d9.dll': b'MZ DXVK: \0v2.7.1\0'})
         (root / 'payload/d3d9.dll').write_bytes(PROXY)
         for n, d in files.items():
             p = root / 'payload' / n; p.parent.mkdir(parents=True, exist_ok=True); p.write_bytes(d)
@@ -499,6 +500,81 @@ class WindowsInstall(Install):
         self.assertFalse((self.client / 'world-cache/a.fgm').exists())
         self.installer().uninstall(self.client)
         self.assertEqual(tree(self.client), self.before)
+
+    def ini(self):
+        return (self.client / 'northlight-renderer.ini').read_bytes()
+
+    def test_fresh_install_writes_dxvk_and_dxvk2_choice_is_kept(self):
+        self.installer().install(self.client)
+        self.assertEqual(self.ini(), b'[Renderer]\r\nBackend=dxvk\r\n')
+        self.installer().install(self.client, backend='dxvk2')
+        self.assertEqual(self.ini(), b'[Renderer]\r\nBackend=dxvk2\r\n')
+        self.installer().install(self.client)   # no --backend: the installed choice stays
+        self.assertEqual(self.ini(), b'[Renderer]\r\nBackend=dxvk2\r\n')
+        self.installer().install(self.client, backend='dxvk')
+        self.assertEqual(self.ini(), b'[Renderer]\r\nBackend=dxvk\r\n')
+        self.installer().install(self.client)
+        self.assertEqual(self.ini(), b'[Renderer]\r\nBackend=dxvk\r\n')
+
+    def test_main_backend_defaults_to_none(self):
+        seen = []
+        with patch.object(fi.Installer, 'install', lambda self, *a: seen.append(a)), patch.object(fi, 'host_platform', lambda: 'windows'):
+            self.assertEqual(fi.main(['install', '--client', str(self.client), '--package', str(self.pkg_root)]), 0)
+            self.assertEqual(fi.main(['install', '--backend', 'dxvk2', '--client', str(self.client), '--package', str(self.pkg_root)]), 0)
+        self.assertEqual([a[3] for a in seen], [None, 'dxvk2'])
+
+    def test_unselected_dxvk_file_damaged_does_not_block_but_selected_does(self):
+        (self.pkg_root / 'payload/renderer-backends/dxvk2/dxvk2_d3d9.dll').write_bytes(b'removed by antivirus')
+        inst = self.installer()
+        inst.install(self.client)
+        self.assertIn('backend dxvk2 will not be available', inst.out.getvalue())
+        self.assertFalse((self.client / 'renderer-backends/dxvk2').exists())
+        self.installer().uninstall(self.client)
+        self.assertEqual(tree(self.client), self.before)
+        with self.assertRaises(fi.Refusal) as e:
+            self.installer().install(self.client, backend='dxvk2')
+        self.assertIn('damaged', str(e.exception))
+
+    def test_uninstall_removes_the_empty_dxvk2_folder(self):
+        self.installer().install(self.client, backend='dxvk2')
+        self.assertTrue((self.client / 'renderer-backends/dxvk2/dxvk2_d3d9.dll').is_file())
+        self.installer().uninstall(self.client)
+        self.assertFalse((self.client / 'renderer-backends').exists())
+        self.assertEqual(tree(self.client), self.before)
+
+    MARKER = 'renderer-backends/dxvk/northlight-dxvk3-init.pending'
+
+    def marker(self):
+        m = self.client / self.MARKER
+        m.parent.mkdir(parents=True, exist_ok=True); m.write_bytes(b'pending')
+        return m
+
+    def test_dxvk3_marker_kept_without_backend_with_a_notice(self):
+        self.installer().install(self.client)
+        m = self.marker()
+        inst = self.installer()
+        inst.install(self.client)
+        self.assertTrue(m.is_file())
+        self.assertIn('DXVK 3 failed to start earlier', inst.out.getvalue())
+        self.assertIn('--backend dxvk', inst.out.getvalue())
+
+    def test_dxvk3_marker_cleared_only_by_an_explicit_dxvk(self):
+        self.installer().install(self.client)
+        m = self.marker()
+        for backend in ('dxvk2', 'native'):
+            self.installer().install(self.client, backend=backend)
+            self.assertTrue(m.is_file(), backend)
+        inst = self.installer()
+        inst.install(self.client, backend='dxvk')
+        self.assertFalse(m.exists())
+        self.assertNotIn('failed to start earlier', inst.out.getvalue())
+
+    def test_dxvk3_marker_does_not_block_install_or_uninstall(self):
+        self.installer().install(self.client)
+        self.marker()
+        self.installer().uninstall(self.client)
+        self.assertEqual(tree(self.client), self.before)
+        self.assertFalse((self.client / 'renderer-backends').exists())
 
 
 if __name__ == '__main__':

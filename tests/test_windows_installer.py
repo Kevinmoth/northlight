@@ -22,7 +22,7 @@ class InstallerTests(unittest.TestCase):
         self.client=self.base/'game';self.client.mkdir()
         self.pkg=self.base/'package';(self.pkg/'payload').mkdir(parents=True)
         self.exe=b'any wow.exe build';(self.client/'wow.exe').write_bytes(self.exe)
-        self.files={'d3d9.dll':PROXY,'northlight-renderer.ini':b'[Renderer]\r\nBackend=dxvk\r\n','renderer-backends/dxvk/dxvk_d3d9.dll':b'MZ DXVK: \0v2.7.1\0','world-cache/models/a.fgm':b'model'}
+        self.files={'d3d9.dll':PROXY,'northlight-renderer.ini':b'[Renderer]\r\nBackend=dxvk\r\n','renderer-backends/dxvk/dxvk_d3d9.dll':b'MZ DXVK: \0v3.1.1\0','renderer-backends/dxvk2/dxvk2_d3d9.dll':b'MZ DXVK: \0v2.7.1\0','world-cache/models/a.fgm':b'model'}
         manifest=[]
         for name,data in self.files.items():
             p=self.pkg/'payload'/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(data)
@@ -72,6 +72,44 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(record[0],'renderer-backends/legacy/legacy_d3d9.dll');self.assertEqual(record[-1],'d3d9.dll')
         m.restore(self.client,backup)
         self.assertEqual(self.snapshot(),before)   # foreign d3d9.dll back; no legacy copy/ini
+    def test_dxvk2_backend_is_written_and_kept(self):
+        first=m.install(self.client,self.pkg,backend='dxvk2')
+        self.assertEqual(self.read('northlight-renderer.ini'),b'[Renderer]\r\nBackend=dxvk2\r\n')
+        self.assertEqual(self.read('renderer-backends/dxvk2/dxvk2_d3d9.dll'),self.files['renderer-backends/dxvk2/dxvk2_d3d9.dll'])
+        self.assertEqual(self.read('renderer-backends/dxvk/dxvk_d3d9.dll'),self.files['renderer-backends/dxvk/dxvk_d3d9.dll'])
+        self.assertIsNone(m.install(self.client,self.pkg))   # a plain reinstall keeps dxvk2
+        second=m.install(self.client,self.pkg,backend='dxvk')
+        self.assertEqual(self.read('northlight-renderer.ini'),b'[Renderer]\r\nBackend=dxvk\r\n')
+        m.restore(self.client,second);m.restore(self.client,first)
+    def test_dxvk3_marker_is_not_a_package_file(self):
+        marker=self.client/m.DXVK3_MARKER;marker.parent.mkdir(parents=True);marker.write_bytes(b'pending')
+        backup=m.install(self.client,self.pkg,backend='dxvk2')
+        self.assertTrue(marker.is_file())
+        self.assertNotIn(m.DXVK3_MARKER,[e['path'] for e in json.loads((backup/'transaction.json').read_text())['files']])
+        m.restore(self.client,backup)
+        self.assertTrue(marker.is_file())
+    def damage(self,name):
+        (self.pkg/'payload'/name).write_bytes(b'quarantined');
+    def test_unselected_dxvk_file_may_be_missing_or_damaged(self):
+        out=[]
+        for backend,gone,kept in [('dxvk','renderer-backends/dxvk2/dxvk2_d3d9.dll','renderer-backends/dxvk/dxvk_d3d9.dll'),
+                                  ('dxvk2','renderer-backends/dxvk/dxvk_d3d9.dll','renderer-backends/dxvk2/dxvk2_d3d9.dll'),
+                                  ('native','renderer-backends/dxvk/dxvk_d3d9.dll','renderer-backends/dxvk2/dxvk2_d3d9.dll')]:
+            with self.subTest(backend=backend):
+                self.damage(gone)
+                with patch('builtins.print',lambda *a,**k:out.append(' '.join(map(str,a)))):
+                    backup=m.install(self.client,self.pkg,backend=backend)
+                self.assertTrue(any('skipping' in line for line in out))
+                self.assertEqual(self.read('d3d9.dll'),PROXY)
+                m.restore(self.client,backup)
+                (self.pkg/'payload'/gone).write_bytes(self.files[gone])
+    def test_selected_dxvk_file_must_verify(self):
+        for backend,name in [('dxvk','renderer-backends/dxvk/dxvk_d3d9.dll'),('dxvk2','renderer-backends/dxvk2/dxvk2_d3d9.dll')]:
+            with self.subTest(backend=backend):
+                self.damage(name)
+                with self.assertRaises(ValueError):m.install(self.client,self.pkg,backend=backend)
+                (self.pkg/'payload'/name).write_bytes(self.files[name])
+        self.assertFalse((self.client/'d3d9.dll').exists())
     def test_use_existing_selects_legacy_and_is_kept_on_update(self):
         self.foreign();first=m.install(self.client,self.pkg,use_existing=True)
         self.assertEqual(self.read('northlight-renderer.ini'),b'[Renderer]\r\nBackend=legacy\r\n')

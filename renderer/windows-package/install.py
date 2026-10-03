@@ -18,6 +18,9 @@ from datetime import datetime
 PROXY = 'd3d9.dll'
 LEGACY = 'renderer-backends/legacy/legacy_d3d9.dll'
 DXVK = 'renderer-backends/dxvk/dxvk_d3d9.dll'
+DXVK2 = 'renderer-backends/dxvk2/dxvk2_d3d9.dll'   # DXVK 2.7.1, the fallback backend
+DXVK3_MARKER = 'renderer-backends/dxvk/northlight-dxvk3-init.pending'   # the renderer's crash marker; never packaged or recorded
+DXVK_FOLDERS = {'dxvk': 'renderer-backends/dxvk/', 'dxvk2': 'renderer-backends/dxvk2/'}
 CONFIG = 'northlight-renderer.ini'
 MARKER = b'Northlight renderer '
 PROXY_SIGNATURE = b'PROXY module=%ls root=%ls'   # the proxy's start-up log line; carries no product name
@@ -202,13 +205,14 @@ def config_bytes(backend):
 
 def payload_plan(client, package, use_existing=False, backend=None, extra=None, proxy=True):
     """(plan, staged, foreign): the entries that bring client to the package payload.
-    backend None keeps the payload's northlight-renderer.ini; 'dxvk'/'native' writes Backend=<backend>;
+    backend None keeps the payload's northlight-renderer.ini; 'dxvk'/'dxvk2'/'native' writes Backend=<backend>;
     'legacy' (like use_existing) selects a foreign d3d9.dll kept as the legacy backend.
     extra {client path: bytes} adds staged files (the art layer). proxy=False (macOS, where
     migrate_mac_proxy owns d3d9.dll and northlight-renderer.ini) leaves the game-folder d3d9.dll alone."""
     if backend == 'legacy': use_existing = True
     first, staged, config, foreign = switch_plan(client, use_existing) if proxy else ([], {}, None, False)
-    if config is None and backend in ('dxvk', 'native'): config = config_bytes(backend)
+    if config is None and backend in ('dxvk', 'dxvk2', 'native'): config = config_bytes(backend)
+    if config is None and backend is None and proxy and config_backend(safe_path(client, CONFIG)) == 'dxvk2': config = config_bytes('dxvk2')   # the choice survives
     manifest = json.loads((package/'payload-manifest.json').read_text(encoding='utf-8'))
     if proxy and PROXY not in [e['path'] for e in manifest]: raise ValueError('Package lacks the renderer '+PROXY)
     if foreign:
@@ -217,6 +221,9 @@ def payload_plan(client, package, use_existing=False, backend=None, extra=None, 
             print('Note: its settings (e.g. ReShade.ini, reshade-shaders, enbseries.ini) stay in the game folder;'
                   ' a ReShade/ENB used as Backend=legacy may not find them there.', flush=True)
     plan, proxy_entry = list(first), []
+    # The selected DXVK backend's files must verify. Another DXVK folder (an antivirus product may have
+    # removed or damaged a DXVK file) is skipped with a notice; 'native' and 'legacy' need neither.
+    selected = backend or config_backend(safe_path(client, CONFIG)) or 'dxvk'
     if proxy and backend is not None and CONFIG not in [e['path'] for e in manifest]:
         manifest = manifest+[{'path':CONFIG, 'sha256':None}]
     print('Verifying package and comparing installed files...', flush=True)
@@ -224,7 +231,12 @@ def payload_plan(client, package, use_existing=False, backend=None, extra=None, 
         dst = safe_path(client, e['path'])
         if e['sha256'] is not None:
             src = safe_path(package/'payload', e['path'])
-            if not src.is_file() or sha(src) != e['sha256']: raise ValueError('Package checksum mismatch: '+e['path'])
+            if not src.is_file() or sha(src) != e['sha256']:
+                other = [n for n, folder in DXVK_FOLDERS.items() if e['path'].startswith(folder) and n != selected]
+                if not other: raise ValueError('Package checksum mismatch: '+e['path'])
+                print('Note:', e['path'], 'is missing or damaged in the package (an antivirus product may have removed it);'
+                      ' skipping it. Backend', other[0], 'will not be available.', flush=True)
+                continue
         old = sha(dst) if dst.exists() else None
         # User settings (northlight-quality.ini) are installed only when missing, never overwritten.
         if e.get('preserve') and dst.exists():
