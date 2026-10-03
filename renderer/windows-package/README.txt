@@ -85,20 +85,32 @@ On a driver DXVK 3.1.1 does not support, DXVK usually throws an error while
 the game starts, and the game closes (DXVK's own log, Wow_d3d9.log in the
 game folder, says "Failed to initialize DXVK" or "Device does not support
 required feature"). The renderer marks that start in
-renderer-backends\dxvk\northlight-dxvk3-init.pending, and every later start
-uses DXVK 2.7.1 instead (the log says BACKEND FALLBACK dxvk -> dxvk2 with
-reason=previous-start-ended-in-dxvk3-init). So the first start fails and the
-next one works. When DXVK 3 only reports no adapter, the renderer switches to
-dxvk2 within the same start (BACKEND FALLBACK dxvk -> dxvk2 reason=...).
-To try DXVK 3 again after a driver update, delete the .pending file or run
-Install.cmd --backend dxvk. To avoid the failed first start, install with
---backend dxvk2. If DXVK 2.7.1 fails too (the driver has no Vulkan 1.3), use
---backend native. A reinstall without --backend keeps your dxvk2 choice and a
-pending marker; --backend dxvk switches back and clears the marker.
+renderer-backends\dxvk\northlight-dxvk3-init.pending. The renderer does not
+switch backends within a start: when the DXVK 3 start fails or finds no
+adapter, the next start uses DXVK 2.7.1 (the log says BACKEND DXVK 3 start
+failed reason=...; the next start uses dxvk2, and later starts say BACKEND
+FALLBACK dxvk -> dxvk2). So the first start can fail and the next one works.
+The marker is tied to the DXVK 3 build it was written for: a package with a
+new DXVK 3 build tries DXVK 3 again by itself. To try DXVK 3 again on the same
+build after a driver update, delete the .pending file or run
+Install.cmd --backend dxvk (the file is removed once that install succeeded).
+To avoid the failed first start, install with --backend dxvk2. If DXVK 2.7.1
+fails too (the driver has no Vulkan 1.3), use --backend native.
+Known limitation: if the game is closed or crashes during the short DXVK 3
+start (for example an overlay or Vulkan layer crashes), the next starts also
+use DXVK 2.7.1 until the .pending file is deleted or Install.cmd --backend dxvk
+is run.
+A reinstall without --backend keeps an installed dxvk2 or native choice and a
+pending marker; --backend dxvk switches back to DXVK 3 and clears the marker.
 Some antivirus products flag 32-bit DXVK builds as a false positive. If one
-removes a DXVK file, the installer still installs the other backend and says
-which one is missing; allow the file in the antivirus product, or use
---backend native or --backend dxvk2.
+removes a DXVK file of the package, the installer still installs the backend you
+use and says which one is not available; an older copy of that file in the game
+folder is removed, so nothing unverified is loaded. A DXVK file that is present
+but damaged or modified is always refused: download and unzip the package again.
+If the file of the backend you install is missing, the installer stops and
+names the options: allow the file in the antivirus product and unzip again, or
+install with --backend dxvk2 (for the dxvk file) / --backend dxvk (for the
+dxvk2 file) / --backend native.
 BackendPath= can also point to another D3D9 implementation (a path relative to
 the game folder or a full path); the file name must not be d3d9.dll (name the
 copy, for example, my_d3d9.dll). The renderer never loads itself: if the chosen

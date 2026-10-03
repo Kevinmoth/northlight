@@ -88,28 +88,111 @@ class InstallerTests(unittest.TestCase):
         self.assertNotIn(m.DXVK3_MARKER,[e['path'] for e in json.loads((backup/'transaction.json').read_text())['files']])
         m.restore(self.client,backup)
         self.assertTrue(marker.is_file())
+    DXVK_FILE='renderer-backends/dxvk/dxvk_d3d9.dll';DXVK2_FILE='renderer-backends/dxvk2/dxvk2_d3d9.dll'
     def damage(self,name):
         (self.pkg/'payload'/name).write_bytes(b'quarantined');
-    def test_unselected_dxvk_file_may_be_missing_or_damaged(self):
+    def remove(self,name):
+        (self.pkg/'payload'/name).unlink()
+    def quiet(self,fn,*a,**k):
         out=[]
-        for backend,gone,kept in [('dxvk','renderer-backends/dxvk2/dxvk2_d3d9.dll','renderer-backends/dxvk/dxvk_d3d9.dll'),
-                                  ('dxvk2','renderer-backends/dxvk/dxvk_d3d9.dll','renderer-backends/dxvk2/dxvk2_d3d9.dll'),
-                                  ('native','renderer-backends/dxvk/dxvk_d3d9.dll','renderer-backends/dxvk2/dxvk2_d3d9.dll')]:
+        with patch('builtins.print',lambda *x,**y:out.append(' '.join(map(str,x)))):
+            result=fn(*a,**k)
+        return result,out
+    def test_unselected_dxvk_file_may_be_missing(self):
+        for backend,gone in [('dxvk',self.DXVK2_FILE),('dxvk2',self.DXVK_FILE),('native',self.DXVK_FILE)]:
             with self.subTest(backend=backend):
-                self.damage(gone)
-                with patch('builtins.print',lambda *a,**k:out.append(' '.join(map(str,a)))):
-                    backup=m.install(self.client,self.pkg,backend=backend)
+                self.remove(gone)
+                backup,out=self.quiet(m.install,self.client,self.pkg,backend=backend)
                 self.assertTrue(any('skipping' in line for line in out))
                 self.assertEqual(self.read('d3d9.dll'),PROXY)
+                self.assertIsNone(self.read(gone))
                 m.restore(self.client,backup)
                 (self.pkg/'payload'/gone).write_bytes(self.files[gone])
-    def test_selected_dxvk_file_must_verify(self):
-        for backend,name in [('dxvk','renderer-backends/dxvk/dxvk_d3d9.dll'),('dxvk2','renderer-backends/dxvk2/dxvk2_d3d9.dll')]:
-            with self.subTest(backend=backend):
+    def test_present_but_modified_dxvk_file_is_always_refused(self):
+        for backend,name in [('dxvk',self.DXVK_FILE),('dxvk',self.DXVK2_FILE),('dxvk2',self.DXVK_FILE),('dxvk2',self.DXVK2_FILE),('native',self.DXVK_FILE)]:
+            with self.subTest(backend=backend,file=name):
                 self.damage(name)
-                with self.assertRaises(ValueError):m.install(self.client,self.pkg,backend=backend)
+                with self.assertRaises(ValueError) as e:m.install(self.client,self.pkg,backend=backend)
+                self.assertIn('damaged or modified; download and unzip the package again',str(e.exception))
+                self.assertFalse((self.client/'d3d9.dll').exists())
                 (self.pkg/'payload'/name).write_bytes(self.files[name])
-        self.assertFalse((self.client/'d3d9.dll').exists())
+    def test_selected_dxvk_file_missing_names_the_alternatives(self):
+        for backend,name,alt in [('dxvk',self.DXVK_FILE,'--backend dxvk2 / --backend native'),('dxvk2',self.DXVK2_FILE,'--backend dxvk / --backend native')]:
+            with self.subTest(backend=backend):
+                self.remove(name)
+                with self.assertRaises(ValueError) as e:m.install(self.client,self.pkg,backend=backend)
+                text=str(e.exception)
+                self.assertIn('antivirus product may have removed it',text);self.assertIn('Allow the file and unzip the package again',text)
+                self.assertIn('install with '+alt,text)
+                self.assertFalse((self.client/'d3d9.dll').exists())
+                (self.pkg/'payload'/name).write_bytes(self.files[name])
+    def test_stale_client_dxvk2_is_removed_when_missing_from_package_and_restored(self):
+        m.install(self.client,self.pkg,backend='dxvk2')
+        stale=self.client/self.DXVK2_FILE;stale.write_bytes(b'older unverified dxvk2')
+        self.remove(self.DXVK2_FILE)
+        before=self.snapshot()
+        backup,out=self.quiet(m.install,self.client,self.pkg,backend='dxvk')
+        self.assertFalse(stale.exists());self.assertTrue(any('dxvk2 will not be available' in l for l in out))
+        entries={e['path']:e for e in json.loads((backup/'transaction.json').read_text())['files']}
+        self.assertIsNone(entries[self.DXVK2_FILE]['after'])
+        m.restore(self.client,backup)
+        self.assertEqual(self.snapshot(),before)
+    def test_stale_client_dxvk2_rollback_when_commit_fails(self):
+        m.install(self.client,self.pkg,backend='dxvk2')
+        stale=self.client/self.DXVK2_FILE;stale.write_bytes(b'older unverified dxvk2')
+        self.remove(self.DXVK2_FILE)
+        before=self.snapshot()
+        real=m.replace_file
+        def fail(src,dst):
+            if Path(dst).name=='late.bin':raise OSError('disk full')
+            return real(src,dst)
+        with patch.object(m,'replace_file',fail),self.assertRaises(OSError):
+            self.quiet(m.install,self.client,self.pkg,backend='dxvk',extra={'late.bin':b'x'})   # fails after the stale file was removed
+        self.assertEqual(self.snapshot(),before)
+    def test_native_and_dxvk2_are_kept_on_a_plain_reinstall(self):
+        for backend in ('native','dxvk2'):
+            with self.subTest(backend=backend):
+                m.install(self.client,self.pkg,backend=backend)
+                self.assertIsNone(m.install(self.client,self.pkg))
+                self.assertEqual(self.read('northlight-renderer.ini'),m.config_bytes(backend))
+    def test_resolve_backend_is_the_single_source(self):
+        ini=self.client/'northlight-renderer.ini'
+        self.assertEqual(m.resolve_backend(self.client),'dxvk')
+        for installed,expected in [('dxvk2','dxvk2'),('native','native'),('dxvk','dxvk'),('legacy','dxvk'),('bogus','dxvk')]:
+            ini.write_bytes(m.config_bytes(installed));self.assertEqual(m.resolve_backend(self.client),expected)
+        self.assertEqual(m.resolve_backend(self.client,'dxvk'),'dxvk')   # explicit wins
+        self.assertEqual(m.resolve_backend(self.client,'native'),'native')
+        ini.write_bytes(m.config_bytes('native'))
+        with patch.object(m,'resolve_backend',side_effect=AssertionError('payload_plan re-resolved')):
+            m.payload_plan(self.client,self.pkg,backend='dxvk2')
+        with self.assertRaises(ValueError):m.payload_plan(self.client,self.pkg)
+    def test_backend_path_survives_a_plain_reinstall(self):
+        m.install(self.client,self.pkg)
+        ini=self.client/'northlight-renderer.ini';custom=b'[Renderer]\r\nBackend=dxvk\r\nBackendPath=my_d3d9.dll\r\n'
+        ini.write_bytes(custom)
+        self.assertIsNone(m.install(self.client,self.pkg));self.assertEqual(ini.read_bytes(),custom)
+        m.install(self.client,self.pkg,backend='dxvk2');self.assertEqual(ini.read_bytes(),m.config_bytes('dxvk2'))
+    def test_legacy_stays_selected_while_the_foreign_dll_is_there(self):
+        self.foreign();m.install(self.client,self.pkg,backend='legacy')
+        self.assertEqual(self.read('northlight-renderer.ini'),m.config_bytes('legacy'))
+        self.assertIsNone(m.install(self.client,self.pkg))
+    def test_other_dxvk_predicate(self):
+        self.assertEqual(m.other_dxvk(self.DXVK2_FILE,'dxvk'),'dxvk2');self.assertEqual(m.other_dxvk(self.DXVK_FILE,'dxvk2'),'dxvk')
+        self.assertIsNone(m.other_dxvk(self.DXVK_FILE,'dxvk'));self.assertIsNone(m.other_dxvk('d3d9.dll','native'))
+        self.assertEqual(m.other_dxvk(self.DXVK_FILE,'native'),'dxvk')
+    def test_package_sha_is_memoised_per_file_state(self):
+        p=self.pkg/'payload'/self.DXVK_FILE
+        with patch.object(m,'sha',wraps=m.sha) as spy:
+            m.package_sha(p);m.package_sha(p);self.assertEqual(spy.call_count,1)
+            p.write_bytes(b'changed content');self.assertEqual(m.package_sha(p),hashlib.sha256(b'changed content').hexdigest())
+    def test_dxvk_folder_link_refused(self):
+        (self.client/'renderer-backends').mkdir();other=self.base/'elsewhere';other.mkdir()
+        (self.client/'renderer-backends/dxvk').symlink_to(other,target_is_directory=True)
+        with self.assertRaises(ValueError):m.safe_path(self.client,m.DXVK3_MARKER)
+        with self.assertRaises(ValueError):m.install(self.client,self.pkg)
+        self.assertEqual(list(other.iterdir()),[])
+    def test_safe_path_of_a_missing_file_is_allowed(self):
+        self.assertEqual(m.safe_path(self.client,m.DXVK3_MARKER),self.client/m.DXVK3_MARKER)
     def test_use_existing_selects_legacy_and_is_kept_on_update(self):
         self.foreign();first=m.install(self.client,self.pkg,use_existing=True)
         self.assertEqual(self.read('northlight-renderer.ini'),b'[Renderer]\r\nBackend=legacy\r\n')
@@ -210,14 +293,10 @@ class InstallerTests(unittest.TestCase):
         with self.assertRaises(ValueError):m.safe_path(self.client,'link/file')
     def test_backend_switch_and_two_level_rollback(self):
         first=m.install(self.client,self.pkg)
-        p=self.pkg/'payload/northlight-renderer.ini';p.write_bytes(b'[Renderer]\nBackend=native\n')
-        manifest=json.loads((self.pkg/'payload-manifest.json').read_text())
-        for e in manifest:
-            if e['path']=='northlight-renderer.ini':e['sha256']=m.sha(p)
-        (self.pkg/'payload-manifest.json').write_text(json.dumps(manifest))
-        second=m.install(self.client,self.pkg)
+        second=m.install(self.client,self.pkg,backend='native')
+        self.assertEqual(self.read('northlight-renderer.ini'),b'[Renderer]\r\nBackend=native\r\n')
         m.restore(self.client,second)
-        self.assertIn(b'dxvk',self.read('northlight-renderer.ini'))
+        self.assertIn(b'Backend=dxvk',self.read('northlight-renderer.ini'))
         m.restore(self.client,first)
         self.assertIsNone(self.read('northlight-renderer.ini'))
     def add_quality(self,data=b'[Quality]\nPreset=Quality\n'):
