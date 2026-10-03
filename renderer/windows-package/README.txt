@@ -13,7 +13,14 @@ DOWNLOADS
 
 REQUIREMENTS
 - 64-bit Windows 10 or 11 and a WoW 3.3.5a (12340) client.
-- A graphics driver with Vulkan for x86 programs (DXVK 2.7.1 needs Vulkan 1.3).
+- A graphics driver with Vulkan for x86 programs. The default DXVK 3.1.1
+  still asks for Vulkan 1.3 but also needs extra device features (for example
+  maintenance6, 8/16-bit storage and scalarBlockLayout), so an old driver or
+  GPU (some AMD Polaris/Vega and Intel Gen9 graphics) may not be supported.
+  On such a driver the first start ends (see below) and the following starts
+  use DXVK 2.7.1 (the dxvk2 backend) by themselves.
+- AMD RX 5000/6000 (RDNA 1/2): DXVK's own release notes say DXVK 3 performs
+  badly on them on Windows. Install with Install.cmd --backend dxvk2.
 - Only ASCII characters in the game folder path (no ä, ö, å or other special
   characters), a path of at most about 150 characters, and the game must not
   be in Program Files.
@@ -44,6 +51,7 @@ are skipped. Log: the logs folder of the extracted package.
 
 Options (Install.cmd ...):
   --locale enUS          if the client has several locales and the installer cannot tell which one is used
+  --backend dxvk2        DXVK 2.7.1 for AMD RX 5000/6000 or drivers DXVK 3 does not support
   --backend native       Windows' own Direct3D 9 instead of DXVK
   --backend legacy       the d3d9.dll that was already in the game folder (for example your own DXVK or ReShade)
   --no-art-layer         no lighting layer (patch-z)
@@ -67,9 +75,30 @@ the actual Direct3D 9 implementation from elsewhere.
   reshade-shaders, enbseries.ini) stay in the game folder.
 
 The backend is chosen in northlight-renderer.ini: Backend=dxvk.
-- dxvk:   renderer-backends\dxvk\dxvk_d3d9.dll (the package's DXVK 2.7.1, the default)
+- dxvk:   renderer-backends\dxvk\dxvk_d3d9.dll (the package's DXVK 3.1.1, the default)
+- dxvk2:  renderer-backends\dxvk2\dxvk2_d3d9.dll (DXVK 2.7.1; for AMD RX 5000/6000 and
+          for drivers DXVK 3 does not support: Install.cmd --backend dxvk2 or
+          Backend=dxvk2 in northlight-renderer.ini)
 - native: Windows' own System32\d3d9.dll
 - legacy: renderer-backends\legacy\legacy_d3d9.dll (the game folder's earlier d3d9.dll)
+On a driver DXVK 3.1.1 does not support, DXVK usually throws an error while
+the game starts, and the game closes (DXVK's own log, Wow_d3d9.log in the
+game folder, says "Failed to initialize DXVK" or "Device does not support
+required feature"). The renderer marks that start in
+renderer-backends\dxvk\northlight-dxvk3-init.pending, and every later start
+uses DXVK 2.7.1 instead (the log says BACKEND FALLBACK dxvk -> dxvk2 with
+reason=previous-start-ended-in-dxvk3-init). So the first start fails and the
+next one works. When DXVK 3 only reports no adapter, the renderer switches to
+dxvk2 within the same start (BACKEND FALLBACK dxvk -> dxvk2 reason=...).
+To try DXVK 3 again after a driver update, delete the .pending file or run
+Install.cmd --backend dxvk. To avoid the failed first start, install with
+--backend dxvk2. If DXVK 2.7.1 fails too (the driver has no Vulkan 1.3), use
+--backend native. A reinstall without --backend keeps your dxvk2 choice and a
+pending marker; --backend dxvk switches back and clears the marker.
+Some antivirus products flag 32-bit DXVK builds as a false positive. If one
+removes a DXVK file, the installer still installs the other backend and says
+which one is missing; allow the file in the antivirus product, or use
+--backend native or --backend dxvk2.
 BackendPath= can also point to another D3D9 implementation (a path relative to
 the game folder or a full path); the file name must not be d3d9.dll (name the
 copy, for example, my_d3d9.dll). The renderer never loads itself: if the chosen
@@ -140,9 +169,14 @@ Before a test or a problem report, set Diagnostics=1 in northlight-quality.ini
 1. Check the start of the new run's northlight-renderer.log file:
    Northlight renderer <version>; d3d9.dll proxy ... backend=dxvk ... loaded=1 error=0
    The backend path must point to renderer-backends\dxvk\dxvk_d3d9.dll.
-   The BACKEND selected=... runtime=v2.7.1 line gives the loaded DXVK version and
+   The BACKEND selected=... runtime=v3.1.1 line (v2.7.1 with dxvk2) gives the loaded DXVK version and
    the HOST line the path of the wow.exe used.
    The Backend capabilities line is expected to show INTZ=1 RESZ=1 floatRT=1 SM3=1.
+   If the log has BACKEND FALLBACK dxvk -> dxvk2, DXVK 2.7.1 is in use because
+   DXVK 3 found no supported adapter or an earlier start ended while it started.
+   The first launches compile shaders (cached under %LOCALAPPDATA%), so they
+   stutter more. To locate a GPU hang, start the game with the environment
+   variable DXVK_DEBUG=hang set and send the log.
 2. Test the Stormwind crowd and Tanaris/Gadgetzan. Check the shadows of
    characters and trees, GI, fog, the sun being covered, and camera rotation.
 3. Let the shaders warm up for one round. Stop at the same view:
@@ -166,6 +200,7 @@ a conflict stops the restore before any change.
 
 SOURCES AND LICENSES
 LICENSES folder: Python (PSF), StormLib (MIT) and the zlib, bzip2,
-LibTomCrypt/LibTomMath and LZMA SDK that come with it, DXVK (zlib license).
+LibTomCrypt/LibTomMath and LZMA SDK that come with it, DXVK 3.1.1 and 2.7.1 (zlib license).
+DXVK 3.1.1: https://github.com/doitsujin/dxvk/releases/tag/v3.1.1
 DXVK 2.7.1: https://github.com/doitsujin/dxvk/releases/tag/v2.7.1
 BUILD-INFO.json lists the versions and checksums of every part of the package.
