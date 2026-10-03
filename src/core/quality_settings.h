@@ -50,8 +50,9 @@ struct Settings {
     // 0 = sky band only.
     unsigned horizonHaze=50,horizonHazeStart=75,horizonHazeBand=6,horizonHazeTerrain=1;
     // 0.3.158 ActorShadows: 0 = static mod shadows only (terrain, world-cache models): no replay
-    // (character, creature, server object) shadows, the game's blob shadows return, and model
-    // capture runs only for GI actor packets. Forces the replay-derived keys off (effective()).
+    // (character, creature, server object) shadows, and model capture runs only for GI actor
+    // packets (0.3.188: the game's blob shadows show with both values). Forces the replay-derived
+    // keys off (effective()).
     unsigned actorShadows=1;
     // 0.3.187 FrameDrawGates: 1 = the draw hooks skip the sky, blob and terrain shadow work in frames
     // where its per-frame preconditions are off (draw_gates.h); 0 = the 0.3.184 per-draw work. Same image.

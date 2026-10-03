@@ -87,6 +87,8 @@ old_draws=[l for l in OLD_DRAWS.strip('\n').split('\n')]
 assert len(old_draws)==4
 
 checks={}
+checkflag=fp.src('shadow_blob_filter.h').read_text()
+checks['real source: HidesNativeBlobs=false (0.3.188 blobs drawn); the mock uses true']=checkflag.count('static constexpr bool HidesNativeBlobs=false;')==1
 # The other three overrides: 0.3.184's capture call and real draw, passed to drawHook unchanged.
 def old_parts(line):
     cap=re.search(r'prepareDraw\(\[&\]\(IDirect3DVertexShader9\* vs\)\{(.*?)captureWater\(vs,(\w+::\w+),\[&\]\{return (ext->\w+\([^)]*\));\}\);\}\);',line)
@@ -196,6 +198,7 @@ struct MockSky{
     bool nativeObservePossible(HRESULT hr,D3DPRIMITIVETYPE,UINT){env->call("nativeObservePossible "+std::to_string(hr));return SUCCEEDED(hr)&&env->bit("observe possible");}
     void observeNativeDraw(HRESULT hr,D3DPRIMITIVETYPE,UINT,bool){env->call("observeNativeDraw "+std::to_string(hr),"fault observe");}
 };
+struct NorthlightShadowBlobFilter{static constexpr bool HidesNativeBlobs=true;};  // true: the old-vs-new equivalence exercises the filter-on path
 struct MockBlobs{Env* env=nullptr;bool claim(UINT c){env->call("blob claim "+std::to_string(c),"fault blob");return env->bit("blob",3);}};
 struct Gate{int drawTid=7;void noteFirst(int){}};
 struct MirrorStateMock{Gate gate;};
