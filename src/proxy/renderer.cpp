@@ -1202,7 +1202,8 @@ static void configureDxvkCompatibility(const NorthlightBackendLoader::Inspection
         const auto combined=NorthlightDxvkCompatibility::config(existing);
         const BOOL set=SetEnvironmentVariableA("DXVK_CONFIG",combined.c_str());
         // DXVK 1.10.x reads only dxvk.conf/DXVK_CONFIG_FILE: the variable is then inert.
-        logf("DXVK compatibility process defaults applied=%u vendor=1002 cachedDynamicBuffers=True explicitInlineOverrides=%u dxvk=%s DXVK_CONFIG supported=%u",
+        // 0.3.188: DXVK 2.x reads cachedDynamicBuffers, >=3.0 cachedWriteOnlyBuffers; each ignores the other's key.
+        logf("DXVK compatibility process defaults applied=%u vendor=1002 cachedDynamicBuffers(2.x)=True cachedWriteOnlyBuffers(>=3.0)=True explicitInlineOverrides=%u dxvk=%s DXVK_CONFIG supported=%u",
              unsigned(set!=FALSE),unsigned(!existing.empty()),info.dxvkVersion.empty()?"unknown":info.dxvkVersion.c_str(),unsigned(info.dxvkConfigEnv));
     }catch(...){logf("DXVK compatibility defaults unavailable: allocation failure");}
 }
@@ -1242,9 +1243,9 @@ struct Win32BackendSys {
     void beforeLoad(const std::wstring&,const NorthlightBackendLoader::Inspection& info){
         // 0.3.175: DXVK_ASYNC is left to the runtime (WoWSilicon enables it). Async forks may skip a
         // draw while a pipeline compiles; the user test showed far fewer hitches, so it is not forced off.
-        // Only Backend=dxvk (Windows DXVK 2.7.1) gets the vendor/buffer defaults;
-        // legacy (the macOS WoWSilicon DXVK) keeps today's runtime unchanged.
-        if(kind==NorthlightBackend::Kind::Dxvk)configureDxvkCompatibility(info);
+        // Only Backend=dxvk/dxvk2 (the Windows package's DXVK: 3.1.1 default, 2.7.1 as dxvk2) gets the
+        // vendor/buffer defaults; legacy (the macOS WoWSilicon DXVK) keeps today's runtime unchanged.
+        if(NorthlightBackend::isPackagedDxvk(kind))configureDxvkCompatibility(info);
     }
     HMODULE load(const std::wstring& path,unsigned long& error){HMODULE m=LoadLibraryW(path.c_str());error=m?0:GetLastError();return m;}
     bool isSelf(HMODULE m){return m==selfModule;}
@@ -1290,6 +1291,12 @@ static void logProxyPlacement(Win32BackendSys& sys,const std::wstring& root,cons
     if(loaded&&gameSha!=backendAttempt.info.sha256)
         logf("GAME WARNING: the game-folder d3d9.dll differs from the backend copy (launcher update or backend switch?). The renderer keeps using %ls.",backendAttempt.path.c_str());
 }
+// 0.3.188 automatic dxvk -> dxvk2 fallback: DXVK 3 returns null / fails / reports no adapters when the
+// driver lacks required Vulkan features. Armed by backend() for the default-path Backend=dxvk only;
+// claimed once per process (exchange), the first module is never freed, and once dxvk2 is loaded
+// procedure() resolves every later export against it.
+static std::atomic<bool> dxvkFallbackArmed{false};
+static std::atomic<HMODULE> dxvkFallbackModule{nullptr};
 static HMODULE backend() {
     static HMODULE cached=[]() -> HMODULE {
     ensureRootPath();
@@ -1306,13 +1313,28 @@ static HMODULE backend() {
     Win32BackendSys sys(configured);
     const std::wstring root(rootPath),system=systemD3d9(),overridden=NorthlightBackend::overridePath(custom,root);
     const auto candidates=NorthlightBackend::candidates(configured,overridden,root,systemDirectory());
-    const auto result=NorthlightBackendLoader::load(sys,candidates,system);
+    // 0.3.188: a surviving DXVK 3 init marker (the last start died inside its Direct3DCreate9) selects dxvk2
+    // for default-path Backend=dxvk. Read-only check; the marker stays until the user/installer removes it.
+    const std::wstring marker=NorthlightBackend::dxvkInitMarker(root);
+    const bool markerSet=configured==NorthlightBackend::Kind::Dxvk&&overridden.empty()&&GetFileAttributesW(marker.c_str())!=INVALID_FILE_ATTRIBUTES;
+    NorthlightBackendLoader::Result<HMODULE> result;std::vector<NorthlightBackendLoader::Attempt> markerAttempts;
+    if(markerSet){
+        Win32BackendSys sys2(NorthlightBackend::Kind::Dxvk2);
+        result=NorthlightBackendLoader::load(sys2,NorthlightBackend::candidates(NorthlightBackend::Kind::Dxvk2,L"",root,systemDirectory()),std::wstring());
+        if(!result.module){markerAttempts=result.attempts;result=NorthlightBackendLoader::Result<HMODULE>();}
+    }
+    const bool fromMarker=markerSet&&result.module;
+    if(!fromMarker){
+        auto normal=NorthlightBackendLoader::load(sys,candidates,system);
+        markerAttempts.insert(markerAttempts.end(),normal.attempts.begin(),normal.attempts.end());
+        normal.attempts=markerAttempts;result=normal;
+    }
     HMODULE module=result.module;
     const auto& last=result.attempts.empty()?NorthlightBackendLoader::Attempt{}:result.attempts.back();
     // Only DXVK keeps the legacy (unchecked, no RESZ dummy draw) rules; every
     // other runtime, including the system fallback, gets the native rules.
     if(module&&(result.fallback||(configured==NorthlightBackend::Kind::Legacy&&!last.info.dxvk)))selectedBackend=NorthlightBackend::Kind::Native;
-    logf("Northlight renderer 0.3.187; reference sun look (sun glow hue from native/sunHalo band, soft-shoulder glare, veil, sun-tinted haze), native sun/moon suppressed (F1b), lamps dimmed to 30 pct in direct sun, native moon02 skipped by texture identity, no game bytes in the DLL, MEMREAD self-read profile (RenderProfile), soft sun removal in shadow, jump-stable shadow anchor, geometry coverage hold with travel lead, steadier animated shadow edges (near 5x5 tent, still-camera shadow history), native blob shadows identified in 16-bit A1R5G5B5 uploads, bilinear lighting history, near capture reserve for the player and companions, remembered rigid prop shadows (drawn-by-game states, windowed held), AO and bloom folded into the world composite, ground normals reject object tops, both wide samples, batched celestial terrain mask, DXVK async left to the runtime, render-thread terrain upload and rigid bookkeeping trims, moon without the horizon stall, art layer bands retimed to the sun and moon, actor prepare on a worker, trimmed prepare handoff, in-place capture constants, gate thread census, predicted snapshot lookups, word-wise memcmp, owner-thread gate elision; abandoned-frame prepare quarantine; removal smoothing on matching normals in its own pass (35/50 degree gate); per-frame draw gates; backend=%s path=%ls loaded=%d error=%lu",
+    logf("Northlight renderer 0.3.188; reference sun look (sun glow hue from native/sunHalo band, soft-shoulder glare, veil, sun-tinted haze), native sun/moon suppressed (F1b), lamps dimmed to 30 pct in direct sun, native moon02 skipped by texture identity, no game bytes in the DLL, MEMREAD self-read profile (RenderProfile), soft sun removal in shadow, jump-stable shadow anchor, geometry coverage hold with travel lead, steadier animated shadow edges (near 5x5 tent, still-camera shadow history), native blob shadows identified in 16-bit A1R5G5B5 uploads, bilinear lighting history, near capture reserve for the player and companions, remembered rigid prop shadows (drawn-by-game states, windowed held), AO and bloom folded into the world composite, ground normals reject object tops, both wide samples, batched celestial terrain mask, DXVK async left to the runtime, render-thread terrain upload and rigid bookkeeping trims, moon without the horizon stall, art layer bands retimed to the sun and moon, actor prepare on a worker, trimmed prepare handoff, in-place capture constants, gate thread census, predicted snapshot lookups, word-wise memcmp, owner-thread gate elision; abandoned-frame prepare quarantine; removal smoothing on matching normals in its own pass (35/50 degree gate); per-frame draw gates; DXVK 3.1.1 default with 2.7.1 fallback; backend=%s path=%ls loaded=%d error=%lu",
          NorthlightBackend::name(configured),last.path.c_str(),module!=nullptr,module?0ul:(last.error?last.error:(unsigned long)ERROR_INVALID_PARAMETER));
     logAttempts(result.attempts);
     logHostExecutable(sys.selfPath);
@@ -1320,9 +1342,13 @@ static HMODULE backend() {
          last.info.dxvk?(last.info.dxvkVersion.empty()?"DXVK (unknown version)":last.info.dxvkVersion.c_str()):"non-DXVK",NorthlightBackend::name(selectedBackend),overridden.empty()?L"(default)":overridden.c_str(),unsigned(result.fallback));
     if(result.fallback&&module)logf("BACKEND SELF-LOAD REFUSED: the configured backend resolves to this proxy (or another Northlight build); fell back to the system d3d9 runtime. Fix northlight-renderer.ini Backend/BackendPath.");
     else if(result.fallback)logf("BACKEND SELF-LOAD REFUSED: the configured backend resolves to this proxy (or another Northlight build) and the system d3d9 fallback FAILED too (expected under Wine with d3d9=n: the system d3d9 is builtin; the fallback is Windows-only). Fix northlight-renderer.ini Backend/BackendPath.");
-    if(module&&last.info.dxvk&&configured!=NorthlightBackend::Kind::Dxvk)
-        logf("DXVK compatibility defaults not applied: Backend=%s keeps the current runtime rules (no vendor 1002, no cachedDynamicBuffers override)",NorthlightBackend::name(configured));
+    if(module&&last.info.dxvk&&!NorthlightBackend::isPackagedDxvk(configured))
+        logf("DXVK compatibility defaults not applied: Backend=%s keeps the current runtime rules (no vendor 1002, no cachedDynamicBuffers/cachedWriteOnlyBuffers override)",NorthlightBackend::name(configured));
     logProxyPlacement(sys,root,last,module!=nullptr);
+    if(fromMarker)logf("BACKEND FALLBACK dxvk -> dxvk2 reason=previous-start-ended-in-dxvk3-init marker=%ls (delete it or reinstall with --backend dxvk to retry DXVK 3)",marker.c_str());
+    else if(markerSet)logf("BACKEND FALLBACK dxvk -> dxvk2 FAILED reason=previous-start-ended-in-dxvk3-init marker=%ls; loading dxvk normally",marker.c_str());
+    // 0.3.188: only the package's default DXVK 3 (no BackendPath) may fall back to dxvk2 (see dxvkFallback).
+    dxvkFallbackArmed=module&&configured==NorthlightBackend::Kind::Dxvk&&overridden.empty()&&!result.fallback&&!fromMarker;
     logf("LOG previous session log northlight-renderer.prev.log rotation=%s error=%lu",NorthlightLogRotation::name(logRotation),(unsigned long)logRotationError);
     if(!module)MessageBoxW(nullptr,
         L"Renderer backend could not be loaded. Check northlight-renderer.ini and northlight-renderer.log. No other backend was selected. Restore the previous package or install the correct x86 DXVK DLL.",
@@ -1342,8 +1368,36 @@ static HMODULE recursionBackend() {
     }();
     return cached;
 }
+// 0.3.188: crash marker around the armed dxvk Direct3DCreate9/Ex (DXVK 3 throws, killing the process, when
+// Vulkan cannot initialise). Written before the call, deleted right after it returns; if the process dies
+// inside, backend() finds it next start. Best effort. Not part of Win32BackendSys (that range stays read-only).
+static void dxvkInitMarkerWrite(){
+    const std::wstring path=NorthlightBackend::dxvkInitMarker(std::wstring(rootPath));
+    HANDLE h=CreateFileW(path.c_str(),GENERIC_WRITE,FILE_SHARE_READ|FILE_SHARE_DELETE,nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(h==INVALID_HANDLE_VALUE){logf("BACKEND FALLBACK marker not written: %ls error=%lu (a DXVK 3 start failure cannot be remembered)",path.c_str(),(unsigned long)GetLastError());return;}
+    static const char line[]="Northlight 0.3.188: DXVK 3 Direct3DCreate9 in progress\r\n";DWORD got=0;
+    WriteFile(h,line,sizeof line-1,&got,nullptr);CloseHandle(h);
+}
+static void dxvkInitMarkerClear(){DeleteFileW(NorthlightBackend::dxvkInitMarker(std::wstring(rootPath)).c_str());}
+// Loads renderer-backends\dxvk2\dxvk2_d3d9.dll through the normal loader path (self-load refusal, DXVK scan,
+// compat beforeLoad). nullptr: not eligible/already tried/dxvk2 missing or broken (logged); the caller then
+// keeps the first backend's result. Never called from a re-entered export.
+static HMODULE dxvkFallback(const char* reason){
+    if(!dxvkFallbackArmed.exchange(false))return dxvkFallbackModule.load();
+    Win32BackendSys sys(NorthlightBackend::Kind::Dxvk2);
+    const std::wstring root(rootPath);
+    const auto result=NorthlightBackendLoader::load(sys,NorthlightBackend::candidates(NorthlightBackend::Kind::Dxvk2,L"",root,systemDirectory()),std::wstring());
+    const auto& a=result.attempts.empty()?NorthlightBackendLoader::Attempt{}:result.attempts.back();
+    logf("BACKEND FALLBACK dxvk -> dxvk2 reason=%s path=%ls result=%s error=%lu runtime=%s",reason,a.path.c_str(),NorthlightBackendLoader::name(a.outcome),a.error,
+         a.info.dxvk?(a.info.dxvkVersion.empty()?"DXVK (unknown version)":a.info.dxvkVersion.c_str()):"non-DXVK");
+    logAttempts(result.attempts);
+    if(result.module)dxvkFallbackModule.store(result.module);   // selectedBackend stays Dxvk: same rules
+    else logf("BACKEND FALLBACK FAILED: dxvk2 is unavailable; keeping the dxvk result");
+    return result.module;
+}
 template<class T> static T procedure(const char* name) {
     HMODULE module=NorthlightBackendLoader::ExportScope::reentered()?recursionBackend():backend();
+    if(!NorthlightBackendLoader::ExportScope::reentered()){HMODULE fb=dxvkFallbackModule.load();if(fb)module=fb;}
     FARPROC raw=module?GetProcAddress(module,name):nullptr;
     T fn=nullptr;static_assert(sizeof(fn)==sizeof(raw));std::memcpy(&fn,&raw,sizeof(fn));return fn;
 }
@@ -1353,13 +1407,52 @@ extern "C" IDirect3D9* WINAPI Direct3DCreate9(UINT sdk) {
     auto fn=procedure<IDirect3D9*(WINAPI*)(UINT)>("Direct3DCreate9");
     if(!fn)return nullptr;
     // The outer (game) call wraps once; a re-entered call returns the raw runtime.
-    IDirect3D9* p=fn(sdk);return p&&!NorthlightBackendLoader::ExportScope::reentered()?new Factory(p):p;
+    const bool probe=!NorthlightBackendLoader::ExportScope::reentered()&&dxvkFallbackArmed.load();
+    if(probe)dxvkInitMarkerWrite();
+    IDirect3D9* p=fn(sdk);
+    if(probe)dxvkInitMarkerClear();
+    if(probe){
+        // GetAdapterCount runs on the raw backend object, before wrapping.
+        const char* why=!p?"null":p->GetAdapterCount()==0?"adapters=0":nullptr;
+        if(!why)dxvkFallbackArmed=false;   // DXVK 3 works here: a later failure must not switch runtimes mid-session
+        else{
+            // The first object is released only once dxvk2 is loaded; if dxvk2 is missing the original result stands.
+            if(dxvkFallback(why)){
+                auto fn2=procedure<IDirect3D9*(WINAPI*)(UINT)>("Direct3DCreate9");
+                if(fn2){
+                    if(p)p->Release();
+                    p=fn2(sdk);
+                    logf("BACKEND FALLBACK Direct3DCreate9 via dxvk2 -> %s",p?"ok":"null");
+                }
+            }
+        }
+    }
+    return p&&!NorthlightBackendLoader::ExportScope::reentered()?new Factory(p):p;
 }
 extern "C" HRESULT WINAPI Direct3DCreate9Ex(UINT sdk,IDirect3D9Ex** out) {
     NORTHLIGHT_EXPORT;
     auto fn=procedure<HRESULT(WINAPI*)(UINT,IDirect3D9Ex**)>("Direct3DCreate9Ex");
     logf("Direct3D9Ex requested: forwarding without effects (use this client's normal D3D9 path).");
-    return fn?fn(sdk,out):D3DERR_NOTAVAILABLE;
+    if(!fn)return D3DERR_NOTAVAILABLE;
+    const bool probe=!NorthlightBackendLoader::ExportScope::reentered()&&dxvkFallbackArmed.load();
+    if(probe)dxvkInitMarkerWrite();
+    HRESULT hr=fn(sdk,out);
+    if(probe)dxvkInitMarkerClear();
+    if(probe){
+        char reason[32];const char* why=nullptr;
+        if(FAILED(hr)||!out||!*out){snprintf(reason,sizeof reason,"hr=0x%08lx",(unsigned long)hr);why=reason;}
+        else if((*out)->GetAdapterCount()==0)why="adapters=0";
+        if(!why)dxvkFallbackArmed=false;
+        if(why&&dxvkFallback(why)){
+            auto fn2=procedure<HRESULT(WINAPI*)(UINT,IDirect3D9Ex**)>("Direct3DCreate9Ex");
+            if(fn2){
+                if(SUCCEEDED(hr)&&out&&*out){(*out)->Release();*out=nullptr;}
+                hr=fn2(sdk,out);
+                logf("BACKEND FALLBACK Direct3DCreate9Ex via dxvk2 -> hr=0x%08lx",(unsigned long)hr);
+            }
+        }
+    }
+    return hr;
 }
 extern "C" int WINAPI D3DPERF_BeginEvent(D3DCOLOR c,LPCWSTR text){NORTHLIGHT_EXPORT;countPerf();auto fn=procedure<int(WINAPI*)(D3DCOLOR,LPCWSTR)>("D3DPERF_BeginEvent");return fn?fn(c,text):-1;}
 extern "C" int WINAPI D3DPERF_EndEvent(){NORTHLIGHT_EXPORT;countPerf();auto fn=procedure<int(WINAPI*)()>("D3DPERF_EndEvent");return fn?fn():-1;}
