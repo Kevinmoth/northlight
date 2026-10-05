@@ -56,7 +56,11 @@ struct Settings {
     // 0.3.187 FrameDrawGates: 1 = the draw hooks skip the sky, blob and terrain shadow work in frames
     // where its per-frame preconditions are off (draw_gates.h); 0 = the 0.3.184 per-draw work. Same image.
     unsigned frameDrawGates=1;
-    char origin[32]={'d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d'};
+    // Picture only (the AOContactBloom pass): AoStrength scales the contact-shading darkening
+    // (60 = the hard-coded 0.60), AoBloom scales the folded light bloom (8 = the hard-coded 0.08),
+    // AoRadius is the kernel's world radius in yards (2 = the hard-coded 2.0). 0 disables the part.
+    unsigned aoStrength=60,aoBloom=8,aoRadius=2;
+    char origin[35]={'d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d','d'};
 };
 struct Key { const char* name; unsigned Settings::*field; unsigned low,high; unsigned preset[3]; };
 // preset[] = Quality, Balanced, Performance. Quality must equal Settings{}.
@@ -93,6 +97,9 @@ inline const Key Keys[]={
     {"HorizonHazeTerrain",&Settings::horizonHazeTerrain,0,1,{1,1,1}},
     {"ActorShadows",&Settings::actorShadows,0,1,{1,1,1}},
     {"FrameDrawGates",&Settings::frameDrawGates,0,1,{1,1,1}},
+    {"AoStrength",&Settings::aoStrength,0,100,{60,60,60}},
+    {"AoBloom",&Settings::aoBloom,0,100,{8,8,8}},
+    {"AoRadius",&Settings::aoRadius,0,8,{2,2,2}},
 };
 inline bool operator==(const Settings& a,const Settings& b){for(const auto& k:Keys)if(a.*k.field!=b.*k.field)return false;return true;}
 inline bool operator!=(const Settings& a,const Settings& b){return !(a==b);}

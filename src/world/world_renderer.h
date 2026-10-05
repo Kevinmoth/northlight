@@ -1833,6 +1833,9 @@ public:
     bool hasContext()const{return valid&&!failed&&!workerFault();}
     bool actorShadowsEnabled()const{return quality.actorShadows!=0;}
     bool frameDrawGates()const{return quality.frameDrawGates!=0;} /* 0.3.187: read once at device creation */ /* 0.3.158: ActorShadows=0 leaves actor shadows to the game's blobs */
+    float aoStrength()const{return float(quality.aoStrength)/100.f;}   /* AOContactBloom Lighting.z; 60 = the built-in 0.60 */
+    float aoBloom()const{return float(quality.aoBloom)/100.f;}        /* AOContactBloom bloom weight; 8 = the built-in 0.08 */
+    float aoRadius()const{return float(quality.aoRadius);}            /* AO kernel world radius, yards; 2 = the built-in 2.0 */
     const float* legacyFogParameters()const{return legacyFog.parameters;}
     const NorthlightCelestialProfiles::Profile& celestialPalette(const char* map,const float* camera){
         // Freeze once per frame: early disc, late halo, direct/GI and fog cannot

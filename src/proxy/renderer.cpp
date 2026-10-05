@@ -542,7 +542,9 @@ class Device final : public GuardedMirrorDevice {
         effectsBuckets.mark(Bucket::Celestial); /* discs, glare, the terrain mask prepare, the ring */
         if (error(ext->StretchRect(saved.targets[0], nullptr, sceneSurface, nullptr, D3DTEXF_NONE), "copy scene")) return;
         effectState();
-        float constants[]={1.f/width,1.f/height,nearZ,farZ,scaleX,scaleY,.60f,(world&&world->ready()?0.f:.12f),.08f,2.f,float(debugMode),0,worldMinDepth,1.f/(worldMaxDepth-worldMinDepth),worldMaxDepth,0};
+        // AoStrength / AoBloom / AoRadius (northlight-quality.ini): 60/8/2 = the built-in constants.
+        const float aoStrength=world?world->aoStrength():.60f,aoBloom=world?world->aoBloom():.08f,aoRadius=world?world->aoRadius():2.f;
+        float constants[]={1.f/width,1.f/height,nearZ,farZ,scaleX,scaleY,aoStrength,(world&&world->ready()?0.f:.12f),aoBloom,aoRadius,float(debugMode),0,worldMinDepth,1.f/(worldMaxDepth-worldMinDepth),worldMaxDepth,0};
 
         float waterFlags[]={waterMask?1.f:0.f,0,0,0};
         auto bindEffects=[&](IDirect3DTexture9* ambient){
@@ -611,7 +613,24 @@ class Device final : public GuardedMirrorDevice {
         }
         CpuScope cpu(sampledDrawTimers()?&cpuPrep:nullptr);if(gateFrame)++gateCounts.prep;
         IDirect3DVertexShader9* vs=nullptr;
-        if(FAILED(ext->GetVertexShader(&vs))||!vs){++missingVS;drop(vs);return;}
+        if(FAILED(ext->GetVertexShader(&vs))||!vs){
+            ++missingVS;drop(vs);
+            // Windows/DXVK target: some clients draw their in-world 2D UI (notably text, e.g. an
+            // HD font renderer) on the fixed-function pipe, so the tagged UI shader boundary
+            // below never fires and no frame is ever applied. The first fixed-function draw with
+            // a vertex declaration or pre-transformed FVF after terrain was captured is the same
+            // world->UI boundary: composite before it, once per frame, exactly as the UI shader
+            // path does. renderEffects' own viewport gate rejects off-screen targets (icons).
+            if(!applied&&enabled&&!failed&&terrain&&projectionValid){
+                DWORD fvf=0;IDirect3DVertexDeclaration9* decl=nullptr;
+                if((SUCCEEDED(ext->GetFVF(&fvf))&&(fvf&D3DFVF_XYZRHW))||
+                   (SUCCEEDED(ext->GetVertexDeclaration(&decl))&&decl)){
+                    if(decl)drop(decl);
+                    renderEffects();
+                }
+            }
+            return;
+        }
         struct ShaderRelease {IDirect3DVertexShader9*& p;~ShaderRelease(){drop(p);}} shaderRelease{vs};
         beforeDraw(vs);planTerrainShadowSwap(vs);
         if(world&&!applied&&enabled&&!failed&&projectionValid){
