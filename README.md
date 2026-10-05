@@ -10,7 +10,7 @@ propio cliente 3.3.5a. Licenciado bajo la [Licencia MIT](LICENSE). (El original 
 
 El changelog, las notas de versión y los registros de validación no forman parte del código público.
 
-<p align="center"> <a href="screenshots/before.jpg"> <img src="screenshots/before.jpg" width="49%" alt="Antes"> </a> <a href="screenshots/after.jpg"> <img src="screenshots/after.jpg" width="49%" alt="Después"> </a> </p>
+<p align="center"> <a href="screenshots/before.jpg"> <img src="screenshots/before.jpg" width="49%" alt="Antes"> </a> <a href="screenshots/After.jpg"> <img src="screenshots/After.jpg" width="49%" alt="Después"> </a> </p>
 
 ## Qué añade Northlight
 
