@@ -40,7 +40,9 @@ Every effect below is on by default and is drawn on top of the game's own frame.
 - **Water.** The game's water is drawn unchanged; a liquid mask keeps the relighting and AO off the
   surface, and fog is measured to the water surface.
 - **Settings.** `northlight-quality.ini` has three presets (Quality, the default, Balanced and
-  Performance) and about 30 keys for shadows, GI, lamps and haze; `celestial-profiles.ini` sets the
+  Performance) and about 35 keys for shadows, GI, lamps, haze, AO and bloom (`AoStrength`, `AoBloom`
+  and `AoRadius` tone down the composite's contact shading and light bloom, useful on heavily modded
+  clients); `celestial-profiles.ini` sets the
   sun and moon look per zone.
 - **Hotkeys** (with Ctrl+Shift): F7 fog and haze, F8 GI, F9 shadows, F10 all effects, F12 debug views
   (shadows, GI, fog volume). On a Mac, first remove macOS's own Control+F7 shortcut.
@@ -52,6 +54,12 @@ Every effect below is on by default and is drawn on top of the game's own frame.
   installer never writes `wow.exe`. It builds the world cache (terrain, models, lamps and fog
   regions) and the lighting art layer from your own client on your machine, about 10-40 minutes and
   at least 8 GB of RAM; nothing from the game is shipped. The packages bundle their own Python and StormLib, and uninstall restores every change.
+- **Modded clients (repacks) on Windows.** Some patched exes render the world at a fixed internal aspect
+  (e.g. 16:10) and letterbox any window that does not match: since the renderer only composites when the
+  viewport fills the render target, on those clients the game window must have exactly that aspect (any
+  16:10 size works; the size itself does not matter). This version also composites when the client's UI is
+  drawn on the fixed-function pipe (e.g. an HD font renderer) instead of the stock UI shader; and
+  Backend=legacy with ReShade crashes (circular proxy load) — with ReShade use DXVK or native.
 
 ## Layout
 

@@ -42,8 +42,9 @@ Todos los efectos de esta lista vienen activados por defecto y se dibujan sobre 
 - **Agua.** El agua del juego se dibuja sin cambios; una máscara de líquido mantiene el reiluminado y la AO
   fuera de la superficie, y la niebla se mide hasta la superficie del agua.
 - **Ajustes.** `northlight-quality.ini` tiene tres presets (Quality, el predeterminado, Balanced y
-  Performance) y unas 30 claves para sombras, GI, lámparas y bruma; `celestial-profiles.ini` define el aspecto
-  del sol y la luna por zona.
+  Performance) y unas 35 claves para sombras, GI, lámparas, bruma, AO y bloom (`AoStrength`, `AoBloom`
+  y `AoRadius` atenúan el sombreado de contacto y el bloom del composite, útiles en clientes muy
+  modificados); `celestial-profiles.ini` define el aspecto del sol y la luna por zona.
 - **Atajos** (con Ctrl+Shift): F7 niebla y bruma, F8 GI, F9 sombras, F10 todos los efectos, F12 vistas de
   depuración (sombras, GI, volumen de niebla). En Mac, quita primero el atajo Control+F7 propio de macOS.
 - **Costo.** Northlight cuesta tiempo de fotograma, sobre todo en el hilo principal de CPU del juego. Las
@@ -56,6 +57,13 @@ Todos los efectos de esta lista vienen activados por defecto y se dibujan sobre 
   regiones de niebla) y la capa de arte de iluminación a partir de tu propio cliente en tu máquina: unos 10-40
   minutos y al menos 8 GB de RAM; no se distribuye nada del juego. Los paquetes incluyen su propio Python y
   StormLib, y la desinstalación restaura cada cambio.
+- **Clientes modificados (repacks) en Windows.** Algunos exes parcheados renderizan el mundo con un aspecto
+  interno fijo (p. ej. 16:10) y letteboxean cualquier ventana que no coincida: como el renderizador solo
+  compone cuando el viewport llena el render target, en esos clientes la ventana del juego debe tener
+  exactamente esa proporción (cualquier tamaño 16:10 sirve; el tamaño da igual). Esta versión también compone
+  cuando la UI del cliente dibuja por función fija (p. ej., un font renderer HD) y no con el shader de UI
+  original; y Backend=legacy con ReShade crashea (carga circular de proxies) — con ReShade hay que usar
+  DXVK o native.
 
 ## Estructura
 
