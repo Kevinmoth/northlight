@@ -32,7 +32,9 @@ def generate():
             count += 1
         assert count == {'IDirect3D9':17,'IDirect3DDevice9':119,'IDirect3DSwapChain9':10,'IDirect3DVertexBuffer9':14,'IDirect3DIndexBuffer9':14}[interface], (interface, count)
         result.append('};')
-    (northlight_paths.GENERATED / 'forwarders.h').write_text('\n'.join(result) + '\n')
+    # LF on every platform: the tree keeps LF line endings (hash gates compare raw bytes).
+    with open(northlight_paths.GENERATED / 'forwarders.h', 'w', newline='\n') as f:
+        f.write('\n'.join(result) + '\n')
 
 if __name__ == '__main__':
     generate()

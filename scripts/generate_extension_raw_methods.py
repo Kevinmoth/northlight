@@ -43,4 +43,6 @@ def generated():
     return '\n'.join(lines) + '\n'
 
 if __name__ == '__main__':
-    (northlight_paths.GENERATED / 'extension_raw_methods.inl').write_text(generated())
+    # LF on every platform: the tree keeps LF line endings (hash gates compare raw bytes).
+    with open(northlight_paths.GENERATED / 'extension_raw_methods.inl', 'w', newline='\n') as f:
+        f.write(generated())

@@ -68,8 +68,11 @@ def sources(root):
 
 def tree_sha256(root):
     """Identity of the StormLib source tree: sorted (relative path, sha256) of src/, CMakeLists.txt, LICENSE."""
+    # Sort by the relative POSIX string: sorted() on Path objects is case-insensitive on Windows and
+    # case-sensitive on macOS, which would give the same tree a different digest per platform.
     paths = sorted([p for p in (root / 'src').rglob('*') if p.is_file() and p.name != '.DS_Store'] +
-                   [root / 'CMakeLists.txt', root / 'LICENSE'])
+                   [root / 'CMakeLists.txt', root / 'LICENSE'],
+                   key=lambda p: p.relative_to(root).as_posix())
     h = hashlib.sha256()
     for p in paths:
         h.update(p.relative_to(root).as_posix().encode() + b'\0' + hashlib.sha256(p.read_bytes()).digest())
@@ -98,7 +101,8 @@ def build(target, out_dir, root=None, cache=None):
     if cache:
         env['ZIG_GLOBAL_CACHE_DIR'] = env['ZIG_LOCAL_CACHE_DIR'] = str(cache)
     env.setdefault('ZIG_LOCAL_CACHE_DIR', env['ZIG_GLOBAL_CACHE_DIR'])
-    run = subprocess.run(['nice', '-n', '15', *cmd], cwd=root, env=env, stdout=subprocess.PIPE,
+    prefix = [] if not shutil.which('nice') else ['nice', '-n', '15']   # run_tests.py skips nice the same way
+    run = subprocess.run([*prefix, *cmd], cwd=root, env=env, stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace')
     if run.returncode:
         raise RuntimeError(f'zig failed for {target}:\n' + run.stdout[-4000:])

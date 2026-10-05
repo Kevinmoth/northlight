@@ -253,6 +253,23 @@ def launchers(platform, version):
             'Uninstall Northlight.command': command('uninstall', 'uninstall')}
 
 
+def stormlib_library(target, build_dir):
+    """The pinned StormLib for target: a prebuilt copy whose bytes match the pin, else a build from
+    tools/StormLib-master (whose tree must match the pin). Searched first: the previous build in
+    <out>/stormlib/<target>/, then tools/stormlib-<target>/ (NORTHLIGHT_TOOLS)."""
+    name = build_stormlib.TARGETS[target]['name']
+    pin = PINS['stormlib'][target + '_sha256']
+    for path in [build_dir / target / name, fp.tools() / f'stormlib-{target}' / name]:
+        if path.is_file():
+            if sha(path) != pin:
+                raise SystemExit(f'{path}: sha256 does not match the StormLib pin in renderer/package-pins.json')
+            return path
+    if not (build_stormlib.source_root() / 'CMakeLists.txt').is_file():
+        raise SystemExit(f'StormLib {target} not found: place the pinned {name} at tools/stormlib-{target}/{name} '
+                         f'or the StormLib source at {build_stormlib.source_root()} and build scripts/build_stormlib.py')
+    return build_stormlib.build(target, build_dir / target)
+
+
 def build(platform, version, dll, variants, out, stormlib_dir):
     top = f'Northlight-{version}-{PLATFORMS[platform]}'
     tree = Tree(top)
@@ -263,7 +280,7 @@ def build(platform, version, dll, variants, out, stormlib_dir):
     dll_data = dll.read_bytes()
     dll_version = check_dll(dll_data)
     target = 'windows' if platform == 'windows' else 'mac'
-    lib = build_stormlib.build(target, stormlib_dir / target)
+    lib = stormlib_library(target, stormlib_dir)
     problems, _ = build_stormlib.verify(lib)
     if problems or sha(lib) != PINS['stormlib'][target + '_sha256']:
         raise SystemExit(f'StormLib {target} build does not verify or does not match its pin: {problems or sha(lib)}')
