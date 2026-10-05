@@ -12,6 +12,22 @@ El changelog, las notas de versión y los registros de validación no forman par
 
 <p align="center"> <a href="screenshots/before.jpg"> <img src="screenshots/before.jpg" width="49%" alt="Antes"> </a> <a href="screenshots/After.jpg"> <img src="screenshots/After.jpg" width="49%" alt="Después"> </a> </p>
 
+<p align="center">
+  <a href="screenshots/1.png">
+    <img src="screenshots/1.png" width="49%" alt="Imagen 1">
+  </a>
+  <a href="screenshots/2.png">
+    <img src="screenshots/2.png" width="49%" alt="Imagen 2">
+  </a>
+  <br>
+  <a href="screenshots/3.png">
+    <img src="screenshots/3.png" width="49%" alt="Imagen 3">
+  </a>
+  <a href="screenshots/4.png">
+    <img src="screenshots/4.png" width="49%" alt="Imagen 4">
+  </a>
+</p>
+
 ## Qué añade Northlight
 
 Todos los efectos de esta lista vienen activados por defecto y se dibujan sobre el propio fotograma del juego.
